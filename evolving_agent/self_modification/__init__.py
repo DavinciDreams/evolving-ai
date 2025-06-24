@@ -1,0 +1,3 @@
+"""
+Self-modification module initialization
+"""

@@ -1,0 +1,57 @@
+{
+  "problem_solving": {
+    "description": "Solutions and approaches to various problems",
+    "tags": [
+      "solution",
+      "approach",
+      "methodology"
+    ],
+    "priority": 0.9
+  },
+  "learning_patterns": {
+    "description": "Patterns and insights from learning experiences",
+    "tags": [
+      "pattern",
+      "insight",
+      "learning"
+    ],
+    "priority": 0.8
+  },
+  "error_resolution": {
+    "description": "Information about errors and their resolutions",
+    "tags": [
+      "error",
+      "bug",
+      "fix",
+      "resolution"
+    ],
+    "priority": 0.85
+  },
+  "optimization": {
+    "description": "Performance and efficiency improvements",
+    "tags": [
+      "optimization",
+      "performance",
+      "efficiency"
+    ],
+    "priority": 0.7
+  },
+  "best_practices": {
+    "description": "Best practices and recommendations",
+    "tags": [
+      "best_practice",
+      "recommendation",
+      "guideline"
+    ],
+    "priority": 0.75
+  },
+  "domain_knowledge": {
+    "description": "Domain-specific knowledge and expertise",
+    "tags": [
+      "domain",
+      "expertise",
+      "knowledge"
+    ],
+    "priority": 0.8
+  }
+}

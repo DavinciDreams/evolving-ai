@@ -1,0 +1,3 @@
+"""
+Knowledge module initialization
+"""

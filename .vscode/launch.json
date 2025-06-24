@@ -1,0 +1,43 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Self-Improving Agent",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": [],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {},
+            "envFile": "${workspaceFolder}/.env",
+            "stopOnEntry": false,
+            "justMyCode": false
+        },
+        {
+            "name": "Run Tests",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": [
+                "-v",
+                "evolving_agent/tests/"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {},
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "Run Basic Test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/evolving_agent/tests/test_basic.py",
+            "args": [],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {},
+            "envFile": "${workspaceFolder}/.env"
+        }
+    ]
+}

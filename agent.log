@@ -1,0 +1,17 @@
+2025-06-24 00:47:27 | INFO     | evolving_agent.core.memory:initialize:75 - Initializing long-term memory system...
+2025-06-24 00:47:32 | INFO     | evolving_agent.core.memory:initialize:82 - Embedding model loaded
+2025-06-24 00:47:33 | INFO     | evolving_agent.core.memory:initialize:104 - Created new memory collection: agent_memory
+2025-06-24 00:47:33 | INFO     | evolving_agent.core.memory:initialize:107 - Long-term memory system initialized successfully
+2025-06-24 00:47:33 | INFO     | evolving_agent.knowledge.base:initialize:103 - Initializing knowledge base...
+2025-06-24 00:47:33 | INFO     | evolving_agent.knowledge.base:_load_knowledge:142 - No existing knowledge file found, starting fresh
+2025-06-24 00:47:33 | INFO     | evolving_agent.knowledge.base:initialize:118 - Knowledge base initialized with 0 entries
+2025-06-24 00:47:33 | INFO     | evolving_agent.core.evaluator:evaluate_output:84 - Evaluating output...
+2025-06-24 00:47:33 | ERROR    | evolving_agent.core.evaluator:_evaluate_criterion:176 - Failed to evaluate criterion accuracy: Provider openai not available
+2025-06-24 00:47:33 | ERROR    | evolving_agent.core.evaluator:_evaluate_criterion:176 - Failed to evaluate criterion completeness: Provider openai not available
+2025-06-24 00:47:33 | ERROR    | evolving_agent.core.evaluator:_evaluate_criterion:176 - Failed to evaluate criterion clarity: Provider openai not available
+2025-06-24 00:47:33 | ERROR    | evolving_agent.core.evaluator:_evaluate_criterion:176 - Failed to evaluate criterion relevance: Provider openai not available
+2025-06-24 00:47:33 | ERROR    | evolving_agent.core.evaluator:_evaluate_criterion:176 - Failed to evaluate criterion creativity: Provider openai not available
+2025-06-24 00:47:33 | ERROR    | evolving_agent.core.evaluator:_evaluate_criterion:176 - Failed to evaluate criterion efficiency: Provider openai not available
+2025-06-24 00:47:33 | ERROR    | evolving_agent.core.evaluator:_evaluate_criterion:176 - Failed to evaluate criterion safety: Provider openai not available
+2025-06-24 00:47:33 | ERROR    | evolving_agent.core.evaluator:_generate_improvement_suggestions:365 - Failed to generate improvement suggestions: Provider openai not available
+2025-06-24 00:47:33 | INFO     | evolving_agent.core.evaluator:evaluate_output:138 - Evaluation completed. Overall score: 0.50
