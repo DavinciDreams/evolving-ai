@@ -377,13 +377,20 @@ class SelfImprovingAgent:
         """Store session initialization information."""
         try:
             session_content = f"Session started: {self.session_id}"
+            
+            # Get config snapshot but only store basic info in metadata
+            config_snapshot = config.get_all_config()
+            
             session_memory = MemoryEntry(
                 content=session_content,
                 memory_type="session",
                 metadata={
                     "session_id": self.session_id,
                     "initialization_timestamp": datetime.now().isoformat(),
-                    "config_snapshot": config.get_all_config()
+                    "llm_provider": config_snapshot.get("default_llm_provider", "unknown"),
+                    "model": config_snapshot.get("default_model", "unknown"),
+                    "self_modification_enabled": config_snapshot.get("enable_self_modification", False),
+                    "auto_update_knowledge": config_snapshot.get("auto_update_knowledge", False)
                 }
             )
             
