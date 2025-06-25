@@ -18,6 +18,7 @@ from ..self_modification.validator import CodeValidator
 from ..utils.config import config
 from ..utils.logging import setup_logger
 from ..utils.llm_interface import llm_manager
+from ..utils.persistent_storage import persistent_data_manager
 
 logger = setup_logger(__name__)
 
@@ -47,6 +48,9 @@ class SelfImprovingAgent:
         self.code_modifier = None  # Will be initialized with proper parameters
         self.code_validator = CodeValidator()
         
+        # Persistent storage
+        self.data_manager = persistent_data_manager
+        
         # State tracking
         self.initialized = False
         self.session_id = None
@@ -60,6 +64,10 @@ class SelfImprovingAgent:
             
             # Ensure directories exist
             config.ensure_directories()
+            
+            # Initialize persistent data manager
+            await self.data_manager.initialize()
+            logger.info("Persistent data manager initialized")
             
             # Initialize core components
             await self.memory.initialize()
@@ -135,6 +143,28 @@ class SelfImprovingAgent:
             )
             
             # Step 5: Store interaction and learn
+            interaction_id = await self.data_manager.save_interaction(
+                query=query,
+                response=final_response,
+                evaluation_score=evaluation.overall_score,
+                context_used=context,
+                metadata={
+                    "interaction_count": self.interaction_count,
+                    "session_id": self.session_id,
+                    "improvement_applied": final_response != initial_response
+                }
+            )
+            
+            # Save detailed evaluation
+            await self.data_manager.save_evaluation(
+                interaction_id=interaction_id,
+                overall_score=evaluation.overall_score,
+                criteria_scores=evaluation.criteria_scores,
+                feedback=evaluation.feedback,
+                improvement_suggestions=evaluation.improvement_suggestions,
+                confidence=evaluation.confidence
+            )
+            
             await self._store_interaction(query, final_response, context, evaluation)
             
             # Step 6: Update knowledge base
@@ -465,23 +495,30 @@ Memory Types:
         try:
             logger.info("Cleaning up agent resources...")
             
+            # Save final agent state
+            agent_state = {
+                "session_id": self.session_id,
+                "interaction_count": self.interaction_count,
+                "improvement_cycle_count": self.improvement_cycle_count,
+                "final_timestamp": datetime.now().isoformat()
+            }
+            await self.data_manager.save_agent_state(agent_state)
+            
+            # Cleanup persistent data manager
+            await self.data_manager.cleanup()
+            
             # Store session end
             if self.memory and self.session_id:
                 session_end_memory = MemoryEntry(
-                    content=f"Session ended: {self.session_id}",
-                    memory_type="session",
+                    content=f"Session {self.session_id} ended with {self.interaction_count} interactions",
+                    memory_type="session_end",
                     metadata={
                         "session_id": self.session_id,
-                        "end_timestamp": datetime.now().isoformat(),
                         "total_interactions": self.interaction_count,
                         "improvement_cycles": self.improvement_cycle_count
                     }
                 )
                 await self.memory.add_memory(session_end_memory)
-            
-            # Clear caches
-            if self.context_manager:
-                self.context_manager.clear_cache()
             
             logger.info("Agent cleanup completed")
             

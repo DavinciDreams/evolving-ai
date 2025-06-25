@@ -50,6 +50,14 @@ async def main():
             elif user_input.lower() == 'memory':
                 await agent.print_memory_stats()
                 continue
+            elif user_input.lower() == 'stats':
+                stats = await agent.data_manager.get_session_statistics()
+                print(f"\nSession Statistics:\n{format_statistics(stats)}")
+                continue
+            elif user_input.lower() == 'interactions':
+                interactions = await agent.data_manager.get_recent_interactions(5)
+                print(f"\nRecent Interactions:\n{format_interactions(interactions)}")
+                continue
             elif not user_input:
                 continue
             
@@ -66,6 +74,12 @@ async def main():
         print(f"Failed to start agent: {e}")
     
     finally:
+        # Cleanup agent resources
+        if 'agent' in locals():
+            try:
+                await agent.cleanup()
+            except Exception as e:
+                logger.error(f"Error during cleanup: {e}")
         logger.info("Shutting down agent...")
 
 
@@ -74,12 +88,49 @@ def print_help():
     print("""
 Available commands:
 - help: Show this help message
-- status: Show agent status
+- status: Show agent status and performance
 - memory: Show memory statistics
+- stats: Show session statistics
+- interactions: Show recent interactions
 - quit/exit: Exit the program
 
 You can also type any question or task for the agent to process.
 """)
+
+
+def format_statistics(stats):
+    """Format session statistics for display."""
+    if not stats:
+        return "No statistics available"
+    
+    return f"""
+Session ID: {stats.get('session_id', 'N/A')}
+Duration: {stats.get('session_duration_minutes', 0):.1f} minutes
+Total Interactions: {stats.get('total_interactions', 0)}
+Current Interactions: {stats.get('current_interactions', 0)}
+Average Score: {stats.get('average_evaluation_score', 0):.2f}
+Successful Evaluations: {stats.get('successful_evaluations', 0)}
+Failed Evaluations: {stats.get('failed_evaluations', 0)}
+Modifications Made: {stats.get('modifications_made', 0)}
+Memories Added: {stats.get('memories_added', 0)}
+Knowledge Added: {stats.get('knowledge_added', 0)}
+"""
+
+
+def format_interactions(interactions):
+    """Format recent interactions for display."""
+    if not interactions:
+        return "No recent interactions"
+    
+    formatted = ""
+    for i, interaction in enumerate(interactions[:5], 1):
+        score = interaction.get('evaluation_score', 'N/A')
+        timestamp = interaction.get('timestamp', 'N/A')
+        query = interaction.get('query', '')[:50] + "..." if len(interaction.get('query', '')) > 50 else interaction.get('query', '')
+        
+        formatted += f"{i}. [{timestamp}] Score: {score} - {query}\n"
+    
+    return formatted
 
 
 if __name__ == "__main__":
