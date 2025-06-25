@@ -184,13 +184,15 @@ class SelfImprovingAgent:
             Please provide a detailed response that addresses the query while incorporating relevant insights from the context.
             """
             
-            # Generate response
-            response = await llm_manager.generate_response(
-                prompt=user_prompt,
+            # Generate response with fallback
+            response, error = await llm_manager.generate_response_with_fallback(
+                message=user_prompt,
                 system_prompt=system_prompt,
-                temperature=config.temperature,
-                max_tokens=config.max_tokens
+                preferred_provider=config.default_llm_provider
             )
+            
+            if response is None:
+                raise Exception(f"No available LLM providers: {error}")
             
             return response.strip()
             

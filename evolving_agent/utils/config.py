@@ -29,6 +29,11 @@ class Config:
         return os.getenv("ANTHROPIC_API_KEY", "")
     
     @property
+    def openrouter_api_key(self) -> str:
+        """Get OpenRouter API key."""
+        return os.getenv("OPENROUTER_API_KEY", "")
+    
+    @property
     def log_level(self) -> str:
         """Get logging level."""
         return os.getenv("LOG_LEVEL", "INFO")
@@ -56,17 +61,17 @@ class Config:
     @property
     def default_llm_provider(self) -> str:
         """Get default LLM provider."""
-        return os.getenv("DEFAULT_LLM_PROVIDER", "openai")
+        return os.getenv("DEFAULT_LLM_PROVIDER", "anthropic")
     
     @property
     def default_model(self) -> str:
         """Get default model."""
-        return os.getenv("DEFAULT_MODEL", "gpt-4")
+        return os.getenv("DEFAULT_MODEL", "claude-3-5-sonnet-20241022")
     
     @property
     def evaluation_model(self) -> str:
         """Get evaluation model."""
-        return os.getenv("EVALUATION_MODEL", "gpt-4")
+        return os.getenv("EVALUATION_MODEL", "claude-3-5-sonnet-20241022")
     
     @property
     def temperature(self) -> float:
@@ -118,6 +123,7 @@ class Config:
         return {
             "openai_api_key": "***" if self.openai_api_key else "",
             "anthropic_api_key": "***" if self.anthropic_api_key else "",
+            "openrouter_api_key": "***" if self.openrouter_api_key else "",
             "log_level": self.log_level,
             "log_file": self.log_file,
             "memory_persist_directory": self.memory_persist_directory,
