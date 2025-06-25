@@ -36,6 +36,7 @@ class EvaluationResult:
     strengths: List[str]
     weaknesses: List[str]
     improvement_suggestions: List[str]
+    feedback: str
     confidence: float
     metadata: Dict[str, Any]
 
@@ -123,6 +124,7 @@ class OutputEvaluator:
                 strengths=strengths,
                 weaknesses=weaknesses,
                 improvement_suggestions=improvement_suggestions,
+                feedback=" ".join(all_feedback) if all_feedback else "No specific feedback provided.",
                 confidence=confidence,
                 metadata={
                     "timestamp": datetime.now().isoformat(),
