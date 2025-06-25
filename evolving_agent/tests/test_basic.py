@@ -165,8 +165,12 @@ class TestConfiguration:
     def test_config_properties(self):
         """Test configuration properties."""
         assert hasattr(config, 'default_llm_provider')
+        assert hasattr(config, 'openrouter_api_key')
         assert hasattr(config, 'memory_persist_directory')
         assert hasattr(config, 'enable_self_modification')
+        
+        # Test that default provider is now anthropic
+        assert config.default_llm_provider == "anthropic"
         
     def test_config_methods(self):
         """Test configuration methods."""
