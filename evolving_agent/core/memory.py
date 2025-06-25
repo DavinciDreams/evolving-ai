@@ -6,7 +6,7 @@ import asyncio
 import json
 import uuid
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Union
 from pathlib import Path
 
 import chromadb
@@ -18,6 +18,31 @@ from ..utils.config import config
 from ..utils.logging import setup_logger
 
 logger = setup_logger(__name__)
+
+
+def sanitize_metadata_for_chroma(metadata: Dict[str, Any]) -> Dict[str, Union[str, int, float, bool, None]]:
+    """
+    Sanitize metadata for ChromaDB storage.
+    ChromaDB only accepts str, int, float, bool, or None as metadata values.
+    """
+    sanitized = {}
+    
+    for key, value in metadata.items():
+        if value is None:
+            sanitized[key] = None
+        elif isinstance(value, (str, int, float, bool)):
+            sanitized[key] = value
+        elif isinstance(value, dict):
+            # Convert dict to JSON string
+            sanitized[f"{key}_json"] = json.dumps(value)
+        elif isinstance(value, (list, tuple)):
+            # Convert list/tuple to JSON string
+            sanitized[f"{key}_json"] = json.dumps(list(value))
+        else:
+            # Convert other types to string
+            sanitized[key] = str(value)
+    
+    return sanitized
 
 
 class MemoryEntry:
@@ -131,12 +156,15 @@ class LongTermMemory:
                 **entry.metadata
             }
             
+            # Sanitize metadata for ChromaDB compatibility
+            sanitized_metadata = sanitize_metadata_for_chroma(metadata)
+            
             # Add to ChromaDB
             self.collection.add(
                 ids=[entry.id],
                 embeddings=[embedding],
                 documents=[entry.content],
-                metadatas=[metadata]
+                metadatas=[sanitized_metadata]
             )
             
             logger.info(f"Added memory entry: {entry.id}")
