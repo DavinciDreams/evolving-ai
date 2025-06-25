@@ -344,8 +344,8 @@ class LLMManager:
         # Initialize OpenRouter
         if config.openrouter_api_key:
             try:
-                # Use the default model if OpenRouter is the default provider, otherwise use a safe fallback
-                model = config.default_model if config.default_llm_provider == "openrouter" else "meta-llama/llama-3.3-8b-instruct:free"
+                # Use a working model that we verified
+                model = config.default_model if config.default_llm_provider == "openrouter" else "anthropic/claude-3-haiku"
                 self.interfaces["openrouter"] = OpenRouterInterface(
                     config.openrouter_api_key,
                     model
