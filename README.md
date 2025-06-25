@@ -9,7 +9,7 @@ A sophisticated AI agent with self-improvement capabilities, long-term memory, d
 - **Self-Evaluation**: Built-in mechanisms to evaluate and improve outputs
 - **Knowledge Base Updates**: Automatic updates to knowledge base from experiences
 - **Code Self-Modification**: Ability to analyze and modify its own codebase
-- **Multi-LLM Support**: Compatible with OpenAI, Anthropic, and other providers
+- **Multi-LLM Support**: Compatible with OpenAI, Anthropic, OpenRouter, and other providers
 
 ## Architecture
 
@@ -57,7 +57,8 @@ python main.py
 
 Set your API keys and preferences in `.env`:
 - `OPENAI_API_KEY`: Your OpenAI API key
-- `ANTHROPIC_API_KEY`: Your Anthropic API key
+- `ANTHROPIC_API_KEY`: Your Anthropic API key (default provider)
+- `OPENROUTER_API_KEY`: Your OpenRouter API key
 - `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
 - `MEMORY_PERSIST_DIRECTORY`: Directory for persistent memory storage
 

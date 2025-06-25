@@ -9,8 +9,9 @@
    
    Edit `.env` and add your API keys:
    ```
+   ANTHROPIC_API_KEY=your_anthropic_api_key_here  # Default provider
    OPENAI_API_KEY=your_openai_api_key_here
-   ANTHROPIC_API_KEY=your_anthropic_api_key_here
+   OPENROUTER_API_KEY=your_openrouter_api_key_here  # Optional
    ```
 
 2. **Run the Agent**:
