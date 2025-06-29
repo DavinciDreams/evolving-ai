@@ -10,7 +10,10 @@ import json
 async def test_openrouter_models():
     """Test OpenRouter with different model names."""
     
-    api_key = "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"
+    import os
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY environment variable not set.")
     
     # Test different model names
     models = [
