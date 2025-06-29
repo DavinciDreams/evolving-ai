@@ -141,6 +141,138 @@ Get knowledge items from the agent's knowledge base.
 - `offset`: Skip number of items (for pagination)
 - `category`: Filter by knowledge category
 
+## GitHub Integration Endpoints
+
+The API provides comprehensive GitHub integration features for automated code improvement and pull request management.
+
+### GET /github/status
+Get the current status of GitHub integration.
+
+**Response Model**: `GitHubStatus`
+```json
+{
+  "github_connected": true,
+  "repository_name": "username/repository",
+  "local_repo_available": true,
+  "auto_pr_enabled": true,
+  "open_prs_count": 2
+}
+```
+
+### GET /github/repository
+Get detailed information about the connected GitHub repository.
+
+**Response Model**: `RepositoryInfo`
+```json
+{
+  "name": "evolving-ai-agent",
+  "full_name": "username/evolving-ai-agent",
+  "description": "A self-improving AI agent",
+  "language": "Python",
+  "stars": 15,
+  "forks": 3,
+  "open_issues": 2
+}
+```
+
+### POST /github/improve
+Analyze the codebase and create improvements, optionally as a pull request.
+
+**Request Model**: `ImprovementRequest`
+```json
+{
+  "create_pr": true,
+  "evaluation_insights": [
+    "The error handling could be improved",
+    "Memory usage optimization needed"
+  ],
+  "knowledge_suggestions": [
+    "Implement async operations for better performance"
+  ]
+}
+```
+
+**Response Model**: `ImprovementResponse`
+```json
+{
+  "improvements_generated": 5,
+  "improvements_validated": 4,
+  "pr_created": true,
+  "pr_number": 123,
+  "pr_url": "https://github.com/username/repo/pull/123",
+  "improvement_potential": 0.85
+}
+```
+
+### POST /github/demo-pr
+Create a demonstration pull request with documentation improvements. This is a safe endpoint that only creates documentation enhancements.
+
+```json
+{
+  "message": "Demo pull request created successfully",
+  "pr_number": 124,
+  "pr_url": "https://github.com/username/repo/pull/124",
+  "branch_name": "demo-improvements-20241224_123456",
+  "files_updated": ["README.md"]
+}
+```
+
+### GET /github/pull-requests
+Get a list of open pull requests in the repository.
+
+```json
+{
+  "open_pull_requests": [
+    {
+      "number": 123,
+      "title": "AI Agent: Code improvements",
+      "url": "https://github.com/username/repo/pull/123",
+      "created_at": "2024-12-24T12:34:56Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+### GET /github/commits
+Get recent commits from the repository.
+
+**Query Parameters**:
+- `limit` (optional): Maximum number of commits to retrieve (default: 10)
+
+```json
+{
+  "recent_commits": [
+    {
+      "sha": "abc123",
+      "message": "Implement new feature",
+      "author": "AI Agent",
+      "date": "2024-12-24T12:34:56Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+### GET /github/improvement-history
+Get the history of automated improvements made by the AI agent.
+
+```json
+{
+  "improvement_history": [
+    {
+      "timestamp": "2024-12-24T12:34:56Z",
+      "type": "code_optimization",
+      "branch": "improvements-20241224_123456",
+      "pr_number": 123,
+      "pr_url": "https://github.com/username/repo/pull/123",
+      "files_updated": ["core/agent.py", "utils/helpers.py"]
+    }
+  ],
+  "count": 1
+}
+```
+
 ## 🧪 Testing the API
 
 ### 1. Test Script
