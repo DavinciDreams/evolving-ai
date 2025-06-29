@@ -299,14 +299,16 @@ class GitHubIntegration:
                 logger.error("Commit message is empty")
                 return {"error": "Commit message cannot be empty"}
             
-            # Ensure new_content is properly encoded
+            # Ensure new_content is properly formatted for GitHub API
             if isinstance(new_content, str):
-                content_bytes = new_content.encode('utf-8')
+                # PyGithub expects string content, not bytes
+                content_to_send = new_content
             else:
-                content_bytes = new_content
+                # If it's bytes, decode it
+                content_to_send = new_content.decode('utf-8') if isinstance(new_content, bytes) else str(new_content)
             
             logger.info(f"Attempting to update file {file_path} in branch {branch}")
-            logger.debug(f"Content length: {len(content_bytes)} bytes")
+            logger.debug(f"Content length: {len(content_to_send)} characters")
             
             # Get current file content to get SHA
             try:
@@ -319,10 +321,9 @@ class GitHubIntegration:
                 result = self.repository.update_file(
                     path=file_path,
                     message=commit_message,
-                    content=content_bytes,
+                    content=content_to_send,
                     sha=file_sha,
-                    branch=branch,
-                    author={"name": author_name, "email": author_email}
+                    branch=branch
                 )
                 
                 logger.info(f"Successfully updated file {file_path} in branch {branch}")
@@ -336,9 +337,8 @@ class GitHubIntegration:
                         result = self.repository.create_file(
                             path=file_path,
                             message=commit_message,
-                            content=content_bytes,
-                            branch=branch,
-                            author={"name": author_name, "email": author_email}
+                            content=content_to_send,
+                            branch=branch
                         )
                         
                         logger.info(f"Successfully created new file {file_path} in branch {branch}")
