@@ -695,7 +695,7 @@ async def get_recent_commits(limit: int = 10):
         if not github_modifier or not github_modifier.github_integration.repository:
             raise HTTPException(status_code=404, detail="GitHub repository not connected")
         
-        commits = await github_modifier.github_integration.get_recent_commits(limit=limit)
+        commits = await github_modifier.github_integration.get_commit_history(limit=limit)
         
         return {
             "recent_commits": commits,
