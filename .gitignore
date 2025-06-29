@@ -189,3 +189,4 @@ Desktop.ini
 chroma.sqlite3
 chroma-*
 memory_db/chroma.sqlite3
+/chroma.sqlite3
