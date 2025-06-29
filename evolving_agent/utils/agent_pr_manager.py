@@ -163,18 +163,16 @@ class AgentPRManager:
         """Create a specific improvement based on a suggestion."""
         try:
             # Use the modifier to generate the actual code change
-            improvement = await self.modifier.apply_modification(
+            improvement = await self.modifier.apply_improvement(
                 file_path=file_path,
                 suggestion=suggestion,
                 context=analysis_result
             )
             
-            # Validate the improvement
-            if improvement and self.validator:
-                is_valid = await self.validator.validate_modification(improvement)
-                if not is_valid:
-                    logger.warning(f"Improvement validation failed for {file_path}")
-                    return None
+            # Note: validation is already done within apply_improvement method
+            if not improvement:
+                logger.warning(f"No improvement generated for {file_path}")
+                return None
             
             return improvement
             
