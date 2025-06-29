@@ -37,17 +37,17 @@ async def run_end_to_end_self_improvement():
         print("\n2. 💬 Testing basic agent interaction...")
         test_query = "What are some common code optimization techniques that could be applied to improve performance in Python applications?"
         
-        response = await agent.process_query(test_query)
+        response = await agent.run(test_query)
         print(f"✅ Query processed successfully")
-        print(f"   Response length: {len(response.response)} characters")
-        print(f"   Evaluation score: {response.evaluation_score}")
+        print(f"   Response length: {len(response)} characters")
+        print(f"   Response preview: {response[:200]}...")
         
         # Step 3: Trigger code analysis
         print("\n3. 🔍 Analyzing own codebase for improvements...")
         
         # Use the agent's self-modification system to analyze the codebase
         try:
-            analysis_result = await agent.self_modifier.code_analyzer.analyze_codebase()
+            analysis_result = await agent.code_modifier.code_analyzer.analyze_codebase()
             
             print(f"✅ Code analysis completed")
             print(f"   Files analyzed: {analysis_result.get('files_analyzed', 0)}")
@@ -170,8 +170,8 @@ response = await agent.process_query("Optimize this code")
         
         try:
             # Check if we have the GitHub integration available
-            if hasattr(agent.self_modifier, 'github_integration'):
-                github_integration = agent.self_modifier.github_integration
+            if hasattr(agent.code_modifier, 'github_integration'):
+                github_integration = agent.code_modifier.github_integration
             else:
                 print("⚠️  GitHub integration not available in agent")
                 print("   Testing with direct GitHub integration...")
@@ -248,8 +248,11 @@ Date: 2025-06-28
 Evaluation Score: Pending human review
 """
             
-            await agent.memory.add_memory(
+            from evolving_agent.core.memory import MemoryEntry
+            
+            memory_entry = MemoryEntry(
                 content=memory_content,
+                memory_type="self_improvement_cycle",
                 metadata={
                     "type": "self_improvement_cycle",
                     "cycle_number": agent.improvement_cycle_count + 1,
@@ -257,6 +260,8 @@ Evaluation Score: Pending human review
                     "github_integration": bool(github_token)
                 }
             )
+            
+            await agent.memory.add_memory(memory_entry)
             
             print(f"✅ Experience stored in long-term memory")
             
