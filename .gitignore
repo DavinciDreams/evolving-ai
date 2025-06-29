@@ -188,3 +188,4 @@ Desktop.ini
 # ChromaDB specific
 chroma.sqlite3
 chroma-*
+memory_db/chroma.sqlite3
