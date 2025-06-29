@@ -3262,3 +3262,483 @@ For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/St
 2025-06-28 22:43:20 | INFO     | evolving_agent.utils.github_integration:initialize:78 - Local repository initialized: .
 2025-06-28 22:43:20 | INFO     | evolving_agent.utils.github_enhanced_modifier:initialize:67 - GitHub integration initialized successfully
 2025-06-28 22:43:20 | INFO     | api_server:lifespan:50 - GitHub integration initialized successfully
+2025-06-28 22:51:46 | INFO     | evolving_agent.core.agent:initialize:63 - Initializing Self-Improving Agent...
+2025-06-28 22:51:46 | INFO     | evolving_agent.utils.persistent_storage:initialize:37 - Initializing persistent data manager...
+2025-06-28 22:51:46 | INFO     | evolving_agent.utils.persistent_storage:_start_new_session:75 - Started new session: session_20250628_225146
+2025-06-28 22:51:46 | INFO     | evolving_agent.utils.persistent_storage:_initialize_interactions_db:131 - Interactions database initialized
+2025-06-28 22:51:46 | INFO     | evolving_agent.utils.persistent_storage:_load_agent_state:142 - Loaded agent state from persistent_data\agent_state.json
+2025-06-28 22:51:46 | INFO     | evolving_agent.utils.persistent_storage:initialize:51 - Persistent data manager initialized successfully
+2025-06-28 22:51:46 | INFO     | evolving_agent.core.agent:initialize:70 - Persistent data manager initialized
+2025-06-28 22:51:46 | INFO     | evolving_agent.core.memory:initialize:100 - Initializing long-term memory system...
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.memory:initialize:107 - Embedding model loaded
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.memory:initialize:123 - Loaded existing memory collection: agent_memory
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.memory:initialize:132 - Long-term memory system initialized successfully
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.agent:initialize:74 - Memory system initialized
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.agent:initialize:77 - Context manager initialized
+2025-06-28 22:51:48 | INFO     | evolving_agent.knowledge.base:initialize:103 - Initializing knowledge base...
+2025-06-28 22:51:48 | INFO     | evolving_agent.knowledge.base:_load_knowledge:140 - Loaded 15 knowledge entries
+2025-06-28 22:51:48 | INFO     | evolving_agent.knowledge.base:_load_categories:155 - Loaded 6 categories
+2025-06-28 22:51:48 | INFO     | evolving_agent.knowledge.base:initialize:118 - Knowledge base initialized with 15 entries
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.agent:initialize:80 - Knowledge base initialized
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.agent:initialize:83 - Knowledge updater initialized
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.agent:initialize:91 - Self-modification system initialized
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 0e5f9303-3f64-4db7-900c-1fa683d342f5
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.agent:initialize:100 - Agent initialization completed successfully
+2025-06-28 22:51:48 | ERROR    | __main__:run_end_to_end_self_improvement:285 - End-to-end test failed: 'SelfImprovingAgent' object has no attribute 'process_query'
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.agent:cleanup:503 - Cleaning up agent resources...
+2025-06-28 22:51:48 | INFO     | evolving_agent.utils.persistent_storage:save_agent_state:338 - Agent state saved
+2025-06-28 22:51:48 | INFO     | evolving_agent.utils.persistent_storage:cleanup:411 - Session session_20250628_225146 finalized
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 52b8b530-c343-4ca0-909b-d89df688da62
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.agent:cleanup:530 - Agent cleanup completed
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.agent:cleanup:503 - Cleaning up agent resources...
+2025-06-28 22:51:48 | INFO     | evolving_agent.utils.persistent_storage:save_agent_state:338 - Agent state saved
+2025-06-28 22:51:48 | INFO     | evolving_agent.utils.persistent_storage:cleanup:411 - Session session_20250628_225146 finalized
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 967a78cf-e13a-4003-b4c4-607320f33699
+2025-06-28 22:51:48 | INFO     | evolving_agent.core.agent:cleanup:530 - Agent cleanup completed
+2025-06-28 22:52:08 | INFO     | api_server:lifespan:57 - Cleaning up agent...
+2025-06-28 22:52:08 | INFO     | api_server:lifespan:57 - Cleaning up agent...
+2025-06-28 22:52:08 | INFO     | evolving_agent.core.agent:cleanup:503 - Cleaning up agent resources...
+2025-06-28 22:52:08 | INFO     | evolving_agent.core.agent:cleanup:503 - Cleaning up agent resources...
+2025-06-28 22:52:08 | INFO     | evolving_agent.utils.persistent_storage:save_agent_state:338 - Agent state saved
+2025-06-28 22:52:08 | INFO     | evolving_agent.utils.persistent_storage:save_agent_state:338 - Agent state saved
+2025-06-28 22:52:08 | INFO     | evolving_agent.utils.persistent_storage:cleanup:411 - Session session_20250628_224318 finalized
+2025-06-28 22:52:08 | INFO     | evolving_agent.utils.persistent_storage:cleanup:411 - Session session_20250628_224258 finalized
+2025-06-28 22:52:08 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 8f85c24a-0596-41bc-9a54-67b5dbe52438
+2025-06-28 22:52:08 | INFO     | evolving_agent.core.agent:cleanup:530 - Agent cleanup completed
+2025-06-28 22:52:08 | INFO     | api_server:lifespan:59 - Agent cleanup completed
+2025-06-28 22:52:08 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 09cbbf24-31de-4454-81e6-8106dfb52d9f
+2025-06-28 22:52:08 | INFO     | evolving_agent.core.agent:cleanup:530 - Agent cleanup completed
+2025-06-28 22:52:08 | INFO     | api_server:lifespan:59 - Agent cleanup completed
+2025-06-28 22:52:20 | INFO     | api_server:lifespan:33 - Initializing Self-Improving Agent...
+2025-06-28 22:52:20 | INFO     | evolving_agent.core.agent:initialize:63 - Initializing Self-Improving Agent...
+2025-06-28 22:52:20 | INFO     | evolving_agent.utils.persistent_storage:initialize:37 - Initializing persistent data manager...
+2025-06-28 22:52:20 | INFO     | evolving_agent.utils.persistent_storage:_start_new_session:75 - Started new session: session_20250628_225220
+2025-06-28 22:52:20 | INFO     | evolving_agent.utils.persistent_storage:_initialize_interactions_db:131 - Interactions database initialized
+2025-06-28 22:52:20 | INFO     | evolving_agent.utils.persistent_storage:_load_agent_state:142 - Loaded agent state from persistent_data\agent_state.json
+2025-06-28 22:52:20 | INFO     | evolving_agent.utils.persistent_storage:initialize:51 - Persistent data manager initialized successfully
+2025-06-28 22:52:20 | INFO     | evolving_agent.core.agent:initialize:70 - Persistent data manager initialized
+2025-06-28 22:52:20 | INFO     | evolving_agent.core.memory:initialize:100 - Initializing long-term memory system...
+2025-06-28 22:52:20 | INFO     | api_server:lifespan:33 - Initializing Self-Improving Agent...
+2025-06-28 22:52:20 | INFO     | evolving_agent.core.agent:initialize:63 - Initializing Self-Improving Agent...
+2025-06-28 22:52:20 | INFO     | evolving_agent.utils.persistent_storage:initialize:37 - Initializing persistent data manager...
+2025-06-28 22:52:20 | INFO     | evolving_agent.utils.persistent_storage:_start_new_session:75 - Started new session: session_20250628_225220
+2025-06-28 22:52:20 | INFO     | evolving_agent.utils.persistent_storage:_initialize_interactions_db:131 - Interactions database initialized
+2025-06-28 22:52:20 | INFO     | evolving_agent.utils.persistent_storage:_load_agent_state:142 - Loaded agent state from persistent_data\agent_state.json
+2025-06-28 22:52:20 | INFO     | evolving_agent.utils.persistent_storage:initialize:51 - Persistent data manager initialized successfully
+2025-06-28 22:52:20 | INFO     | evolving_agent.core.agent:initialize:70 - Persistent data manager initialized
+2025-06-28 22:52:20 | INFO     | evolving_agent.core.memory:initialize:100 - Initializing long-term memory system...
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.memory:initialize:107 - Embedding model loaded
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.memory:initialize:107 - Embedding model loaded
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.memory:initialize:123 - Loaded existing memory collection: agent_memory
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.memory:initialize:132 - Long-term memory system initialized successfully
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.agent:initialize:74 - Memory system initialized
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.agent:initialize:77 - Context manager initialized
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.memory:initialize:123 - Loaded existing memory collection: agent_memory
+2025-06-28 22:52:22 | INFO     | evolving_agent.knowledge.base:initialize:103 - Initializing knowledge base...
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.memory:initialize:132 - Long-term memory system initialized successfully
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.agent:initialize:74 - Memory system initialized
+2025-06-28 22:52:22 | INFO     | evolving_agent.knowledge.base:_load_knowledge:140 - Loaded 15 knowledge entries
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.agent:initialize:77 - Context manager initialized
+2025-06-28 22:52:22 | INFO     | evolving_agent.knowledge.base:initialize:103 - Initializing knowledge base...
+2025-06-28 22:52:22 | INFO     | evolving_agent.knowledge.base:_load_categories:155 - Loaded 6 categories
+2025-06-28 22:52:22 | INFO     | evolving_agent.knowledge.base:initialize:118 - Knowledge base initialized with 15 entries
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.agent:initialize:80 - Knowledge base initialized
+2025-06-28 22:52:22 | INFO     | evolving_agent.knowledge.base:_load_knowledge:140 - Loaded 15 knowledge entries
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.agent:initialize:83 - Knowledge updater initialized
+2025-06-28 22:52:22 | INFO     | evolving_agent.knowledge.base:_load_categories:155 - Loaded 6 categories
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.agent:initialize:91 - Self-modification system initialized
+2025-06-28 22:52:22 | INFO     | evolving_agent.knowledge.base:initialize:118 - Knowledge base initialized with 15 entries
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.agent:initialize:80 - Knowledge base initialized
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.agent:initialize:83 - Knowledge updater initialized
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.agent:initialize:91 - Self-modification system initialized
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 22e540ca-1539-408d-9bc6-42a93ad3f931
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.agent:initialize:100 - Agent initialization completed successfully
+2025-06-28 22:52:22 | INFO     | api_server:lifespan:36 - Agent initialized successfully
+2025-06-28 22:52:22 | INFO     | api_server:lifespan:43 - Initializing GitHub integration...
+2025-06-28 22:52:22 | INFO     | evolving_agent.utils.github_integration:initialize:68 - GitHub client initialized
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 2c0ded94-d742-4d17-86aa-a40399a50842
+2025-06-28 22:52:22 | INFO     | evolving_agent.core.agent:initialize:100 - Agent initialization completed successfully
+2025-06-28 22:52:22 | INFO     | api_server:lifespan:36 - Agent initialized successfully
+2025-06-28 22:52:22 | INFO     | api_server:lifespan:43 - Initializing GitHub integration...
+2025-06-28 22:52:22 | INFO     | evolving_agent.utils.github_integration:initialize:68 - GitHub client initialized
+2025-06-28 22:52:22 | INFO     | evolving_agent.utils.github_integration:initialize:73 - Connected to repository: DavinciDreams/evolving-ai
+2025-06-28 22:52:22 | INFO     | evolving_agent.utils.github_integration:initialize:73 - Connected to repository: DavinciDreams/evolving-ai
+2025-06-28 22:52:22 | INFO     | evolving_agent.utils.github_integration:initialize:78 - Local repository initialized: .
+2025-06-28 22:52:22 | INFO     | evolving_agent.utils.github_integration:initialize:78 - Local repository initialized: .
+2025-06-28 22:52:22 | INFO     | evolving_agent.utils.github_enhanced_modifier:initialize:67 - GitHub integration initialized successfully
+2025-06-28 22:52:22 | INFO     | evolving_agent.utils.github_enhanced_modifier:initialize:67 - GitHub integration initialized successfully
+2025-06-28 22:52:22 | INFO     | api_server:lifespan:50 - GitHub integration initialized successfully
+2025-06-28 22:52:22 | INFO     | api_server:lifespan:50 - GitHub integration initialized successfully
+2025-06-28 22:53:07 | INFO     | evolving_agent.core.agent:initialize:63 - Initializing Self-Improving Agent...
+2025-06-28 22:53:07 | INFO     | evolving_agent.utils.persistent_storage:initialize:37 - Initializing persistent data manager...
+2025-06-28 22:53:07 | INFO     | evolving_agent.utils.persistent_storage:_start_new_session:75 - Started new session: session_20250628_225307
+2025-06-28 22:53:07 | INFO     | evolving_agent.utils.persistent_storage:_initialize_interactions_db:131 - Interactions database initialized
+2025-06-28 22:53:07 | INFO     | evolving_agent.utils.persistent_storage:_load_agent_state:142 - Loaded agent state from persistent_data\agent_state.json
+2025-06-28 22:53:07 | INFO     | evolving_agent.utils.persistent_storage:initialize:51 - Persistent data manager initialized successfully
+2025-06-28 22:53:07 | INFO     | evolving_agent.core.agent:initialize:70 - Persistent data manager initialized
+2025-06-28 22:53:07 | INFO     | evolving_agent.core.memory:initialize:100 - Initializing long-term memory system...
+2025-06-28 22:53:09 | INFO     | evolving_agent.core.memory:initialize:107 - Embedding model loaded
+2025-06-28 22:53:09 | INFO     | evolving_agent.core.memory:initialize:123 - Loaded existing memory collection: agent_memory
+2025-06-28 22:53:09 | INFO     | evolving_agent.core.memory:initialize:132 - Long-term memory system initialized successfully
+2025-06-28 22:53:09 | INFO     | evolving_agent.core.agent:initialize:74 - Memory system initialized
+2025-06-28 22:53:09 | INFO     | evolving_agent.core.agent:initialize:77 - Context manager initialized
+2025-06-28 22:53:09 | INFO     | evolving_agent.knowledge.base:initialize:103 - Initializing knowledge base...
+2025-06-28 22:53:09 | INFO     | evolving_agent.knowledge.base:_load_knowledge:140 - Loaded 15 knowledge entries
+2025-06-28 22:53:09 | INFO     | evolving_agent.knowledge.base:_load_categories:155 - Loaded 6 categories
+2025-06-28 22:53:09 | INFO     | evolving_agent.knowledge.base:initialize:118 - Knowledge base initialized with 15 entries
+2025-06-28 22:53:09 | INFO     | evolving_agent.core.agent:initialize:80 - Knowledge base initialized
+2025-06-28 22:53:09 | INFO     | evolving_agent.core.agent:initialize:83 - Knowledge updater initialized
+2025-06-28 22:53:09 | INFO     | evolving_agent.core.agent:initialize:91 - Self-modification system initialized
+2025-06-28 22:53:09 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: c4bd582d-a6a3-4c5c-8318-44e2389c0934
+2025-06-28 22:53:09 | INFO     | evolving_agent.core.agent:initialize:100 - Agent initialization completed successfully
+2025-06-28 22:53:09 | INFO     | evolving_agent.core.agent:run:121 - Processing query: What are some common code optimization techniques that could be applied to improve performance in Py...
+2025-06-28 22:53:09 | INFO     | evolving_agent.core.context_manager:get_relevant_context:57 - Retrieving context for query: What are some common code optimization techniques that could be applied to improve performance in Py...
+2025-06-28 22:53:10 | INFO     | evolving_agent.utils.llm_interface:_initialize_interfaces:329 - OpenAI interface initialized
+2025-06-28 22:53:10 | INFO     | evolving_agent.utils.llm_interface:_initialize_interfaces:340 - Anthropic interface initialized
+2025-06-28 22:53:10 | INFO     | evolving_agent.utils.llm_interface:_initialize_interfaces:353 - OpenRouter interface initialized
+2025-06-28 22:53:23 | INFO     | evolving_agent.core.memory:search_memories:225 - Found 0 relevant memories for query
+2025-06-28 22:53:23 | INFO     | evolving_agent.core.memory:search_memories:225 - Found 0 relevant memories for query
+2025-06-28 22:53:23 | INFO     | evolving_agent.core.memory:search_memories:225 - Found 0 relevant memories for query
+2025-06-28 22:53:23 | INFO     | evolving_agent.core.memory:search_memories:225 - Found 0 relevant memories for query
+2025-06-28 22:53:23 | INFO     | evolving_agent.core.memory:search_memories:225 - Found 0 relevant memories for query
+2025-06-28 22:53:23 | INFO     | evolving_agent.core.memory:search_memories:225 - Found 0 relevant memories for query
+2025-06-28 22:53:23 | INFO     | evolving_agent.core.memory:search_memories:225 - Found 0 relevant memories for query
+2025-06-28 22:53:23 | INFO     | evolving_agent.core.context_manager:get_relevant_context:83 - Retrieved 1 context categories
+2025-06-28 22:53:23 | ERROR    | evolving_agent.utils.llm_interface:generate_response:93 - OpenAI API error: Error code: 401 - {'error': {'message': 'Incorrect API key provided: your_ope************here. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_api_key'}}
+2025-06-28 22:53:27 | ERROR    | evolving_agent.utils.llm_interface:generate_response:93 - OpenAI API error: Error code: 401 - {'error': {'message': 'Incorrect API key provided: your_ope************here. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_api_key'}}
+2025-06-28 22:53:32 | ERROR    | evolving_agent.utils.llm_interface:generate_response:93 - OpenAI API error: Error code: 401 - {'error': {'message': 'Incorrect API key provided: your_ope************here. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_api_key'}}
+2025-06-28 22:53:32 | WARNING  | evolving_agent.utils.llm_interface:check_provider_availability:376 - Provider openai unavailable: RetryError[<Future at 0x2af0300e650 state=finished raised AuthenticationError>]
+2025-06-28 22:53:33 | ERROR    | evolving_agent.utils.llm_interface:generate_response:262 - OpenRouter API error: Client error '401 Unauthorized' for url 'https://openrouter.ai/api/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+2025-06-28 22:53:38 | ERROR    | evolving_agent.utils.llm_interface:generate_response:262 - OpenRouter API error: Client error '401 Unauthorized' for url 'https://openrouter.ai/api/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+2025-06-28 22:53:42 | ERROR    | evolving_agent.utils.llm_interface:generate_response:262 - OpenRouter API error: Client error '401 Unauthorized' for url 'https://openrouter.ai/api/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+2025-06-28 22:53:42 | WARNING  | evolving_agent.utils.llm_interface:check_provider_availability:376 - Provider openrouter unavailable: RetryError[<Future at 0x2af03017150 state=finished raised HTTPStatusError>]
+2025-06-28 22:53:57 | INFO     | evolving_agent.core.evaluator:evaluate_output:85 - Evaluating output...
+2025-06-28 22:54:57 | INFO     | evolving_agent.core.evaluator:evaluate_output:140 - Evaluation completed. Overall score: 0.94
+2025-06-28 22:54:57 | INFO     | evolving_agent.core.agent:_improve_response:279 - Response quality is high, no improvement needed
+2025-06-28 22:54:57 | INFO     | evolving_agent.utils.persistent_storage:save_interaction:183 - Saved interaction 10
+2025-06-28 22:54:58 | INFO     | evolving_agent.utils.persistent_storage:save_evaluation:224 - Saved evaluation for interaction 10
+2025-06-28 22:54:58 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 327b377a-c0ad-491a-8d34-84728e17fec9
+2025-06-28 22:54:58 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 9c375775-fab7-40d4-8f53-4d17631591de
+2025-06-28 22:54:58 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 2aeab97b-21c9-4188-b471-957cf913d30d
+2025-06-28 22:54:58 | INFO     | evolving_agent.core.context_manager:store_interaction_context:404 - Stored interaction context
+2025-06-28 22:54:58 | INFO     | evolving_agent.core.agent:_store_interaction:351 - Interaction stored successfully
+2025-06-28 22:54:58 | INFO     | evolving_agent.knowledge.updater:update_from_interaction:37 - Analyzing interaction for knowledge updates...
+2025-06-28 22:55:06 | INFO     | evolving_agent.knowledge.base:add_knowledge:220 - Added new knowledge entry: ecaed94d27f1bdd8
+2025-06-28 22:55:06 | INFO     | evolving_agent.knowledge.updater:_process_knowledge_candidate:187 - Added knowledge entry: ecaed94d27f1bdd8
+2025-06-28 22:55:06 | INFO     | evolving_agent.knowledge.base:add_knowledge:220 - Added new knowledge entry: a08365ccb76ff95a
+2025-06-28 22:55:06 | INFO     | evolving_agent.knowledge.updater:_process_knowledge_candidate:187 - Added knowledge entry: a08365ccb76ff95a
+2025-06-28 22:55:06 | INFO     | evolving_agent.knowledge.base:add_knowledge:220 - Added new knowledge entry: 05b331a9a95aa445
+2025-06-28 22:55:06 | INFO     | evolving_agent.knowledge.updater:_process_knowledge_candidate:187 - Added knowledge entry: 05b331a9a95aa445
+2025-06-28 22:55:06 | INFO     | evolving_agent.knowledge.updater:update_from_interaction:53 - Processed 3 knowledge candidates
+2025-06-28 22:55:06 | INFO     | evolving_agent.core.agent:run:181 - Query processed successfully. Evaluation score: 0.94
+2025-06-28 22:55:06 | ERROR    | __main__:run_end_to_end_self_improvement:223 - GitHub workflow error: 'SelfImprovingAgent' object has no attribute 'self_modifier'
+2025-06-28 22:55:06 | INFO     | evolving_agent.core.agent:cleanup:503 - Cleaning up agent resources...
+2025-06-28 22:55:06 | INFO     | evolving_agent.utils.persistent_storage:save_agent_state:338 - Agent state saved
+2025-06-28 22:55:06 | INFO     | evolving_agent.utils.persistent_storage:cleanup:411 - Session session_20250628_225307 finalized
+2025-06-28 22:55:06 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 48695681-0295-48d3-92b3-93f96392ea2f
+2025-06-28 22:55:06 | INFO     | evolving_agent.core.agent:cleanup:530 - Agent cleanup completed
+2025-06-28 22:55:43 | INFO     | api_server:lifespan:57 - Cleaning up agent...
+2025-06-28 22:55:43 | INFO     | evolving_agent.core.agent:cleanup:503 - Cleaning up agent resources...
+2025-06-28 22:55:43 | INFO     | evolving_agent.core.agent:cleanup:503 - Cleaning up agent resources...
+2025-06-28 22:55:43 | INFO     | evolving_agent.utils.persistent_storage:save_agent_state:338 - Agent state saved
+2025-06-28 22:55:43 | INFO     | evolving_agent.utils.persistent_storage:save_agent_state:338 - Agent state saved
+2025-06-28 22:55:43 | INFO     | evolving_agent.utils.persistent_storage:cleanup:411 - Session session_20250628_225220 finalized
+2025-06-28 22:55:43 | INFO     | evolving_agent.utils.persistent_storage:cleanup:411 - Session session_20250628_225220 finalized
+2025-06-28 22:55:43 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: d161f954-b5af-4739-a875-0452cee11d4e
+2025-06-28 22:55:43 | INFO     | evolving_agent.core.agent:cleanup:530 - Agent cleanup completed
+2025-06-28 22:55:43 | INFO     | api_server:lifespan:59 - Agent cleanup completed
+2025-06-28 22:55:43 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 638152e4-e57f-4467-9c41-31b6abe085e3
+2025-06-28 22:55:43 | INFO     | evolving_agent.core.agent:cleanup:530 - Agent cleanup completed
+2025-06-28 22:55:43 | INFO     | api_server:lifespan:59 - Agent cleanup completed
+2025-06-28 22:56:02 | INFO     | api_server:lifespan:33 - Initializing Self-Improving Agent...
+2025-06-28 22:56:02 | INFO     | evolving_agent.core.agent:initialize:63 - Initializing Self-Improving Agent...
+2025-06-28 22:56:02 | INFO     | evolving_agent.utils.persistent_storage:initialize:37 - Initializing persistent data manager...
+2025-06-28 22:56:02 | INFO     | evolving_agent.utils.persistent_storage:_start_new_session:75 - Started new session: session_20250628_225602
+2025-06-28 22:56:02 | INFO     | evolving_agent.utils.persistent_storage:_initialize_interactions_db:131 - Interactions database initialized
+2025-06-28 22:56:02 | INFO     | evolving_agent.utils.persistent_storage:_load_agent_state:142 - Loaded agent state from persistent_data\agent_state.json
+2025-06-28 22:56:02 | INFO     | evolving_agent.utils.persistent_storage:initialize:51 - Persistent data manager initialized successfully
+2025-06-28 22:56:02 | INFO     | evolving_agent.core.agent:initialize:70 - Persistent data manager initialized
+2025-06-28 22:56:02 | INFO     | evolving_agent.core.memory:initialize:100 - Initializing long-term memory system...
+2025-06-28 22:56:02 | INFO     | api_server:lifespan:33 - Initializing Self-Improving Agent...
+2025-06-28 22:56:02 | INFO     | evolving_agent.core.agent:initialize:63 - Initializing Self-Improving Agent...
+2025-06-28 22:56:02 | INFO     | evolving_agent.utils.persistent_storage:initialize:37 - Initializing persistent data manager...
+2025-06-28 22:56:02 | INFO     | evolving_agent.utils.persistent_storage:_start_new_session:75 - Started new session: session_20250628_225602
+2025-06-28 22:56:02 | INFO     | evolving_agent.utils.persistent_storage:_initialize_interactions_db:131 - Interactions database initialized
+2025-06-28 22:56:02 | INFO     | evolving_agent.utils.persistent_storage:_load_agent_state:142 - Loaded agent state from persistent_data\agent_state.json
+2025-06-28 22:56:02 | INFO     | evolving_agent.utils.persistent_storage:initialize:51 - Persistent data manager initialized successfully
+2025-06-28 22:56:02 | INFO     | evolving_agent.core.agent:initialize:70 - Persistent data manager initialized
+2025-06-28 22:56:02 | INFO     | evolving_agent.core.memory:initialize:100 - Initializing long-term memory system...
+2025-06-28 22:56:05 | INFO     | evolving_agent.core.memory:initialize:107 - Embedding model loaded
+2025-06-28 22:56:05 | INFO     | evolving_agent.core.memory:initialize:107 - Embedding model loaded
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.memory:initialize:123 - Loaded existing memory collection: agent_memory
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.memory:initialize:132 - Long-term memory system initialized successfully
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:initialize:74 - Memory system initialized
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:initialize:77 - Context manager initialized
+2025-06-28 22:56:06 | INFO     | evolving_agent.knowledge.base:initialize:103 - Initializing knowledge base...
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.memory:initialize:123 - Loaded existing memory collection: agent_memory
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.memory:initialize:132 - Long-term memory system initialized successfully
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:initialize:74 - Memory system initialized
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:initialize:77 - Context manager initialized
+2025-06-28 22:56:06 | INFO     | evolving_agent.knowledge.base:initialize:103 - Initializing knowledge base...
+2025-06-28 22:56:06 | INFO     | evolving_agent.knowledge.base:_load_knowledge:140 - Loaded 18 knowledge entries
+2025-06-28 22:56:06 | INFO     | evolving_agent.knowledge.base:_load_knowledge:140 - Loaded 18 knowledge entries
+2025-06-28 22:56:06 | INFO     | evolving_agent.knowledge.base:_load_categories:155 - Loaded 6 categories
+2025-06-28 22:56:06 | INFO     | evolving_agent.knowledge.base:initialize:118 - Knowledge base initialized with 18 entries
+2025-06-28 22:56:06 | INFO     | evolving_agent.knowledge.base:_load_categories:155 - Loaded 6 categories
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:initialize:80 - Knowledge base initialized
+2025-06-28 22:56:06 | INFO     | evolving_agent.knowledge.base:initialize:118 - Knowledge base initialized with 18 entries
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:initialize:80 - Knowledge base initialized
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:initialize:83 - Knowledge updater initialized
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:initialize:83 - Knowledge updater initialized
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:initialize:91 - Self-modification system initialized
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:initialize:91 - Self-modification system initialized
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: a1c35338-c2cd-43cc-8354-f2dcb9bfb576
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:initialize:100 - Agent initialization completed successfully
+2025-06-28 22:56:06 | INFO     | api_server:lifespan:36 - Agent initialized successfully
+2025-06-28 22:56:06 | INFO     | api_server:lifespan:43 - Initializing GitHub integration...
+2025-06-28 22:56:06 | INFO     | evolving_agent.utils.github_integration:initialize:68 - GitHub client initialized
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 6333c491-055b-48e2-a5c2-d8c9c54dfde5
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:initialize:100 - Agent initialization completed successfully
+2025-06-28 22:56:06 | INFO     | api_server:lifespan:36 - Agent initialized successfully
+2025-06-28 22:56:06 | INFO     | api_server:lifespan:43 - Initializing GitHub integration...
+2025-06-28 22:56:06 | INFO     | evolving_agent.utils.github_integration:initialize:68 - GitHub client initialized
+2025-06-28 22:56:06 | INFO     | evolving_agent.utils.github_integration:initialize:73 - Connected to repository: DavinciDreams/evolving-ai
+2025-06-28 22:56:06 | INFO     | evolving_agent.utils.github_integration:initialize:78 - Local repository initialized: .
+2025-06-28 22:56:06 | INFO     | evolving_agent.utils.github_enhanced_modifier:initialize:67 - GitHub integration initialized successfully
+2025-06-28 22:56:06 | INFO     | api_server:lifespan:50 - GitHub integration initialized successfully
+2025-06-28 22:56:06 | INFO     | api_server:lifespan:57 - Cleaning up agent...
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:cleanup:503 - Cleaning up agent resources...
+2025-06-28 22:56:06 | INFO     | evolving_agent.utils.persistent_storage:save_agent_state:338 - Agent state saved
+2025-06-28 22:56:06 | INFO     | evolving_agent.utils.persistent_storage:cleanup:411 - Session session_20250628_225602 finalized
+2025-06-28 22:56:06 | INFO     | evolving_agent.utils.github_integration:initialize:73 - Connected to repository: DavinciDreams/evolving-ai
+2025-06-28 22:56:06 | INFO     | evolving_agent.utils.github_integration:initialize:78 - Local repository initialized: .
+2025-06-28 22:56:06 | INFO     | evolving_agent.utils.github_enhanced_modifier:initialize:67 - GitHub integration initialized successfully
+2025-06-28 22:56:06 | INFO     | api_server:lifespan:50 - GitHub integration initialized successfully
+2025-06-28 22:56:06 | INFO     | api_server:lifespan:57 - Cleaning up agent...
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:cleanup:503 - Cleaning up agent resources...
+2025-06-28 22:56:06 | INFO     | evolving_agent.utils.persistent_storage:save_agent_state:338 - Agent state saved
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: a92e69a8-def3-4c40-b7a4-80b2e242e446
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:cleanup:530 - Agent cleanup completed
+2025-06-28 22:56:06 | INFO     | api_server:lifespan:59 - Agent cleanup completed
+2025-06-28 22:56:06 | INFO     | evolving_agent.utils.persistent_storage:cleanup:411 - Session session_20250628_225602 finalized
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 73e95504-9d8e-4f6e-a065-e0d8f3bfbd08
+2025-06-28 22:56:06 | INFO     | evolving_agent.core.agent:cleanup:530 - Agent cleanup completed
+2025-06-28 22:56:06 | INFO     | api_server:lifespan:59 - Agent cleanup completed
+2025-06-28 22:56:28 | INFO     | api_server:lifespan:33 - Initializing Self-Improving Agent...
+2025-06-28 22:56:28 | INFO     | evolving_agent.core.agent:initialize:63 - Initializing Self-Improving Agent...
+2025-06-28 22:56:28 | INFO     | evolving_agent.utils.persistent_storage:initialize:37 - Initializing persistent data manager...
+2025-06-28 22:56:28 | INFO     | evolving_agent.utils.persistent_storage:_start_new_session:75 - Started new session: session_20250628_225628
+2025-06-28 22:56:28 | INFO     | evolving_agent.utils.persistent_storage:_initialize_interactions_db:131 - Interactions database initialized
+2025-06-28 22:56:28 | INFO     | evolving_agent.utils.persistent_storage:_load_agent_state:142 - Loaded agent state from persistent_data\agent_state.json
+2025-06-28 22:56:28 | INFO     | evolving_agent.utils.persistent_storage:initialize:51 - Persistent data manager initialized successfully
+2025-06-28 22:56:28 | INFO     | evolving_agent.core.agent:initialize:70 - Persistent data manager initialized
+2025-06-28 22:56:28 | INFO     | evolving_agent.core.memory:initialize:100 - Initializing long-term memory system...
+2025-06-28 22:56:28 | INFO     | api_server:lifespan:33 - Initializing Self-Improving Agent...
+2025-06-28 22:56:28 | INFO     | evolving_agent.core.agent:initialize:63 - Initializing Self-Improving Agent...
+2025-06-28 22:56:28 | INFO     | evolving_agent.utils.persistent_storage:initialize:37 - Initializing persistent data manager...
+2025-06-28 22:56:28 | INFO     | evolving_agent.utils.persistent_storage:_start_new_session:75 - Started new session: session_20250628_225628
+2025-06-28 22:56:28 | INFO     | evolving_agent.utils.persistent_storage:_initialize_interactions_db:131 - Interactions database initialized
+2025-06-28 22:56:28 | INFO     | evolving_agent.utils.persistent_storage:_load_agent_state:142 - Loaded agent state from persistent_data\agent_state.json
+2025-06-28 22:56:28 | INFO     | evolving_agent.utils.persistent_storage:initialize:51 - Persistent data manager initialized successfully
+2025-06-28 22:56:28 | INFO     | evolving_agent.core.agent:initialize:70 - Persistent data manager initialized
+2025-06-28 22:56:28 | INFO     | evolving_agent.core.memory:initialize:100 - Initializing long-term memory system...
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.memory:initialize:107 - Embedding model loaded
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.memory:initialize:107 - Embedding model loaded
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.memory:initialize:123 - Loaded existing memory collection: agent_memory
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.memory:initialize:132 - Long-term memory system initialized successfully
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.agent:initialize:74 - Memory system initialized
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.agent:initialize:77 - Context manager initialized
+2025-06-28 22:56:31 | INFO     | evolving_agent.knowledge.base:initialize:103 - Initializing knowledge base...
+2025-06-28 22:56:31 | INFO     | evolving_agent.knowledge.base:_load_knowledge:140 - Loaded 18 knowledge entries
+2025-06-28 22:56:31 | INFO     | evolving_agent.knowledge.base:_load_categories:155 - Loaded 6 categories
+2025-06-28 22:56:31 | INFO     | evolving_agent.knowledge.base:initialize:118 - Knowledge base initialized with 18 entries
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.agent:initialize:80 - Knowledge base initialized
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.agent:initialize:83 - Knowledge updater initialized
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.agent:initialize:91 - Self-modification system initialized
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.memory:initialize:123 - Loaded existing memory collection: agent_memory
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.memory:initialize:132 - Long-term memory system initialized successfully
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.agent:initialize:74 - Memory system initialized
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.agent:initialize:77 - Context manager initialized
+2025-06-28 22:56:31 | INFO     | evolving_agent.knowledge.base:initialize:103 - Initializing knowledge base...
+2025-06-28 22:56:31 | INFO     | evolving_agent.knowledge.base:_load_knowledge:140 - Loaded 18 knowledge entries
+2025-06-28 22:56:31 | INFO     | evolving_agent.knowledge.base:_load_categories:155 - Loaded 6 categories
+2025-06-28 22:56:31 | INFO     | evolving_agent.knowledge.base:initialize:118 - Knowledge base initialized with 18 entries
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.agent:initialize:80 - Knowledge base initialized
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.agent:initialize:83 - Knowledge updater initialized
+2025-06-28 22:56:31 | INFO     | evolving_agent.core.agent:initialize:91 - Self-modification system initialized
+2025-06-28 22:56:32 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: e0bbf825-e67b-4996-bc2d-173155f72c77
+2025-06-28 22:56:32 | INFO     | evolving_agent.core.agent:initialize:100 - Agent initialization completed successfully
+2025-06-28 22:56:32 | INFO     | api_server:lifespan:36 - Agent initialized successfully
+2025-06-28 22:56:32 | INFO     | api_server:lifespan:43 - Initializing GitHub integration...
+2025-06-28 22:56:32 | INFO     | evolving_agent.utils.github_integration:initialize:68 - GitHub client initialized
+2025-06-28 22:56:32 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 2b5826c7-7fe7-4631-a8a6-d718efbed38d
+2025-06-28 22:56:32 | INFO     | evolving_agent.core.agent:initialize:100 - Agent initialization completed successfully
+2025-06-28 22:56:32 | INFO     | api_server:lifespan:36 - Agent initialized successfully
+2025-06-28 22:56:32 | INFO     | api_server:lifespan:43 - Initializing GitHub integration...
+2025-06-28 22:56:32 | INFO     | evolving_agent.utils.github_integration:initialize:68 - GitHub client initialized
+2025-06-28 22:56:32 | INFO     | evolving_agent.utils.github_integration:initialize:73 - Connected to repository: DavinciDreams/evolving-ai
+2025-06-28 22:56:32 | INFO     | evolving_agent.utils.github_integration:initialize:78 - Local repository initialized: .
+2025-06-28 22:56:32 | INFO     | evolving_agent.utils.github_enhanced_modifier:initialize:67 - GitHub integration initialized successfully
+2025-06-28 22:56:32 | INFO     | api_server:lifespan:50 - GitHub integration initialized successfully
+2025-06-28 22:56:32 | INFO     | api_server:lifespan:57 - Cleaning up agent...
+2025-06-28 22:56:32 | INFO     | evolving_agent.core.agent:cleanup:503 - Cleaning up agent resources...
+2025-06-28 22:56:32 | INFO     | evolving_agent.utils.persistent_storage:save_agent_state:338 - Agent state saved
+2025-06-28 22:56:32 | INFO     | evolving_agent.utils.persistent_storage:cleanup:411 - Session session_20250628_225628 finalized
+2025-06-28 22:56:32 | INFO     | evolving_agent.utils.github_integration:initialize:73 - Connected to repository: DavinciDreams/evolving-ai
+2025-06-28 22:56:32 | INFO     | evolving_agent.utils.github_integration:initialize:78 - Local repository initialized: .
+2025-06-28 22:56:32 | INFO     | evolving_agent.utils.github_enhanced_modifier:initialize:67 - GitHub integration initialized successfully
+2025-06-28 22:56:32 | INFO     | api_server:lifespan:50 - GitHub integration initialized successfully
+2025-06-28 22:56:32 | INFO     | api_server:lifespan:57 - Cleaning up agent...
+2025-06-28 22:56:32 | INFO     | evolving_agent.core.agent:cleanup:503 - Cleaning up agent resources...
+2025-06-28 22:56:32 | INFO     | evolving_agent.utils.persistent_storage:save_agent_state:338 - Agent state saved
+2025-06-28 22:56:32 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: f36083aa-bcce-4a1e-b2e8-d799c571e864
+2025-06-28 22:56:32 | INFO     | evolving_agent.core.agent:cleanup:530 - Agent cleanup completed
+2025-06-28 22:56:32 | INFO     | api_server:lifespan:59 - Agent cleanup completed
+2025-06-28 22:56:32 | INFO     | evolving_agent.utils.persistent_storage:cleanup:411 - Session session_20250628_225628 finalized
+2025-06-28 22:56:32 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 2cb3a19e-ec84-4644-bc98-c5a15e240ae8
+2025-06-28 22:56:32 | INFO     | evolving_agent.core.agent:cleanup:530 - Agent cleanup completed
+2025-06-28 22:56:32 | INFO     | api_server:lifespan:59 - Agent cleanup completed
+2025-06-28 22:56:55 | INFO     | api_server:lifespan:33 - Initializing Self-Improving Agent...
+2025-06-28 22:56:55 | INFO     | evolving_agent.core.agent:initialize:63 - Initializing Self-Improving Agent...
+2025-06-28 22:56:55 | INFO     | evolving_agent.utils.persistent_storage:initialize:37 - Initializing persistent data manager...
+2025-06-28 22:56:55 | INFO     | evolving_agent.utils.persistent_storage:_start_new_session:75 - Started new session: session_20250628_225655
+2025-06-28 22:56:55 | INFO     | evolving_agent.utils.persistent_storage:_initialize_interactions_db:131 - Interactions database initialized
+2025-06-28 22:56:55 | INFO     | evolving_agent.utils.persistent_storage:_load_agent_state:142 - Loaded agent state from persistent_data\agent_state.json
+2025-06-28 22:56:55 | INFO     | evolving_agent.utils.persistent_storage:initialize:51 - Persistent data manager initialized successfully
+2025-06-28 22:56:55 | INFO     | evolving_agent.core.agent:initialize:70 - Persistent data manager initialized
+2025-06-28 22:56:55 | INFO     | evolving_agent.core.memory:initialize:100 - Initializing long-term memory system...
+2025-06-28 22:56:55 | INFO     | api_server:lifespan:33 - Initializing Self-Improving Agent...
+2025-06-28 22:56:55 | INFO     | evolving_agent.core.agent:initialize:63 - Initializing Self-Improving Agent...
+2025-06-28 22:56:55 | INFO     | evolving_agent.utils.persistent_storage:initialize:37 - Initializing persistent data manager...
+2025-06-28 22:56:55 | INFO     | evolving_agent.utils.persistent_storage:_start_new_session:75 - Started new session: session_20250628_225655
+2025-06-28 22:56:55 | INFO     | evolving_agent.utils.persistent_storage:_initialize_interactions_db:131 - Interactions database initialized
+2025-06-28 22:56:55 | INFO     | evolving_agent.utils.persistent_storage:_load_agent_state:142 - Loaded agent state from persistent_data\agent_state.json
+2025-06-28 22:56:55 | INFO     | evolving_agent.utils.persistent_storage:initialize:51 - Persistent data manager initialized successfully
+2025-06-28 22:56:55 | INFO     | evolving_agent.core.agent:initialize:70 - Persistent data manager initialized
+2025-06-28 22:56:55 | INFO     | evolving_agent.core.memory:initialize:100 - Initializing long-term memory system...
+2025-06-28 22:56:58 | INFO     | evolving_agent.core.memory:initialize:107 - Embedding model loaded
+2025-06-28 22:56:58 | INFO     | evolving_agent.core.memory:initialize:107 - Embedding model loaded
+2025-06-28 22:56:58 | INFO     | evolving_agent.core.memory:initialize:123 - Loaded existing memory collection: agent_memory
+2025-06-28 22:56:58 | INFO     | evolving_agent.core.memory:initialize:132 - Long-term memory system initialized successfully
+2025-06-28 22:56:58 | INFO     | evolving_agent.core.agent:initialize:74 - Memory system initialized
+2025-06-28 22:56:58 | INFO     | evolving_agent.core.agent:initialize:77 - Context manager initialized
+2025-06-28 22:56:58 | INFO     | evolving_agent.knowledge.base:initialize:103 - Initializing knowledge base...
+2025-06-28 22:56:59 | INFO     | evolving_agent.knowledge.base:_load_knowledge:140 - Loaded 18 knowledge entries
+2025-06-28 22:56:59 | INFO     | evolving_agent.knowledge.base:_load_categories:155 - Loaded 6 categories
+2025-06-28 22:56:59 | INFO     | evolving_agent.knowledge.base:initialize:118 - Knowledge base initialized with 18 entries
+2025-06-28 22:56:59 | INFO     | evolving_agent.core.agent:initialize:80 - Knowledge base initialized
+2025-06-28 22:56:59 | INFO     | evolving_agent.core.agent:initialize:83 - Knowledge updater initialized
+2025-06-28 22:56:59 | INFO     | evolving_agent.core.agent:initialize:91 - Self-modification system initialized
+2025-06-28 22:56:59 | INFO     | evolving_agent.core.memory:initialize:123 - Loaded existing memory collection: agent_memory
+2025-06-28 22:56:59 | INFO     | evolving_agent.core.memory:initialize:132 - Long-term memory system initialized successfully
+2025-06-28 22:56:59 | INFO     | evolving_agent.core.agent:initialize:74 - Memory system initialized
+2025-06-28 22:56:59 | INFO     | evolving_agent.core.agent:initialize:77 - Context manager initialized
+2025-06-28 22:56:59 | INFO     | evolving_agent.knowledge.base:initialize:103 - Initializing knowledge base...
+2025-06-28 22:56:59 | INFO     | evolving_agent.knowledge.base:_load_knowledge:140 - Loaded 18 knowledge entries
+2025-06-28 22:56:59 | INFO     | evolving_agent.knowledge.base:_load_categories:155 - Loaded 6 categories
+2025-06-28 22:56:59 | INFO     | evolving_agent.knowledge.base:initialize:118 - Knowledge base initialized with 18 entries
+2025-06-28 22:56:59 | INFO     | evolving_agent.core.agent:initialize:80 - Knowledge base initialized
+2025-06-28 22:56:59 | INFO     | evolving_agent.core.agent:initialize:83 - Knowledge updater initialized
+2025-06-28 22:56:59 | INFO     | evolving_agent.core.agent:initialize:91 - Self-modification system initialized
+2025-06-28 22:56:59 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 4ad8f3f2-3255-4bde-ad59-160504aacbf8
+2025-06-28 22:56:59 | INFO     | evolving_agent.core.agent:initialize:100 - Agent initialization completed successfully
+2025-06-28 22:56:59 | INFO     | api_server:lifespan:36 - Agent initialized successfully
+2025-06-28 22:56:59 | INFO     | api_server:lifespan:43 - Initializing GitHub integration...
+2025-06-28 22:56:59 | INFO     | evolving_agent.utils.github_integration:initialize:68 - GitHub client initialized
+2025-06-28 22:56:59 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 4b26b310-17ed-4a16-83e6-67e6e64c1249
+2025-06-28 22:56:59 | INFO     | evolving_agent.core.agent:initialize:100 - Agent initialization completed successfully
+2025-06-28 22:56:59 | INFO     | api_server:lifespan:36 - Agent initialized successfully
+2025-06-28 22:56:59 | INFO     | api_server:lifespan:43 - Initializing GitHub integration...
+2025-06-28 22:56:59 | INFO     | evolving_agent.utils.github_integration:initialize:68 - GitHub client initialized
+2025-06-28 22:56:59 | INFO     | evolving_agent.utils.github_integration:initialize:73 - Connected to repository: DavinciDreams/evolving-ai
+2025-06-28 22:56:59 | INFO     | evolving_agent.utils.github_integration:initialize:78 - Local repository initialized: .
+2025-06-28 22:56:59 | INFO     | evolving_agent.utils.github_enhanced_modifier:initialize:67 - GitHub integration initialized successfully
+2025-06-28 22:56:59 | INFO     | api_server:lifespan:50 - GitHub integration initialized successfully
+2025-06-28 22:56:59 | INFO     | evolving_agent.utils.github_integration:initialize:73 - Connected to repository: DavinciDreams/evolving-ai
+2025-06-28 22:56:59 | INFO     | evolving_agent.utils.github_integration:initialize:78 - Local repository initialized: .
+2025-06-28 22:56:59 | INFO     | evolving_agent.utils.github_enhanced_modifier:initialize:67 - GitHub integration initialized successfully
+2025-06-28 22:56:59 | INFO     | api_server:lifespan:50 - GitHub integration initialized successfully
+2025-06-28 22:57:14 | INFO     | evolving_agent.core.agent:initialize:63 - Initializing Self-Improving Agent...
+2025-06-28 22:57:14 | INFO     | evolving_agent.utils.persistent_storage:initialize:37 - Initializing persistent data manager...
+2025-06-28 22:57:14 | INFO     | evolving_agent.utils.persistent_storage:_start_new_session:75 - Started new session: session_20250628_225714
+2025-06-28 22:57:14 | INFO     | evolving_agent.utils.persistent_storage:_initialize_interactions_db:131 - Interactions database initialized
+2025-06-28 22:57:14 | INFO     | evolving_agent.utils.persistent_storage:_load_agent_state:142 - Loaded agent state from persistent_data\agent_state.json
+2025-06-28 22:57:14 | INFO     | evolving_agent.utils.persistent_storage:initialize:51 - Persistent data manager initialized successfully
+2025-06-28 22:57:14 | INFO     | evolving_agent.core.agent:initialize:70 - Persistent data manager initialized
+2025-06-28 22:57:14 | INFO     | evolving_agent.core.memory:initialize:100 - Initializing long-term memory system...
+2025-06-28 22:57:18 | INFO     | evolving_agent.core.memory:initialize:107 - Embedding model loaded
+2025-06-28 22:57:18 | INFO     | evolving_agent.core.memory:initialize:123 - Loaded existing memory collection: agent_memory
+2025-06-28 22:57:18 | INFO     | evolving_agent.core.memory:initialize:132 - Long-term memory system initialized successfully
+2025-06-28 22:57:18 | INFO     | evolving_agent.core.agent:initialize:74 - Memory system initialized
+2025-06-28 22:57:18 | INFO     | evolving_agent.core.agent:initialize:77 - Context manager initialized
+2025-06-28 22:57:18 | INFO     | evolving_agent.knowledge.base:initialize:103 - Initializing knowledge base...
+2025-06-28 22:57:18 | INFO     | evolving_agent.knowledge.base:_load_knowledge:140 - Loaded 18 knowledge entries
+2025-06-28 22:57:18 | INFO     | evolving_agent.knowledge.base:_load_categories:155 - Loaded 6 categories
+2025-06-28 22:57:18 | INFO     | evolving_agent.knowledge.base:initialize:118 - Knowledge base initialized with 18 entries
+2025-06-28 22:57:18 | INFO     | evolving_agent.core.agent:initialize:80 - Knowledge base initialized
+2025-06-28 22:57:18 | INFO     | evolving_agent.core.agent:initialize:83 - Knowledge updater initialized
+2025-06-28 22:57:18 | INFO     | evolving_agent.core.agent:initialize:91 - Self-modification system initialized
+2025-06-28 22:57:18 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 46354806-3a49-4656-aa62-79e372262f26
+2025-06-28 22:57:18 | INFO     | evolving_agent.core.agent:initialize:100 - Agent initialization completed successfully
+2025-06-28 22:57:18 | INFO     | evolving_agent.core.agent:run:121 - Processing query: What are some common code optimization techniques that could be applied to improve performance in Py...
+2025-06-28 22:57:18 | INFO     | evolving_agent.core.context_manager:get_relevant_context:57 - Retrieving context for query: What are some common code optimization techniques that could be applied to improve performance in Py...
+2025-06-28 22:57:19 | INFO     | evolving_agent.utils.llm_interface:_initialize_interfaces:329 - OpenAI interface initialized
+2025-06-28 22:57:20 | INFO     | evolving_agent.utils.llm_interface:_initialize_interfaces:340 - Anthropic interface initialized
+2025-06-28 22:57:20 | INFO     | evolving_agent.utils.llm_interface:_initialize_interfaces:353 - OpenRouter interface initialized
+2025-06-28 22:57:34 | INFO     | evolving_agent.core.memory:search_memories:225 - Found 0 relevant memories for query
+2025-06-28 22:57:34 | INFO     | evolving_agent.core.memory:search_memories:225 - Found 0 relevant memories for query
+2025-06-28 22:57:34 | INFO     | evolving_agent.core.memory:search_memories:225 - Found 0 relevant memories for query
+2025-06-28 22:57:34 | INFO     | evolving_agent.core.memory:search_memories:225 - Found 0 relevant memories for query
+2025-06-28 22:57:34 | INFO     | evolving_agent.core.memory:search_memories:225 - Found 0 relevant memories for query
+2025-06-28 22:57:34 | INFO     | evolving_agent.core.memory:search_memories:225 - Found 0 relevant memories for query
+2025-06-28 22:57:34 | INFO     | evolving_agent.core.memory:search_memories:225 - Found 0 relevant memories for query
+2025-06-28 22:57:34 | INFO     | evolving_agent.core.context_manager:get_relevant_context:83 - Retrieved 1 context categories
+2025-06-28 22:57:35 | ERROR    | evolving_agent.utils.llm_interface:generate_response:93 - OpenAI API error: Error code: 401 - {'error': {'message': 'Incorrect API key provided: your_ope************here. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_api_key'}}
+2025-06-28 22:57:39 | ERROR    | evolving_agent.utils.llm_interface:generate_response:93 - OpenAI API error: Error code: 401 - {'error': {'message': 'Incorrect API key provided: your_ope************here. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_api_key'}}
+2025-06-28 22:57:43 | ERROR    | evolving_agent.utils.llm_interface:generate_response:93 - OpenAI API error: Error code: 401 - {'error': {'message': 'Incorrect API key provided: your_ope************here. You can find your API key at https://platform.openai.com/account/api-keys.', 'type': 'invalid_request_error', 'param': None, 'code': 'invalid_api_key'}}
+2025-06-28 22:57:43 | WARNING  | evolving_agent.utils.llm_interface:check_provider_availability:376 - Provider openai unavailable: RetryError[<Future at 0x23db7ac6750 state=finished raised AuthenticationError>]
+2025-06-28 22:57:46 | ERROR    | evolving_agent.utils.llm_interface:generate_response:262 - OpenRouter API error: Client error '401 Unauthorized' for url 'https://openrouter.ai/api/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+2025-06-28 22:57:50 | ERROR    | evolving_agent.utils.llm_interface:generate_response:262 - OpenRouter API error: Client error '401 Unauthorized' for url 'https://openrouter.ai/api/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+2025-06-28 22:57:55 | ERROR    | evolving_agent.utils.llm_interface:generate_response:262 - OpenRouter API error: Client error '401 Unauthorized' for url 'https://openrouter.ai/api/v1/chat/completions'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+2025-06-28 22:57:55 | WARNING  | evolving_agent.utils.llm_interface:check_provider_availability:376 - Provider openrouter unavailable: RetryError[<Future at 0x23db7acb310 state=finished raised HTTPStatusError>]
+2025-06-28 22:58:10 | INFO     | evolving_agent.core.evaluator:evaluate_output:85 - Evaluating output...
+2025-06-28 22:59:10 | INFO     | evolving_agent.core.evaluator:evaluate_output:140 - Evaluation completed. Overall score: 0.93
+2025-06-28 22:59:10 | INFO     | evolving_agent.core.agent:_improve_response:279 - Response quality is high, no improvement needed
+2025-06-28 22:59:10 | INFO     | evolving_agent.utils.persistent_storage:save_interaction:183 - Saved interaction 11
+2025-06-28 22:59:10 | INFO     | evolving_agent.utils.persistent_storage:save_evaluation:224 - Saved evaluation for interaction 11
+2025-06-28 22:59:10 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: fe1786cc-1bf1-486c-9f64-1f93fee29688
+2025-06-28 22:59:10 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: aa670fad-3a51-4102-9b4e-ae5b6d20d3a1
+2025-06-28 22:59:10 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 366f17bb-d68d-42d9-8261-9c14f9f0f74a
+2025-06-28 22:59:10 | INFO     | evolving_agent.core.context_manager:store_interaction_context:404 - Stored interaction context
+2025-06-28 22:59:10 | INFO     | evolving_agent.core.agent:_store_interaction:351 - Interaction stored successfully
+2025-06-28 22:59:10 | INFO     | evolving_agent.knowledge.updater:update_from_interaction:37 - Analyzing interaction for knowledge updates...
+2025-06-28 22:59:19 | INFO     | evolving_agent.knowledge.base:add_knowledge:220 - Added new knowledge entry: 0581c83d2e9769b1
+2025-06-28 22:59:19 | INFO     | evolving_agent.knowledge.updater:_process_knowledge_candidate:187 - Added knowledge entry: 0581c83d2e9769b1
+2025-06-28 22:59:19 | INFO     | evolving_agent.knowledge.base:add_knowledge:220 - Added new knowledge entry: 6f61e6594d667a7e
+2025-06-28 22:59:19 | INFO     | evolving_agent.knowledge.updater:_process_knowledge_candidate:187 - Added knowledge entry: 6f61e6594d667a7e
+2025-06-28 22:59:19 | INFO     | evolving_agent.knowledge.base:add_knowledge:220 - Added new knowledge entry: 8c9a046200c75b94
+2025-06-28 22:59:19 | INFO     | evolving_agent.knowledge.updater:_process_knowledge_candidate:187 - Added knowledge entry: 8c9a046200c75b94
+2025-06-28 22:59:19 | INFO     | evolving_agent.knowledge.updater:update_from_interaction:53 - Processed 3 knowledge candidates
+2025-06-28 22:59:19 | INFO     | evolving_agent.core.agent:run:181 - Query processed successfully. Evaluation score: 0.93
+2025-06-28 22:59:19 | INFO     | evolving_agent.utils.github_integration:initialize:68 - GitHub client initialized
+2025-06-28 22:59:20 | INFO     | evolving_agent.utils.github_integration:initialize:73 - Connected to repository: DavinciDreams/evolving-ai
+2025-06-28 22:59:20 | INFO     | evolving_agent.utils.github_integration:initialize:78 - Local repository initialized: .
+2025-06-28 22:59:21 | INFO     | evolving_agent.utils.github_integration:create_branch:245 - Created branch ai-improvements-20250628_225920 from main
+2025-06-28 22:59:21 | INFO     | evolving_agent.utils.github_integration:update_file:310 - Attempting to update file SELF_IMPROVEMENT_DEMO.md in branch ai-improvements-20250628_225920
+2025-06-28 22:59:21 | INFO     | evolving_agent.utils.github_integration:update_file:333 - File SELF_IMPROVEMENT_DEMO.md doesn't exist, creating new file
+2025-06-28 22:59:22 | INFO     | evolving_agent.utils.github_integration:update_file:344 - Successfully created new file SELF_IMPROVEMENT_DEMO.md in branch ai-improvements-20250628_225920
+2025-06-28 22:59:27 | INFO     | evolving_agent.utils.github_integration:create_pull_request:409 - Added labels to PR: ['ai-improvement', 'automation']
+2025-06-28 22:59:27 | INFO     | evolving_agent.utils.github_integration:create_pull_request:413 - Created pull request #3: 🤖 AI-Generated Code Improvements (1 files)
+2025-06-28 22:59:27 | INFO     | evolving_agent.utils.github_integration:create_improvement_branch_and_pr:655 - Created improvement branch ai-improvements-20250628_225920 with 1 files
+2025-06-28 22:59:27 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: 3ed39fbf-3a84-4d3e-a4f8-42b3d2386ba7
+2025-06-28 22:59:27 | INFO     | evolving_agent.core.agent:cleanup:503 - Cleaning up agent resources...
+2025-06-28 22:59:27 | INFO     | evolving_agent.utils.persistent_storage:save_agent_state:338 - Agent state saved
+2025-06-28 22:59:27 | INFO     | evolving_agent.utils.persistent_storage:cleanup:411 - Session session_20250628_225714 finalized
+2025-06-28 22:59:27 | INFO     | evolving_agent.core.memory:add_memory:170 - Added memory entry: f7eb9078-ad54-49f5-95b5-c3220f1c7026
+2025-06-28 22:59:27 | INFO     | evolving_agent.core.agent:cleanup:530 - Agent cleanup completed
