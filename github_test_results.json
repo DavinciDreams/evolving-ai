@@ -1,0 +1,50 @@
+{
+  "health": {
+    "status": 200,
+    "data": {
+      "status": "healthy",
+      "timestamp": "2025-06-02T00:00:00Z",
+      "version": "1.0.0"
+    }
+  },
+  "github_status": {
+    "status": 404,
+    "data": {
+      "detail": "Not Found"
+    }
+  },
+  "repository_info": {
+    "status": 404,
+    "data": {
+      "detail": "Not Found"
+    }
+  },
+  "pull_requests": {
+    "status": 404,
+    "data": {
+      "detail": "Not Found"
+    }
+  },
+  "recent_commits": {
+    "status": 404,
+    "data": {
+      "detail": "Not Found"
+    }
+  },
+  "improvement_history": {
+    "status": 404,
+    "data": {
+      "detail": "Not Found"
+    }
+  },
+  "code_improvements": {
+    "status": 404,
+    "data": {
+      "detail": "Not Found"
+    }
+  },
+  "demo_pr": {
+    "status": "skipped",
+    "reason": "GitHub not connected"
+  }
+}
