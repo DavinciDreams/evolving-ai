@@ -173,6 +173,10 @@ tmp/
 knowledge_base/*.json
 !knowledge_base/categories.json
 
+# Persistent agent data (runtime state, sessions, interactions)
+persistent_data/
+*.db
+
 # AI model cache
 .cache/
 cache/
@@ -190,9 +194,3 @@ chroma.sqlite3
 chroma-*
 memory_db/chroma.sqlite3
 /chroma.sqlite3
-evolving_agent/core/__pycache__/agent.cpython-313.pyc
-evolving_agent/core/__pycache__/agent.cpython-313.pyc
-evolving_agent/core/__pycache__/evaluator.cpython-313.pyc
-evolving_agent/core/__pycache__/agent.cpython-313.pyc
-evolving_agent/core/__pycache__/agent.cpython-313.pyc
-evolving_agent/utils/__pycache__/llm_interface.cpython-313.pyc
