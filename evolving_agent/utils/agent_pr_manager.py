@@ -365,3 +365,52 @@ The agent learns from feedback on these improvements to enhance future suggestio
             "success_rate": successful_prs / total_attempts if total_attempts > 0 else 0,
             "latest_attempt": self.improvement_history[-1] if self.improvement_history else None
         }
+    
+    async def record_pr_merge_feedback(
+        self, 
+        branch_name: str, 
+        pr_number: Optional[int] = None,
+        feedback: str = "merged",
+        rating: float = 1.0
+    ) -> bool:
+        """
+        Record feedback from a merged PR to help the agent learn.
+        
+        Args:
+            branch_name: The branch that was merged
+            pr_number: The PR number (optional)
+            feedback: Feedback text ("merged", "rejected", etc.)
+            rating: Quality rating (0.0 - 1.0)
+            
+        Returns:
+            True if feedback was recorded successfully
+        """
+        try:
+            # Find the corresponding improvement record
+            for record in self.improvement_history:
+                if record.get("branch_name") == branch_name:
+                    # Update the record with feedback
+                    record["feedback"] = {
+                        "timestamp": datetime.now().isoformat(),
+                        "status": feedback,
+                        "rating": rating,
+                        "pr_number": pr_number
+                    }
+                    
+                    if feedback == "merged":
+                        record["status"] = "merged_successfully"
+                        logger.info(f"✅ Recorded successful merge for branch {branch_name}")
+                    else:
+                        record["status"] = f"feedback_received_{feedback}"
+                        logger.info(f"📝 Recorded feedback '{feedback}' for branch {branch_name}")
+                    
+                    # Save updated history
+                    self._save_improvement_history()
+                    return True
+            
+            logger.warning(f"No improvement record found for branch {branch_name}")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Failed to record PR feedback: {e}")
+            return False
