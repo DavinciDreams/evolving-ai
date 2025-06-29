@@ -287,38 +287,66 @@ class GitHubIntegration:
         """
         try:
             if not self.repository:
+                logger.error("Repository not connected")
                 return {"error": "Repository not connected"}
+            
+            # Validate inputs
+            if not file_path or not file_path.strip():
+                logger.error("File path is empty")
+                return {"error": "File path cannot be empty"}
+            
+            if not commit_message or not commit_message.strip():
+                logger.error("Commit message is empty")
+                return {"error": "Commit message cannot be empty"}
+            
+            # Ensure new_content is properly encoded
+            if isinstance(new_content, str):
+                content_bytes = new_content.encode('utf-8')
+            else:
+                content_bytes = new_content
+            
+            logger.info(f"Attempting to update file {file_path} in branch {branch}")
+            logger.debug(f"Content length: {len(content_bytes)} bytes")
             
             # Get current file content to get SHA
             try:
                 current_file = self.repository.get_contents(file_path, ref=branch)
                 file_sha = current_file.sha
                 
+                logger.info(f"File {file_path} exists, updating with SHA {file_sha}")
+                
                 # Update existing file
                 result = self.repository.update_file(
                     path=file_path,
                     message=commit_message,
-                    content=new_content,
+                    content=content_bytes,
                     sha=file_sha,
                     branch=branch,
                     author={"name": author_name, "email": author_email}
                 )
                 
-                logger.info(f"Updated file {file_path} in branch {branch}")
+                logger.info(f"Successfully updated file {file_path} in branch {branch}")
                 
             except GithubException as e:
                 if e.status == 404:
-                    # File doesn't exist, create it
-                    result = self.repository.create_file(
-                        path=file_path,
-                        message=commit_message,
-                        content=new_content,
-                        branch=branch,
-                        author={"name": author_name, "email": author_email}
-                    )
+                    logger.info(f"File {file_path} doesn't exist, creating new file")
                     
-                    logger.info(f"Created new file {file_path} in branch {branch}")
+                    try:
+                        # File doesn't exist, create it
+                        result = self.repository.create_file(
+                            path=file_path,
+                            message=commit_message,
+                            content=content_bytes,
+                            branch=branch,
+                            author={"name": author_name, "email": author_email}
+                        )
+                        
+                        logger.info(f"Successfully created new file {file_path} in branch {branch}")
+                    except Exception as create_error:
+                        logger.error(f"Error creating file: {type(create_error).__name__}: {str(create_error)}")
+                        raise
                 else:
+                    logger.error(f"GitHub API error: {e.status} - {e.data}")
                     raise
             
             return {
@@ -326,12 +354,18 @@ class GitHubIntegration:
                 "branch": branch,
                 "commit_sha": result["commit"].sha,
                 "commit_message": commit_message,
-                "content_sha": result["content"].sha
+                "content_sha": result["content"].sha,
+                "url": result["content"].html_url
             }
             
+        except GithubException as e:
+            error_msg = f"GitHub API error {e.status}: {e.data}"
+            logger.error(f"Error updating file {file_path}: {error_msg}")
+            return {"error": error_msg}
         except Exception as e:
-            logger.error(f"Error updating file {file_path}: {e}")
-            return {"error": str(e)}
+            error_msg = f"Unexpected error: {str(e)}"
+            logger.error(f"Error updating file {file_path}: {error_msg}")
+            return {"error": error_msg}
     
     async def create_pull_request(
         self,

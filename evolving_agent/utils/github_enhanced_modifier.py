@@ -48,7 +48,6 @@ class GitHubEnabledSelfModifier:
             repo_name=repo_name,
             local_repo_path=local_repo_path
         )
-        self.pr_manager = CodeImprovementPRManager(self.github_integration)
         
         # State tracking
         self.improvement_history: List[Dict[str, Any]] = []
@@ -418,9 +417,9 @@ class GitHubEnabledSelfModifier:
             # Update README.md
             update_result = await self.github_integration.update_file(
                 file_path="README.md",
-                content=improved_readme,
-                branch=branch_name,
-                commit_message="🤖 AI Agent: Improve README documentation"
+                new_content=improved_readme,
+                commit_message="🤖 AI Agent: Improve README documentation",
+                branch=branch_name
             )
             
             if "error" in update_result:
