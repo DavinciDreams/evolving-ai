@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,22 +16,41 @@ import uvicorn
 
 from evolving_agent.core.agent import SelfImprovingAgent
 from evolving_agent.utils.logging import setup_logger
+from evolving_agent.utils.github_enhanced_modifier import GitHubEnabledSelfModifier
 
 logger = setup_logger(__name__)
 
 # Global agent instance
 agent: Optional[SelfImprovingAgent] = None
+github_modifier: Optional[GitHubEnabledSelfModifier] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup the agent."""
-    global agent
+    global agent, github_modifier
     try:
         logger.info("Initializing Self-Improving Agent...")
         agent = SelfImprovingAgent()
         await agent.initialize()
         logger.info("Agent initialized successfully")
+        
+        # Initialize GitHub modifier if GitHub credentials are available
+        github_token = os.getenv("GITHUB_TOKEN")
+        github_repo = os.getenv("GITHUB_REPO")
+        
+        if github_token and github_repo:
+            logger.info("Initializing GitHub integration...")
+            github_modifier = GitHubEnabledSelfModifier(
+                github_token=github_token,
+                repo_name=github_repo,
+                local_repo_path="."
+            )
+            await github_modifier.initialize()
+            logger.info("GitHub integration initialized successfully")
+        else:
+            logger.warning("GitHub credentials not found. GitHub features will be unavailable.")
+            
         yield
     finally:
         if agent:
@@ -138,6 +158,43 @@ class AgentStatus(BaseModel):
     memory_count: int = Field(..., description="Number of memories stored")
     knowledge_count: int = Field(..., description="Number of knowledge items")
     uptime: str = Field(..., description="Agent uptime")
+
+
+class GitHubStatus(BaseModel):
+    """GitHub integration status model."""
+    github_connected: bool = Field(..., description="Whether GitHub is connected")
+    repository_name: Optional[str] = Field(None, description="Connected repository name")
+    local_repo_available: bool = Field(..., description="Whether local repository is available")
+    auto_pr_enabled: bool = Field(..., description="Whether auto PR creation is enabled")
+    open_prs_count: int = Field(..., description="Number of open pull requests")
+
+
+class ImprovementRequest(BaseModel):
+    """Request model for code improvements."""
+    create_pr: bool = Field(True, description="Whether to create a pull request")
+    evaluation_insights: Optional[Dict[str, Any]] = Field(None, description="Evaluation insights")
+    knowledge_suggestions: Optional[List[Dict[str, Any]]] = Field(None, description="Knowledge suggestions")
+
+
+class ImprovementResponse(BaseModel):
+    """Response model for code improvements."""
+    improvements_generated: int = Field(..., description="Number of improvements generated")
+    improvements_validated: int = Field(..., description="Number of improvements validated")
+    pr_created: bool = Field(..., description="Whether a pull request was created")
+    pr_number: Optional[int] = Field(None, description="Pull request number if created")
+    pr_url: Optional[str] = Field(None, description="Pull request URL if created")
+    improvement_potential: float = Field(..., description="Overall improvement potential")
+
+
+class RepositoryInfo(BaseModel):
+    """Repository information model."""
+    name: str = Field(..., description="Repository name")
+    full_name: str = Field(..., description="Full repository name")
+    description: Optional[str] = Field(None, description="Repository description")
+    language: Optional[str] = Field(None, description="Primary language")
+    stars: int = Field(..., description="Number of stars")
+    forks: int = Field(..., description="Number of forks")
+    open_issues: int = Field(..., description="Number of open issues")
 
 
 # FastAPI app initialization
@@ -450,8 +507,227 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now(),
-        "agent_initialized": agent is not None and agent.initialized if agent else False
+        "agent_initialized": agent is not None and agent.initialized if agent else False,
+        "github_available": github_modifier is not None
     }
+
+
+@app.get("/github/status", response_model=GitHubStatus, tags=["GitHub"])
+async def get_github_status():
+    """
+    Get GitHub integration status.
+    
+    Returns information about GitHub connection, repository status, and configuration.
+    """
+    try:
+        if not github_modifier:
+            return GitHubStatus(
+                github_connected=False,
+                repository_name=None,
+                local_repo_available=False,
+                auto_pr_enabled=False,
+                open_prs_count=0
+            )
+        
+        # Get repository status
+        repo_status = await github_modifier.get_repository_status()
+        
+        return GitHubStatus(
+            github_connected=repo_status.get("github_connected", False),
+            repository_name=repo_status.get("repository_info", {}).get("full_name"),
+            local_repo_available=repo_status.get("local_repo_available", False),
+            auto_pr_enabled=repo_status.get("auto_pr_enabled", False),
+            open_prs_count=len(repo_status.get("open_pull_requests", []))
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting GitHub status: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting GitHub status: {str(e)}")
+
+
+@app.get("/github/repository", response_model=RepositoryInfo, tags=["GitHub"])
+async def get_repository_info():
+    """
+    Get information about the connected GitHub repository.
+    """
+    try:
+        if not github_modifier or not github_modifier.github_integration.repository:
+            raise HTTPException(status_code=404, detail="GitHub repository not connected")
+        
+        repo_info = await github_modifier.github_integration.get_repository_info()
+        
+        if "error" in repo_info:
+            raise HTTPException(status_code=500, detail=repo_info["error"])
+        
+        return RepositoryInfo(
+            name=repo_info["name"],
+            full_name=repo_info["full_name"],
+            description=repo_info.get("description"),
+            language=repo_info.get("language"),
+            stars=repo_info["stars"],
+            forks=repo_info["forks"],
+            open_issues=repo_info["open_issues"]
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting repository info: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting repository info: {str(e)}")
+
+
+@app.post("/github/improve", response_model=ImprovementResponse, tags=["GitHub"])
+async def create_code_improvements(
+    request: ImprovementRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Analyze codebase and create improvements, optionally as a pull request.
+    
+    This endpoint will:
+    1. Analyze the current codebase for improvement opportunities
+    2. Generate specific code improvements
+    3. Validate the improvements for safety
+    4. Optionally create a pull request with the improvements
+    """
+    try:
+        if not github_modifier:
+            raise HTTPException(status_code=503, detail="GitHub integration not available")
+        
+        logger.info("Starting automated code improvement process...")
+        
+        # Run the improvement analysis
+        result = await github_modifier.analyze_and_improve_codebase(
+            evaluation_insights=request.evaluation_insights,
+            knowledge_suggestions=request.knowledge_suggestions,
+            create_pr=request.create_pr
+        )
+        
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+        
+        summary = result.get("summary", {})
+        pr_result = result.get("pr_result", {})
+        
+        return ImprovementResponse(
+            improvements_generated=summary.get("improvements_generated", 0),
+            improvements_validated=summary.get("improvements_validated", 0),
+            pr_created=summary.get("pr_created", False),
+            pr_number=pr_result.get("pr_number"),
+            pr_url=pr_result.get("pr_url"),
+            improvement_potential=summary.get("improvement_potential", 0)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating code improvements: {e}")
+        raise HTTPException(status_code=500, detail=f"Error creating code improvements: {str(e)}")
+
+
+@app.post("/github/demo-pr", tags=["GitHub"])
+async def create_demo_pr():
+    """
+    Create a demonstration pull request with documentation improvements.
+    
+    This is a safe demo endpoint that creates a PR with README enhancements.
+    """
+    try:
+        if not github_modifier:
+            raise HTTPException(status_code=503, detail="GitHub integration not available")
+        
+        if not github_modifier.github_integration.repository:
+            raise HTTPException(status_code=404, detail="GitHub repository not connected")
+        
+        logger.info("Creating demonstration pull request...")
+        
+        pr_result = await github_modifier.create_documentation_improvement_pr()
+        
+        if "error" in pr_result:
+            raise HTTPException(status_code=500, detail=pr_result["error"])
+        
+        return {
+            "message": "Demo pull request created successfully",
+            "pr_number": pr_result.get("pr_number"),
+            "pr_url": pr_result.get("pr_url"),
+            "branch_name": pr_result.get("branch_name"),
+            "files_updated": pr_result.get("files_updated", [])
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating demo PR: {e}")
+        raise HTTPException(status_code=500, detail=f"Error creating demo PR: {str(e)}")
+
+
+@app.get("/github/pull-requests", tags=["GitHub"])
+async def get_pull_requests():
+    """
+    Get list of open pull requests in the repository.
+    """
+    try:
+        if not github_modifier or not github_modifier.github_integration.repository:
+            raise HTTPException(status_code=404, detail="GitHub repository not connected")
+        
+        prs = await github_modifier.github_integration.get_open_pull_requests()
+        
+        return {
+            "open_pull_requests": prs,
+            "count": len(prs)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting pull requests: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting pull requests: {str(e)}")
+
+
+@app.get("/github/commits", tags=["GitHub"])
+async def get_recent_commits(limit: int = 10):
+    """
+    Get recent commits from the repository.
+    
+    - **limit**: Maximum number of commits to retrieve (default: 10)
+    """
+    try:
+        if not github_modifier or not github_modifier.github_integration.repository:
+            raise HTTPException(status_code=404, detail="GitHub repository not connected")
+        
+        commits = await github_modifier.github_integration.get_recent_commits(limit=limit)
+        
+        return {
+            "recent_commits": commits,
+            "count": len(commits)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting recent commits: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting recent commits: {str(e)}")
+
+
+@app.get("/github/improvement-history", tags=["GitHub"])
+async def get_improvement_history():
+    """
+    Get history of automated improvements made by the AI agent.
+    """
+    try:
+        if not github_modifier:
+            raise HTTPException(status_code=503, detail="GitHub integration not available")
+        
+        history = github_modifier.get_improvement_history()
+        
+        return {
+            "improvement_history": history,
+            "count": len(history)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting improvement history: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting improvement history: {str(e)}")
 
 
 if __name__ == "__main__":
