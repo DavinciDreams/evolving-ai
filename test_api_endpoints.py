@@ -168,6 +168,37 @@ async def test_api_endpoints():
         except Exception as e:
             print(f"Error: {e}")
         
+        # GitHub Integration endpoints
+        print("\n9. Testing GitHub Integration endpoints...")
+        github_endpoints = [
+            ("GET", "/github/status", None, "Get GitHub integration status"),
+            ("GET", "/github/repository", None, "Get repository information"),
+            ("GET", "/github/pull-requests", None, "Get open pull requests"),
+            ("GET", "/github/commits", None, "Get recent commits"),
+            ("GET", "/github/improvement-history", None, "Get improvement history"),
+            ("POST", "/github/improve", {
+                "create_pr": False,
+                "evaluation_insights": ["Test insight"],
+                "knowledge_suggestions": ["Test suggestion"]
+            }, "Create code improvements (dry run)"),
+        ]
+        
+        for method, endpoint, payload, description in github_endpoints:
+            print(f"\nTesting {description}...")
+            try:
+                if method == "GET":
+                    response = await client.get(f"{base_url}{endpoint}")
+                elif method == "POST":
+                    response = await client.post(f"{base_url}{endpoint}", json=payload)
+                
+                print(f"Status: {response.status_code}")
+                if response.status_code == 200:
+                    print(f"Response: {response.json()}")
+                else:
+                    print(f"Error: {response.text}")
+            except Exception as e:
+                print(f"Error: {e}")
+        
         print("\n" + "=" * 60)
         print("🎉 API endpoint testing completed!")
         print("\n📋 Available endpoints:")
@@ -179,6 +210,12 @@ async def test_api_endpoints():
         print("  • GET  /memories  - Retrieve memories")
         print("  • GET  /knowledge - Retrieve knowledge")
         print("  • GET  /analysis-history - Analysis history")
+        print("  • GET  /github/status - GitHub integration status")
+        print("  • GET  /github/repository - Repository information")
+        print("  • GET  /github/pull-requests - Open pull requests")
+        print("  • GET  /github/commits - Recent commits")
+        print("  • GET  /github/improvement-history - Improvement history")
+        print("  • POST /github/improve - Create code improvements (dry run)")
         print("\n📖 Interactive documentation:")
         print(f"  • Swagger UI: {base_url}/docs")
         print(f"  • ReDoc: {base_url}/redoc")
