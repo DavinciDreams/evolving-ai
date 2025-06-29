@@ -498,3 +498,156 @@ class CodeAnalyzer:
     def get_performance_metrics(self) -> Dict[str, Any]:
         """Get current performance metrics."""
         return self.performance_metrics.copy()
+    
+    async def analyze_file(self, file_path: str) -> Dict[str, Any]:
+        """
+        Analyze a specific file for improvement opportunities.
+        
+        Args:
+            file_path: Path to the file to analyze
+            
+        Returns:
+            Dictionary containing analysis results and suggestions
+        """
+        try:
+            logger.info(f"Analyzing file: {file_path}")
+            
+            if not Path(file_path).exists():
+                return {
+                    "file_path": file_path,
+                    "error": "File not found",
+                    "suggestions": [],
+                    "metrics": {}
+                }
+            
+            # Read file content
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Basic metrics
+            lines = content.split('\n')
+            metrics = {
+                "lines_of_code": len([line for line in lines if line.strip() and not line.strip().startswith('#')]),
+                "total_lines": len(lines),
+                "functions": len([line for line in lines if line.strip().startswith('def ')]),
+                "classes": len([line for line in lines if line.strip().startswith('class ')]),
+                "imports": len([line for line in lines if line.strip().startswith(('import ', 'from '))]),
+                "complexity": self._estimate_complexity(content)
+            }
+            
+            # Generate suggestions based on analysis
+            suggestions = []
+            
+            # Check for long functions
+            if metrics["lines_of_code"] > 200:
+                suggestions.append("Consider breaking down large functions into smaller, more focused functions")
+            
+            # Check for missing docstrings
+            if '"""' not in content and "'''" not in content:
+                suggestions.append("Add comprehensive docstrings to improve code documentation")
+            
+            # Check for error handling
+            if 'try:' not in content:
+                suggestions.append("Consider adding error handling with try/except blocks")
+            
+            # Check for type hints
+            if '-> ' not in content and 'typing' not in content:
+                suggestions.append("Add type hints to improve code clarity and IDE support")
+            
+            # Check for async patterns
+            if 'async def' in content and 'await' not in content:
+                suggestions.append("Review async function implementations for proper await usage")
+            
+            # Check for logging
+            if 'logger' not in content and 'logging' not in content:
+                suggestions.append("Add logging for better debugging and monitoring")
+            
+            # Performance suggestions
+            if metrics["complexity"] > 10:
+                suggestions.append("High complexity detected - consider refactoring for better maintainability")
+            
+            return {
+                "file_path": file_path,
+                "metrics": metrics,
+                "suggestions": suggestions,
+                "timestamp": datetime.now().isoformat(),
+                "status": "success"
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to analyze file {file_path}: {e}")
+            return {
+                "file_path": file_path,
+                "error": str(e),
+                "suggestions": [],
+                "metrics": {}
+            }
+    
+    def _estimate_complexity(self, content: str) -> int:
+        """Estimate code complexity based on control structures."""
+        complexity_keywords = ['if ', 'elif ', 'else:', 'for ', 'while ', 'try:', 'except:', 'with ']
+        complexity = 1  # Base complexity
+        
+        for keyword in complexity_keywords:
+            complexity += content.count(keyword)
+        
+        return complexity
+
+    async def analyze_codebase(self) -> Dict[str, Any]:
+        """
+        Analyze the entire codebase for improvement opportunities.
+        
+        Returns:
+            Dictionary containing comprehensive codebase analysis
+        """
+        try:
+            logger.info("Starting comprehensive codebase analysis...")
+            
+            # Core files to analyze
+            core_files = [
+                "evolving_agent/core/agent.py",
+                "evolving_agent/core/memory.py", 
+                "evolving_agent/core/evaluator.py",
+                "evolving_agent/core/context_manager.py",
+                "evolving_agent/utils/llm_interface.py",
+                "evolving_agent/self_modification/code_analyzer.py",
+                "evolving_agent/self_modification/modifier.py"
+            ]
+            
+            file_analyses = []
+            total_suggestions = 0
+            total_functions = 0
+            complex_functions = []
+            
+            for file_path in core_files:
+                if Path(file_path).exists():
+                    analysis = await self.analyze_file(file_path)
+                    file_analyses.append(analysis)
+                    total_suggestions += len(analysis.get('suggestions', []))
+                    total_functions += analysis.get('metrics', {}).get('functions', 0)
+                    
+                    # Track complex files
+                    if analysis.get('metrics', {}).get('complexity', 0) > 15:
+                        complex_functions.append({
+                            'file': file_path,
+                            'complexity': analysis.get('metrics', {}).get('complexity', 0)
+                        })
+            
+            return {
+                "timestamp": datetime.now().isoformat(),
+                "files_analyzed": len(file_analyses),
+                "total_functions": total_functions,
+                "total_suggestions": total_suggestions,
+                "complex_functions": complex_functions,
+                "improvement_opportunities": file_analyses,
+                "summary": f"Analyzed {len(file_analyses)} files with {total_suggestions} improvement suggestions"
+            }
+            
+        except Exception as e:
+            logger.error(f"Codebase analysis failed: {e}")
+            return {
+                "timestamp": datetime.now().isoformat(),
+                "error": str(e),
+                "files_analyzed": 0,
+                "total_suggestions": 0
+            }
