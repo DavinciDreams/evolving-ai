@@ -675,3 +675,124 @@ class CodeModifier:
         except Exception as e:
             logger.error(f"Failed to generate diff report: {e}")
             return f"Diff generation failed: {str(e)}"
+    
+    async def apply_improvement(
+        self, 
+        file_path: str, 
+        suggestion: str, 
+        context: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Apply a specific improvement suggestion to a file.
+        
+        Args:
+            file_path: Path to the file to improve
+            suggestion: The improvement suggestion to apply
+            context: Context from the analysis result
+            
+        Returns:
+            Dictionary with improvement details or None if failed
+        """
+        try:
+            logger.info(f"Applying improvement to {file_path}: {suggestion}")
+            
+            # Read the current file content
+            if not Path(file_path).exists():
+                logger.error(f"File not found: {file_path}")
+                return None
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                original_content = f.read()
+            
+            # Generate improved content based on the suggestion
+            improved_content = await self._generate_improved_content(
+                original_content, suggestion, context
+            )
+            
+            if not improved_content or improved_content == original_content:
+                logger.warning(f"No improvement generated for {file_path}")
+                return None
+            
+            # Create a modification proposal
+            proposal = ModificationProposal(
+                file_path=file_path,
+                original_code=original_content,
+                modified_code=improved_content,
+                modification_type="improvement",
+                rationale=suggestion,
+                priority=0.7  # Medium-high priority for explicit improvements
+            )
+            
+            # Validate the improvement
+            await self._validate_proposal(proposal)
+            
+            if not proposal.validation_result or not proposal.validation_result.is_valid:
+                logger.warning(f"Improvement validation failed for {file_path}")
+                return None
+            
+            return {
+                "file_path": file_path,
+                "content": improved_content,
+                "description": suggestion,
+                "original_content": original_content,
+                "validation_score": proposal.validation_result.safety_score,
+                "proposal_id": proposal.id
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to apply improvement to {file_path}: {e}")
+            return None
+    
+    async def _generate_improved_content(
+        self, 
+        original_content: str, 
+        suggestion: str, 
+        context: Dict[str, Any]
+    ) -> Optional[str]:
+        """Generate improved content based on a suggestion."""
+        try:
+            # Use LLM to generate improved code
+            prompt = f"""
+Please improve the following code based on this suggestion: {suggestion}
+
+Original code:
+```python
+{original_content}
+```
+
+Context from analysis:
+- File metrics: {context.get('metrics', {})}
+- Other suggestions: {context.get('suggestions', [])}
+
+Instructions:
+1. Apply the specific suggestion while maintaining all existing functionality
+2. Ensure the code remains syntactically correct and follows Python best practices
+3. Add appropriate comments if adding new functionality
+4. Preserve all existing imports and dependencies
+5. Return only the improved code without any explanations
+
+Improved code:
+"""
+            
+            response = await llm_manager.generate_response(
+                prompt,
+                model_preference=['anthropic', 'openrouter', 'openai'],
+                max_tokens=4000,
+                temperature=0.3  # Lower temperature for code generation
+            )
+            
+            if not response:
+                return None
+            
+            # Extract code from response (remove markdown if present)
+            improved_code = response.strip()
+            if improved_code.startswith('```python'):
+                improved_code = improved_code[9:]
+            if improved_code.endswith('```'):
+                improved_code = improved_code[:-3]
+            
+            return improved_code.strip()
+            
+        except Exception as e:
+            logger.error(f"Failed to generate improved content: {e}")
+            return None
