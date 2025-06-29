@@ -21,10 +21,7 @@ logger = setup_logger(__name__)
 
 
 def sanitize_metadata_for_chroma(metadata: Dict[str, Any]) -> Dict[str, Union[str, int, float, bool, None]]:
-    """
-    Sanitize metadata for ChromaDB storage.
-    ChromaDB only accepts str, int, float, bool, or None as metadata values.
-    """
+    """Sanitize metadata for ChromaDB storage."""
     sanitized = {}
     
     for key, value in metadata.items():
@@ -33,13 +30,10 @@ def sanitize_metadata_for_chroma(metadata: Dict[str, Any]) -> Dict[str, Union[st
         elif isinstance(value, (str, int, float, bool)):
             sanitized[key] = value
         elif isinstance(value, dict):
-            # Convert dict to JSON string
             sanitized[f"{key}_json"] = json.dumps(value)
         elif isinstance(value, (list, tuple)):
-            # Convert list/tuple to JSON string
             sanitized[f"{key}_json"] = json.dumps(list(value))
         else:
-            # Convert other types to string
             sanitized[key] = str(value)
     
     return sanitized
@@ -93,40 +87,45 @@ class LongTermMemory:
         self.client = None
         self.collection = None
         self.initialized = False
+
+    async def _init_embedding_model(self):
+        """Initialize the embedding model."""
+        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        logger.info("Embedding model loaded")
+
+    async def _init_chroma_client(self):
+        """Initialize ChromaDB client."""
+        self.client = chromadb.PersistentClient(
+            path=config.memory_persist_directory,
+            settings=Settings(
+                anonymized_telemetry=False,
+                allow_reset=True
+            )
+        )
+
+    async def _init_collection(self):
+        """Initialize or get existing ChromaDB collection."""
+        try:
+            self.collection = self.client.get_collection(
+                name=config.memory_collection_name
+            )
+            logger.info(f"Loaded existing memory collection: {config.memory_collection_name}")
+        except Exception:
+            self.collection = self.client.create_collection(
+                name=config.memory_collection_name,
+                metadata={"description": "Agent long-term memory"}
+            )
+            logger.info(f"Created new memory collection: {config.memory_collection_name}")
         
     async def initialize(self):
         """Initialize the memory system."""
         try:
             logger.info("Initializing long-term memory system...")
-            
-            # Ensure memory directory exists
             config.ensure_directories()
             
-            # Initialize embedding model
-            self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-            logger.info("Embedding model loaded")
-            
-            # Initialize ChromaDB
-            self.client = chromadb.PersistentClient(
-                path=config.memory_persist_directory,
-                settings=Settings(
-                    anonymized_telemetry=False,
-                    allow_reset=True
-                )
-            )
-            
-            # Get or create collection
-            try:
-                self.collection = self.client.get_collection(
-                    name=config.memory_collection_name
-                )
-                logger.info(f"Loaded existing memory collection: {config.memory_collection_name}")
-            except Exception:
-                self.collection = self.client.create_collection(
-                    name=config.memory_collection_name,
-                    metadata={"description": "Agent long-term memory"}
-                )
-                logger.info(f"Created new memory collection: {config.memory_collection_name}")
+            await self._init_embedding_model()
+            await self._init_chroma_client()
+            await self._init_collection()
             
             self.initialized = True
             logger.info("Long-term memory system initialized successfully")
@@ -139,30 +138,31 @@ class LongTermMemory:
         """Ensure memory system is initialized."""
         if not self.initialized:
             raise RuntimeError("Memory system not initialized. Call initialize() first.")
-    
+
+    def _generate_embedding(self, text: str) -> List[float]:
+        """Generate embedding for text."""
+        return self.embedding_model.encode(text).tolist()
+
+    def _prepare_metadata(self, entry: MemoryEntry) -> Dict[str, Any]:
+        """Prepare metadata for ChromaDB storage."""
+        metadata = {
+            "memory_type": entry.memory_type,
+            "timestamp": entry.timestamp.isoformat(),
+            **entry.metadata
+        }
+        return sanitize_metadata_for_chroma(metadata)
+
     async def add_memory(self, entry: MemoryEntry) -> str:
         """Add a memory entry to the database."""
         self._ensure_initialized()
         
         try:
-            # Generate embedding
-            embedding = self.embedding_model.encode(entry.content).tolist()
-            entry.embedding = embedding
+            entry.embedding = self._generate_embedding(entry.content)
+            sanitized_metadata = self._prepare_metadata(entry)
             
-            # Prepare metadata
-            metadata = {
-                "memory_type": entry.memory_type,
-                "timestamp": entry.timestamp.isoformat(),
-                **entry.metadata
-            }
-            
-            # Sanitize metadata for ChromaDB compatibility
-            sanitized_metadata = sanitize_metadata_for_chroma(metadata)
-            
-            # Add to ChromaDB
             self.collection.add(
                 ids=[entry.id],
-                embeddings=[embedding],
+                embeddings=[entry.embedding],
                 documents=[entry.content],
                 metadatas=[sanitized_metadata]
             )
@@ -173,7 +173,30 @@ class LongTermMemory:
         except Exception as e:
             logger.error(f"Failed to add memory entry: {e}")
             raise
-    
+
+    def _process_search_results(self, results: Dict[str, Any], similarity_threshold: float) -> List[Tuple[MemoryEntry, float]]:
+        """Process and filter search results."""
+        memories = []
+        if results["ids"]:
+            for i, doc_id in enumerate(results["ids"][0]):
+                distance = results["distances"][0][i]
+                similarity = 1 - distance
+                
+                if similarity >= similarity_threshold:
+                    metadata = results["metadatas"][0][i]
+                    content = results["documents"][0][i]
+                    
+                    entry = MemoryEntry(
+                        content=content,
+                        memory_type=metadata.get("memory_type", "general"),
+                        metadata={k: v for k, v in metadata.items() 
+                                if k not in ["memory_type", "timestamp"]},
+                        timestamp=datetime.fromisoformat(metadata["timestamp"]),
+                        entry_id=doc_id
+                    )
+                    memories.append((entry, similarity))
+        return memories
+
     async def search_memories(
         self,
         query: str,
@@ -185,90 +208,61 @@ class LongTermMemory:
         self._ensure_initialized()
         
         try:
-            # Generate query embedding
-            query_embedding = self.embedding_model.encode(query).tolist()
+            query_embedding = self._generate_embedding(query)
+            where_clause = {"memory_type": memory_type} if memory_type else None
             
-            # Prepare where clause for filtering
-            where_clause = {}
-            if memory_type:
-                where_clause["memory_type"] = memory_type
-            
-            # Search in ChromaDB
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results,
-                where=where_clause if where_clause else None
+                where=where_clause
             )
             
-            # Convert results to MemoryEntry objects
-            memories = []
-            if results["ids"]:
-                for i, doc_id in enumerate(results["ids"][0]):
-                    distance = results["distances"][0][i]
-                    similarity = 1 - distance  # Convert distance to similarity
-                    
-                    if similarity >= similarity_threshold:
-                        metadata = results["metadatas"][0][i]
-                        content = results["documents"][0][i]
-                        
-                        entry = MemoryEntry(
-                            content=content,
-                            memory_type=metadata.get("memory_type", "general"),
-                            metadata={k: v for k, v in metadata.items() 
-                                    if k not in ["memory_type", "timestamp"]},
-                            timestamp=datetime.fromisoformat(metadata["timestamp"]),
-                            entry_id=doc_id
-                        )
-                        
-                        memories.append((entry, similarity))
-            
+            memories = self._process_search_results(results, similarity_threshold)
             logger.info(f"Found {len(memories)} relevant memories for query")
             return memories
             
         except Exception as e:
             logger.error(f"Failed to search memories: {e}")
             raise
-    
+
+    def _create_memory_from_results(self, results: Dict[str, Any], memory_id: str) -> Optional[MemoryEntry]:
+        """Create MemoryEntry object from query results."""
+        if results["ids"]:
+            metadata = results["metadatas"][0]
+            content = results["documents"][0]
+            
+            return MemoryEntry(
+                content=content,
+                memory_type=metadata.get("memory_type", "general"),
+                metadata={k: v for k, v in metadata.items() 
+                        if k not in ["memory_type", "timestamp"]},
+                timestamp=datetime.fromisoformat(metadata["timestamp"]),
+                entry_id=memory_id
+            )
+        return None
+
     async def get_memory(self, memory_id: str) -> Optional[MemoryEntry]:
         """Get a specific memory by ID."""
         self._ensure_initialized()
         
         try:
             results = self.collection.get(ids=[memory_id])
-            
-            if results["ids"]:
-                metadata = results["metadatas"][0]
-                content = results["documents"][0]
-                
-                return MemoryEntry(
-                    content=content,
-                    memory_type=metadata.get("memory_type", "general"),
-                    metadata={k: v for k, v in metadata.items() 
-                            if k not in ["memory_type", "timestamp"]},
-                    timestamp=datetime.fromisoformat(metadata["timestamp"]),
-                    entry_id=memory_id
-                )
-            
-            return None
+            return self._create_memory_from_results(results, memory_id)
             
         except Exception as e:
             logger.error(f"Failed to get memory {memory_id}: {e}")
             raise
-    
+
     async def update_memory(self, memory_id: str, entry: MemoryEntry) -> bool:
         """Update an existing memory entry."""
         self._ensure_initialized()
         
         try:
-            # Check if memory exists
             existing = await self.get_memory(memory_id)
             if not existing:
                 return False
             
-            # Delete old entry
             self.collection.delete(ids=[memory_id])
-            
-            # Add updated entry
             entry.id = memory_id
             await self.add_memory(entry)
             
@@ -278,7 +272,7 @@ class LongTermMemory:
         except Exception as e:
             logger.error(f"Failed to update memory {memory_id}: {e}")
             raise
-    
+
     async def delete_memory(self, memory_id: str) -> bool:
         """Delete a memory entry."""
         self._ensure_initialized()
@@ -291,22 +285,24 @@ class LongTermMemory:
         except Exception as e:
             logger.error(f"Failed to delete memory {memory_id}: {e}")
             raise
-    
+
+    def _get_memory_type_distribution(self, all_data: Dict[str, Any]) -> Dict[str, int]:
+        """Calculate distribution of memory types."""
+        memory_types = {}
+        if all_data["metadatas"]:
+            for metadata in all_data["metadatas"]:
+                mem_type = metadata.get("memory_type", "general")
+                memory_types[mem_type] = memory_types.get(mem_type, 0) + 1
+        return memory_types
+
     async def get_memory_stats(self) -> Dict[str, Any]:
         """Get statistics about the memory system."""
         self._ensure_initialized()
         
         try:
             count = self.collection.count()
-            
-            # Get memory types distribution
             all_data = self.collection.get()
-            memory_types = {}
-            
-            if all_data["metadatas"]:
-                for metadata in all_data["metadatas"]:
-                    mem_type = metadata.get("memory_type", "general")
-                    memory_types[mem_type] = memory_types.get(mem_type, 0) + 1
+            memory_types = self._get_memory_type_distribution(all_data)
             
             return {
                 "total_memories": count,
@@ -318,7 +314,16 @@ class LongTermMemory:
         except Exception as e:
             logger.error(f"Failed to get memory stats: {e}")
             raise
-    
+
+    def _get_sorted_entries(self, all_data: Dict[str, Any]) -> List[Tuple[str, datetime]]:
+        """Get memory entries sorted by timestamp."""
+        entries = []
+        for i, entry_id in enumerate(all_data["ids"]):
+            metadata = all_data["metadatas"][i]
+            timestamp = datetime.fromisoformat(metadata["timestamp"])
+            entries.append((entry_id, timestamp))
+        return sorted(entries, key=lambda x: x[1])
+
     async def cleanup_old_memories(self, max_entries: Optional[int] = None) -> int:
         """Clean up old memories to maintain performance."""
         self._ensure_initialized()
@@ -330,23 +335,13 @@ class LongTermMemory:
             if current_count <= max_entries:
                 return 0
             
-            # Get all memories sorted by timestamp
             all_data = self.collection.get()
             if not all_data["ids"]:
                 return 0
             
-            # Sort by timestamp (oldest first)
-            entries_with_timestamps = []
-            for i, entry_id in enumerate(all_data["ids"]):
-                metadata = all_data["metadatas"][i]
-                timestamp = datetime.fromisoformat(metadata["timestamp"])
-                entries_with_timestamps.append((entry_id, timestamp))
-            
-            entries_with_timestamps.sort(key=lambda x: x[1])
-            
-            # Delete oldest entries
+            sorted_entries = self._get_sorted_entries(all_data)
             entries_to_delete = current_count - max_entries
-            ids_to_delete = [entry[0] for entry in entries_with_timestamps[:entries_to_delete]]
+            ids_to_delete = [entry[0] for entry in sorted_entries[:entries_to_delete]]
             
             self.collection.delete(ids=ids_to_delete)
             
