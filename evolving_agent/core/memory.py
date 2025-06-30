@@ -150,6 +150,15 @@ class LongTermMemory:
         }
         return sanitize_metadata_for_chroma(metadata)
 
+    async def _add_entry_to_collection(self, entry: MemoryEntry, metadata: Dict[str, Any]):
+        """Add entry to ChromaDB collection."""
+        self.collection.add(
+            ids=[entry.id],
+            embeddings=[entry.embedding],
+            documents=[entry.content],
+            metadatas=[metadata]
+        )
+
     async def add_memory(self, entry: MemoryEntry) -> str:
         """Add a memory entry to the database."""
         self._ensure_initialized()
@@ -157,13 +166,7 @@ class LongTermMemory:
         try:
             entry.embedding = await self._generate_embedding(entry.content)
             sanitized_metadata = await self._prepare_metadata(entry)
-            
-            self.collection.add(
-                ids=[entry.id],
-                embeddings=[entry.embedding],
-                documents=[entry.content],
-                metadatas=[sanitized_metadata]
-            )
+            await self._add_entry_to_collection(entry, sanitized_metadata)
             
             logger.info(f"Added memory entry: {entry.id}")
             return entry.id
@@ -171,6 +174,17 @@ class LongTermMemory:
         except Exception as e:
             logger.error(f"Failed to add memory entry: {e}")
             raise
+
+    async def _create_memory_entry_from_results(self, doc_id: str, content: str, metadata: Dict[str, Any]) -> MemoryEntry:
+        """Create MemoryEntry object from search results."""
+        return MemoryEntry(
+            content=content,
+            memory_type=metadata.get("memory_type", "general"),
+            metadata={k: v for k, v in metadata.items() 
+                    if k not in ["memory_type", "timestamp"]},
+            timestamp=datetime.fromisoformat(metadata["timestamp"]),
+            entry_id=doc_id
+        )
 
     async def _process_search_results(self, results: Dict[str, Any], similarity_threshold: float) -> List[Tuple[MemoryEntry, float]]:
         """Process and filter search results."""
@@ -183,15 +197,7 @@ class LongTermMemory:
                 if similarity >= similarity_threshold:
                     metadata = results["metadatas"][0][i]
                     content = results["documents"][0][i]
-                    
-                    entry = MemoryEntry(
-                        content=content,
-                        memory_type=metadata.get("memory_type", "general"),
-                        metadata={k: v for k, v in metadata.items() 
-                                if k not in ["memory_type", "timestamp"]},
-                        timestamp=datetime.fromisoformat(metadata["timestamp"]),
-                        entry_id=doc_id
-                    )
+                    entry = await self._create_memory_entry_from_results(doc_id, content, metadata)
                     memories.append((entry, similarity))
         return memories
 
@@ -233,15 +239,7 @@ class LongTermMemory:
             if results["ids"]:
                 metadata = results["metadatas"][0]
                 content = results["documents"][0]
-                
-                return MemoryEntry(
-                    content=content,
-                    memory_type=metadata.get("memory_type", "general"),
-                    metadata={k: v for k, v in metadata.items() 
-                            if k not in ["memory_type", "timestamp"]},
-                    timestamp=datetime.fromisoformat(metadata["timestamp"]),
-                    entry_id=memory_id
-                )
+                return await self._create_memory_entry_from_results(memory_id, content, metadata)
             return None
             
         except Exception as e:
@@ -280,6 +278,18 @@ class LongTermMemory:
             logger.error(f"Failed to delete memory {memory_id}: {e}")
             raise
 
+    async def _get_memory_type_distribution(self) -> Dict[str, int]:
+        """Get distribution of memory types."""
+        memory_types = {}
+        all_data = self.collection.get()
+        
+        if all_data["metadatas"]:
+            for metadata in all_data["metadatas"]:
+                mem_type = metadata.get("memory_type", "general")
+                memory_types[mem_type] = memory_types.get(mem_type, 0) + 1
+                
+        return memory_types
+
     async def get_memory_stats(self) -> Dict[str, Any]:
         """Get statistics about the memory system."""
         self._ensure_initialized()
@@ -299,17 +309,19 @@ class LongTermMemory:
             logger.error(f"Failed to get memory stats: {e}")
             raise
 
-    async def _get_memory_type_distribution(self) -> Dict[str, int]:
-        """Get distribution of memory types."""
-        memory_types = {}
+    async def _get_entries_to_delete(self, num_entries: int) -> List[str]:
+        """Get IDs of oldest entries to delete."""
         all_data = self.collection.get()
+        if not all_data["ids"]:
+            return []
+            
+        entries_with_timestamps = [
+            (entry_id, datetime.fromisoformat(metadata["timestamp"]))
+            for entry_id, metadata in zip(all_data["ids"], all_data["metadatas"])
+        ]
+        entries_with_timestamps.sort(key=lambda x: x[1])
         
-        if all_data["metadatas"]:
-            for metadata in all_data["metadatas"]:
-                mem_type = metadata.get("memory_type", "general")
-                memory_types[mem_type] = memory_types.get(mem_type, 0) + 1
-                
-        return memory_types
+        return [entry[0] for entry in entries_with_timestamps[:num_entries]]
 
     async def cleanup_old_memories(self, max_entries: Optional[int] = None) -> int:
         """Clean up old memories to maintain performance."""
@@ -331,17 +343,3 @@ class LongTermMemory:
         except Exception as e:
             logger.error(f"Failed to cleanup memories: {e}")
             raise
-
-    async def _get_entries_to_delete(self, num_entries: int) -> List[str]:
-        """Get IDs of oldest entries to delete."""
-        all_data = self.collection.get()
-        if not all_data["ids"]:
-            return []
-            
-        entries_with_timestamps = [
-            (entry_id, datetime.fromisoformat(metadata["timestamp"]))
-            for entry_id, metadata in zip(all_data["ids"], all_data["metadatas"])
-        ]
-        entries_with_timestamps.sort(key=lambda x: x[1])
-        
-        return [entry[0] for entry in entries_with_timestamps[:num_entries]]
