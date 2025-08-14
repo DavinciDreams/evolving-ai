@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 """
 Test script to verify the agent's improvements are working
 and record successful merge feedback.
@@ -85,7 +89,7 @@ async def test_agent_improvements():
         
         # Test knowledge base
         print("7. 📚 Testing knowledge base...")
-        knowledge_stats = agent.knowledge_base.get_knowledge_stats()
+        knowledge_stats = await agent.knowledge_base.get_knowledge_stats()
         print(f"✅ Knowledge base working: {knowledge_stats['total_entries']} entries")
         
         # Run a quick self-improvement analysis (without creating PR)

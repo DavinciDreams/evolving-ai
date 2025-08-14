@@ -2,6 +2,9 @@
 Test OpenRouter API endpoint to verify the correct URL.
 """
 
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import asyncio
 import httpx
 import json

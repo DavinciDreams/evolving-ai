@@ -4,6 +4,9 @@ Simple test script to verify the agent's core improvements are working
 without requiring LLM API calls.
 """
 
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import asyncio
 import json
 from pathlib import Path

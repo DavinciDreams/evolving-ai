@@ -2,6 +2,9 @@
 Test script to verify LLM provider configuration changes.
 """
 
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import asyncio
 import sys
 import os
