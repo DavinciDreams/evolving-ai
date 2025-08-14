@@ -3,14 +3,14 @@ Dynamic context management for intelligent query processing.
 """
 
 import asyncio
-from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime, timedelta
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
-from .memory import LongTermMemory, MemoryEntry
 from ..utils.config import config
-from ..utils.logging import setup_logger
 from ..utils.llm_interface import llm_manager
+from ..utils.logging import setup_logger
+from .memory import LongTermMemory, MemoryEntry
 
 logger = setup_logger(__name__)
 

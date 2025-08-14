@@ -4,15 +4,15 @@ Output evaluation system for self-improvement.
 
 import asyncio
 import json
-from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
-from .memory import MemoryEntry
 from ..utils.config import config
-from ..utils.logging import setup_logger
 from ..utils.llm_interface import llm_manager
+from ..utils.logging import setup_logger
+from .memory import MemoryEntry
 
 logger = setup_logger(__name__)
 

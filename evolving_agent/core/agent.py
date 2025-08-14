@@ -4,21 +4,21 @@ Main Self-Improving AI Agent class.
 
 import asyncio
 import json
-from typing import Dict, List, Any, Optional
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from .memory import LongTermMemory, MemoryEntry
-from .context_manager import ContextManager
-from .evaluator import OutputEvaluator, EvaluationResult
 from ..knowledge.base import KnowledgeBase
 from ..knowledge.updater import KnowledgeUpdater
 from ..self_modification.code_analyzer import CodeAnalyzer
 from ..self_modification.modifier import CodeModifier
 from ..self_modification.validator import CodeValidator
 from ..utils.config import config
-from ..utils.logging import setup_logger
 from ..utils.llm_interface import llm_manager
+from ..utils.logging import setup_logger
 from ..utils.persistent_storage import persistent_data_manager
+from .context_manager import ContextManager
+from .evaluator import EvaluationResult, OutputEvaluator
+from .memory import LongTermMemory, MemoryEntry
 
 logger = setup_logger(__name__)
 

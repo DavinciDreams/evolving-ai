@@ -6,12 +6,12 @@ import asyncio
 import json
 import uuid
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Tuple, Union
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import chromadb
-from chromadb.config import Settings
 import numpy as np
+from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
 from ..utils.config import config
