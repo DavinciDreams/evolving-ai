@@ -3,6 +3,7 @@ Final demonstration of the complete self-improving agent system.
 """
 
 import asyncio
+
 from evolving_agent.self_modification.code_analyzer import CodeAnalyzer
 from evolving_agent.utils.logging import setup_logger
 
