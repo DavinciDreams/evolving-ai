@@ -222,3 +222,6 @@ evolving_agent/core/__pycache__/evaluator.cpython-313.pyc
 evolving_agent/core/__pycache__/memory.cpython-313.pyc
 evolving_agent/utils/__pycache__/config.cpython-313.pyc
 evolving_agent/utils/__pycache__/llm_interface.cpython-313.pyc
+# Roo configuration and mode files
+.roo/
+.roomodes/
