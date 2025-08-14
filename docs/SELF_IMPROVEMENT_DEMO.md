@@ -17,9 +17,10 @@ This file demonstrates the Self-Improving AI Agent's capability to enhance its o
 
 ## Improvements Made
 1. **Enhanced Documentation**: Added comprehensive docstrings with examples
-2. **Type Safety**: Improved type hints for better IDE support  
+2. **Type Safety**: Improved type hints for better IDE support
 3. **Code Clarity**: Added inline comments for complex logic
 4. **Performance Notes**: Documented performance considerations
+5. **Automated Linting Feedback Loop**: After each code improvement, the agent runs `isort` and `black` for formatting, then executes `flake8` to capture linting errors and warnings. These linting messages are made available to the agent context, enabling targeted fixes based on specific issues reported by `flake8`. The agent will attempt to resolve these issues in subsequent improvement cycles.
 
 ## Example Usage
 ```python
