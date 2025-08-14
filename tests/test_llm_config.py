@@ -5,7 +5,7 @@ Test script to verify LLM provider configuration changes.
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import asyncio
 import os
 import sys
@@ -22,30 +22,32 @@ from evolving_agent.utils.llm_interface import LLMManager
 async def test_llm_configuration():
     """Test the updated LLM configuration."""
     print("=== LLM Configuration Test ===")
-    
+
     # Test configuration
     print(f"Default LLM Provider: {config.default_llm_provider}")
     print(f"Default Model: {config.default_model}")
     print(f"Evaluation Model: {config.evaluation_model}")
-    
+
     # Test available providers
     print("\nAPI Key Status:")
     print(f"OpenAI API Key: {'✓ Set' if config.openai_api_key else '✗ Not set'}")
     print(f"Anthropic API Key: {'✓ Set' if config.anthropic_api_key else '✗ Not set'}")
-    print(f"OpenRouter API Key: {'✓ Set' if config.openrouter_api_key else '✗ Not set'}")
-    
+    print(
+        f"OpenRouter API Key: {'✓ Set' if config.openrouter_api_key else '✗ Not set'}"
+    )
+
     # Initialize LLM Manager
     llm_manager = LLMManager()
-    
+
     print(f"\nAvailable Providers: {list(llm_manager.interfaces.keys())}")
-    
+
     # Test provider selection
     try:
         default_interface = llm_manager.get_interface()
         print(f"Default interface type: {type(default_interface).__name__}")
     except Exception as e:
         print(f"Error getting default interface: {e}")
-    
+
     # Test each available provider
     for provider in llm_manager.interfaces.keys():
         try:

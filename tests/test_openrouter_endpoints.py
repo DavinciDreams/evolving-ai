@@ -5,7 +5,7 @@ Test OpenRouter API endpoint to verify the correct URL.
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import asyncio
 import json
 import os
@@ -23,61 +23,62 @@ import pytest
 @pytest.mark.asyncio
 async def test_openrouter_endpoints():
     """Test different OpenRouter API endpoints."""
-    
+
     # Get API key from environment variable
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         print("❌ OPENROUTER_API_KEY not found in environment variables")
         return
-    
+
     # Test different possible endpoints
     endpoints = [
         "https://openrouter.ai/api/v1/chat/completions",
-        "https://openrouter.ai/api/v1/completions", 
+        "https://openrouter.ai/api/v1/completions",
         "https://api.openrouter.ai/api/v1/chat/completions",
-        "https://api.openrouter.ai/v1/chat/completions"
+        "https://api.openrouter.ai/v1/chat/completions",
     ]
-    
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "HTTP-Referer": "https://github.com/evolving-ai-agent",
         "X-Title": "Self-Improving AI Agent",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
-    
+
     test_payload = {
         "model": "nvidia/llama-3.1-nemotron-ultra-253b-v1:free",
-        "messages": [{"role": "user", "content": "Hello, just testing the API endpoint."}],
+        "messages": [
+            {"role": "user", "content": "Hello, just testing the API endpoint."}
+        ],
         "temperature": 0.7,
-        "max_tokens": 50
+        "max_tokens": 50,
     }
-    
+
     async with httpx.AsyncClient() as client:
         for endpoint in endpoints:
             try:
                 print(f"Testing endpoint: {endpoint}")
                 response = await client.post(
-                    endpoint,
-                    headers=headers,
-                    json=test_payload,
-                    timeout=30.0
+                    endpoint, headers=headers, json=test_payload, timeout=30.0
                 )
-                
+
                 print(f"Status Code: {response.status_code}")
                 if response.status_code == 200:
                     print(f"✅ SUCCESS! Endpoint works: {endpoint}")
                     data = response.json()
-                    print(f"Response: {data.get('choices', [{}])[0].get('message', {}).get('content', 'No content')}")
+                    print(
+                        f"Response: {data.get('choices', [{}])[0].get('message', {}).get('content', 'No content')}"
+                    )
                     return endpoint
                 else:
                     print(f"❌ Failed with status: {response.status_code}")
                     print(f"Response: {response.text[:200]}...")
-                
+
             except Exception as e:
                 print(f"❌ Error testing {endpoint}: {e}")
-            
+
             print("-" * 50)
-    
+
     return None
 
 

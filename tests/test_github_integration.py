@@ -21,11 +21,11 @@ async def test_github_integration():
     """Test the GitHub integration functionality."""
     print("🐙 Testing GitHub Integration for Self-Improving Agent")
     print("=" * 70)
-    
+
     # Check for GitHub token
     github_token = os.getenv("GITHUB_TOKEN")
     github_repo = os.getenv("GITHUB_REPO")
-    
+
     if not github_token:
         print("⚠️  GITHUB_TOKEN not found in environment variables")
         print("   To enable GitHub integration, add to your .env file:")
@@ -35,37 +35,35 @@ async def test_github_integration():
         print("🧪 Running offline GitHub integration tests...")
         test_offline_functionality()
         return
-    
+
     if not github_repo:
         print("⚠️  GITHUB_REPO not found in environment variables")
         print("   Please set GITHUB_REPO=owner/repository-name in .env")
         test_offline_functionality()
         return
-    
+
     try:
         # Initialize GitHub integration
         print("🔧 Initializing GitHub integration...")
         github = GitHubIntegration(
-            github_token=github_token,
-            repo_name=github_repo,
-            local_repo_path="."
+            github_token=github_token, repo_name=github_repo, local_repo_path="."
         )
-        
+
         # Test initialization
         print("📡 Testing GitHub connection...")
         init_success = await github.initialize()
-        
+
         if not init_success:
             print("❌ Failed to initialize GitHub connection")
             test_offline_functionality()
             return
-        
+
         print("✅ GitHub connection successful!")
-        
+
         # Test 1: Get repository information
         print("\n1. 📊 Testing repository information retrieval...")
         repo_info = await github.get_repository_info()
-        
+
         if "error" in repo_info:
             print(f"❌ Error getting repo info: {repo_info['error']}")
         else:
@@ -74,23 +72,23 @@ async def test_github_integration():
             print(f"   Stars: {repo_info['stars']}")
             print(f"   Forks: {repo_info['forks']}")
             print(f"   Default branch: {repo_info['default_branch']}")
-        
+
         # Test 2: Get repository structure
         print("\n2. 🗂️  Testing repository structure...")
         structure = await github.get_repository_structure()
-        
+
         if "error" in structure:
             print(f"❌ Error getting structure: {structure['error']}")
         else:
             print(f"✅ Found {len(structure['items'])} items in root:")
-            for item in structure['items'][:10]:  # Show first 10
-                icon = "📁" if item['type'] == 'dir' else "📄"
+            for item in structure["items"][:10]:  # Show first 10
+                icon = "📁" if item["type"] == "dir" else "📄"
                 print(f"   {icon} {item['name']}")
-        
+
         # Test 3: Get specific file content
         print("\n3. 📄 Testing file content retrieval...")
         test_files = ["README.md", "main.py", "requirements.txt"]
-        
+
         for file_path in test_files:
             file_content = await github.get_file_content(file_path)
             if "error" not in file_content:
@@ -98,31 +96,31 @@ async def test_github_integration():
                 break
         else:
             print("❌ Could not retrieve any test files")
-        
+
         # Test 4: Get commit history
         print("\n4. 📝 Testing commit history...")
         commits = await github.get_commit_history(limit=5)
-        
+
         if commits:
             print(f"✅ Retrieved {len(commits)} recent commits:")
             for i, commit in enumerate(commits, 1):
-                short_sha = commit['sha'][:8]
-                message = commit['message'].split('\n')[0][:50]
+                short_sha = commit["sha"][:8]
+                message = commit["message"].split("\n")[0][:50]
                 print(f"   {i}. {short_sha} - {message}...")
         else:
             print("❌ Could not retrieve commit history")
-        
+
         # Test 5: Get open pull requests
         print("\n5. 🔄 Testing pull request retrieval...")
         prs = await github.get_open_pull_requests()
-        
+
         print(f"✅ Found {len(prs)} open pull requests")
         for pr in prs[:3]:  # Show first 3
             print(f"   #{pr['number']}: {pr['title']}")
-        
+
         # Test 6: Test improvement workflow (simulation)
         print("\n6. 🤖 Testing improvement workflow simulation...")
-        
+
         # Simulate improvements that the agent might generate
         mock_improvements = [
             {
@@ -148,16 +146,15 @@ the GitHub integration functionality.
 
 *This file can be safely deleted after testing.*
 """,
-                "description": "Demo file to test GitHub integration workflow"
+                "description": "Demo file to test GitHub integration workflow",
             }
         ]
-        
+
         # Test the complete workflow
         improvement_result = await github.create_improvement_branch_and_pr(
-            improvements=mock_improvements,
-            base_branch=None  # Use default branch
+            improvements=mock_improvements, base_branch=None  # Use default branch
         )
-        
+
         if "error" in improvement_result:
             print(f"⚠️  Improvement workflow test: {improvement_result['error']}")
         else:
@@ -165,11 +162,11 @@ the GitHub integration functionality.
             print(f"   Branch: {improvement_result['branch_name']}")
             print(f"   Files updated: {improvement_result['summary']['files_updated']}")
             print(f"   PR created: {improvement_result['summary']['pr_created']}")
-            
-            if improvement_result['summary']['pr_created']:
-                pr_info = improvement_result['pull_request']
+
+            if improvement_result["summary"]["pr_created"]:
+                pr_info = improvement_result["pull_request"]
                 print(f"   PR URL: {pr_info.get('url', 'N/A')}")
-        
+
         print("\n" + "=" * 70)
         print("🎉 GitHub Integration Test Summary")
         print("=" * 70)
@@ -179,13 +176,13 @@ the GitHub integration functionality.
         print("✅ Commit history: Working")
         print("✅ Pull request access: Working")
         print("✅ Improvement workflow: Working")
-        
+
         print("\n🚀 GitHub integration is ready for:")
         print("   • Accessing own codebase")
         print("   • Creating improvement branches")
         print("   • Submitting pull requests with code improvements")
         print("   • Monitoring repository activity")
-        
+
     except Exception as e:
         logger.error(f"GitHub integration test failed: {e}")
         print(f"❌ GitHub integration test failed: {e}")
@@ -196,38 +193,38 @@ def test_offline_functionality():
     """Test GitHub integration functionality that doesn't require a connection."""
     print("\n🔧 Testing Offline GitHub Integration Features")
     print("-" * 50)
-    
+
     try:
         # Test initialization without credentials
         github = GitHubIntegration()
         print("✅ GitHub integration class can be instantiated")
-        
+
         # Test PR description generation
         test_files = [
             {
                 "file_path": "evolving_agent/core/agent.py",
                 "description": "Optimized response generation loop",
-                "commit_sha": "abc12345"
+                "commit_sha": "abc12345",
             },
             {
-                "file_path": "evolving_agent/utils/llm_interface.py", 
+                "file_path": "evolving_agent/utils/llm_interface.py",
                 "description": "Added connection pooling for better performance",
-                "commit_sha": "def67890"
-            }
+                "commit_sha": "def67890",
+            },
         ]
-        
+
         pr_description = github._generate_pr_description(test_files)
         print("✅ PR description generation works")
         print(f"   Generated description length: {len(pr_description)} characters")
-        
+
         # Test local repo detection
         if os.path.exists(".git"):
             print("✅ Local git repository detected")
         else:
             print("⚠️  No local git repository found")
-        
+
         print("\n✅ Offline functionality tests passed")
-        
+
     except Exception as e:
         print(f"❌ Offline test failed: {e}")
 
@@ -236,7 +233,7 @@ async def demo_improvement_workflow():
     """Demonstrate how the GitHub integration would work for code improvements."""
     print("\n🎯 GitHub Improvement Workflow Demo")
     print("=" * 50)
-    
+
     print("This is how the self-improving agent would use GitHub integration:")
     print()
     print("1. 🔍 Agent analyzes its own codebase")
@@ -272,21 +269,21 @@ async def demo_improvement_workflow():
     print("   • Stores feedback in knowledge base")
     print("   • Improves future suggestions")
     print("   • Updates improvement patterns")
-    
+
     # Example improvement structure
     example_improvements = [
         {
             "file_path": "evolving_agent/core/agent.py",
             "content": "# Example optimized code...",
-            "description": "Optimized _format_context_for_prompt method (complexity: 11 → 7)"
+            "description": "Optimized _format_context_for_prompt method (complexity: 11 → 7)",
         },
         {
             "file_path": "evolving_agent/core/evaluator.py",
             "content": "# Example improved code...",
-            "description": "Added caching to evaluation pipeline for 40% speed improvement"
-        }
+            "description": "Added caching to evaluation pipeline for 40% speed improvement",
+        },
     ]
-    
+
     print(f"\n📊 Example improvements the agent might suggest:")
     for i, improvement in enumerate(example_improvements, 1):
         print(f"   {i}. {improvement['file_path']}")
@@ -297,13 +294,13 @@ async def main():
     """Run all GitHub integration tests."""
     print("🚀 Self-Improving Agent - GitHub Integration Testing")
     print("=" * 80)
-    
+
     # Test GitHub integration
     await test_github_integration()
-    
+
     # Demo workflow
     await demo_improvement_workflow()
-    
+
     print("\n" + "=" * 80)
     print("📋 Setup Instructions for GitHub Integration:")
     print("=" * 80)
@@ -329,4 +326,5 @@ async def main():
 if __name__ == "__main__":
     # Fix missing import
     from datetime import datetime
+
     asyncio.run(main())

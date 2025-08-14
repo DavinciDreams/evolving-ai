@@ -25,43 +25,43 @@ logger = setup_logger(__name__)
 async def main():
     """Main function to run the self-improving agent."""
     logger.info("Initializing Self-Improving AI Agent...")
-    
+
     try:
         # Initialize the agent
         agent = SelfImprovingAgent()
         await agent.initialize()
-        
+
         logger.info("Agent initialized successfully!")
-        
+
         # Interactive mode
         print("Self-Improving AI Agent is ready!")
         print("Type 'quit' to exit, 'help' for commands")
-        
+
         while True:
             user_input = input("\n> ").strip()
-            
-            if user_input.lower() in ['quit', 'exit']:
+
+            if user_input.lower() in ["quit", "exit"]:
                 break
-            elif user_input.lower() == 'help':
+            elif user_input.lower() == "help":
                 print_help()
                 continue
-            elif user_input.lower() == 'status':
+            elif user_input.lower() == "status":
                 await agent.print_status()
                 continue
-            elif user_input.lower() == 'memory':
+            elif user_input.lower() == "memory":
                 await agent.print_memory_stats()
                 continue
-            elif user_input.lower() == 'stats':
+            elif user_input.lower() == "stats":
                 stats = await agent.data_manager.get_session_statistics()
                 print(f"\nSession Statistics:\n{format_statistics(stats)}")
                 continue
-            elif user_input.lower() == 'interactions':
+            elif user_input.lower() == "interactions":
                 interactions = await agent.data_manager.get_recent_interactions(5)
                 print(f"\nRecent Interactions:\n{format_interactions(interactions)}")
                 continue
             elif not user_input:
                 continue
-            
+
             # Process the input
             try:
                 result = await agent.run(user_input)
@@ -69,14 +69,14 @@ async def main():
             except Exception as e:
                 logger.error(f"Error processing input: {e}")
                 print(f"Error: {e}")
-    
+
     except Exception as e:
         logger.error(f"Failed to initialize agent: {e}")
         print(f"Failed to start agent: {e}")
-    
+
     finally:
         # Cleanup agent resources
-        if 'agent' in locals():
+        if "agent" in locals():
             try:
                 await agent.cleanup()
             except Exception as e:
@@ -86,7 +86,8 @@ async def main():
 
 def print_help():
     """Print available commands."""
-    print("""
+    print(
+        """
 Available commands:
 - help: Show this help message
 - status: Show agent status and performance
@@ -96,14 +97,15 @@ Available commands:
 - quit/exit: Exit the program
 
 You can also type any question or task for the agent to process.
-""")
+"""
+    )
 
 
 def format_statistics(stats):
     """Format session statistics for display."""
     if not stats:
         return "No statistics available"
-    
+
     return f"""
 Session ID: {stats.get('session_id', 'N/A')}
 Duration: {stats.get('session_duration_minutes', 0):.1f} minutes
@@ -122,15 +124,19 @@ def format_interactions(interactions):
     """Format recent interactions for display."""
     if not interactions:
         return "No recent interactions"
-    
+
     formatted = ""
     for i, interaction in enumerate(interactions[:5], 1):
-        score = interaction.get('evaluation_score', 'N/A')
-        timestamp = interaction.get('timestamp', 'N/A')
-        query = interaction.get('query', '')[:50] + "..." if len(interaction.get('query', '')) > 50 else interaction.get('query', '')
-        
+        score = interaction.get("evaluation_score", "N/A")
+        timestamp = interaction.get("timestamp", "N/A")
+        query = (
+            interaction.get("query", "")[:50] + "..."
+            if len(interaction.get("query", "")) > 50
+            else interaction.get("query", "")
+        )
+
         formatted += f"{i}. [{timestamp}] Score: {score} - {query}\n"
-    
+
     return formatted
 
 
