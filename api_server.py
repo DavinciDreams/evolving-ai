@@ -275,7 +275,7 @@ async def get_status(current_agent: SelfImprovingAgent = Depends(get_agent)):
         knowledge_count = 0
         if hasattr(current_agent, 'knowledge_base'):
             try:
-                knowledge_count = len(current_agent.knowledge_base.knowledge_items)
+                knowledge_count = len(current_agent.knowledge_base.knowledge)
             except Exception:
                 knowledge_count = 0
         
@@ -455,7 +455,7 @@ async def get_knowledge(
             return []
         
         knowledge_items = []
-        all_items = current_agent.knowledge_base.knowledge_items
+        all_items = current_agent.knowledge_base.knowledge
         
         # Filter by category if specified
         if category:

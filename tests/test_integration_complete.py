@@ -124,7 +124,7 @@ async def test_complete_self_improvement_cycle():
         # Check knowledge base
         if hasattr(agent, 'knowledge_base'):
             try:
-                kb_size = len(agent.knowledge_base.knowledge_items)
+                kb_size = len(agent.knowledge_base.knowledge)
                 print(f"📚 Knowledge Base Items: {kb_size}")
             except:
                 print("📚 Knowledge base size not available")
