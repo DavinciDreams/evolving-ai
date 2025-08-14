@@ -87,11 +87,26 @@ When enabled, the agent will:
 - Analyze its own codebase for improvements
 - Propose and validate modifications
 - Optionally create GitHub pull requests for validated changes
+- **Autofix code style using `isort` and `black` before committing improvements**
+
+**Linting Autofix Step:**
+Before each code improvement is committed, the agent automatically runs [`isort`](https://pycqa.github.io/isort/) and [`black`](https://black.readthedocs.io/en/stable/) to ensure code style consistency.
+If autofix fails for a file, that file is skipped and not committed.
+
+**Manual Linting:**
+To manually run the same linting autofix on your codebase:
+```bash
+isort path/to/your/file.py
+black path/to/your/file.py
+# Or recursively for the whole project:
+isort .
+black .
+```
 
 **Workflow:**
 1. Set `ENABLE_SELF_MODIFICATION=true` in `.env`
 2. Run `python main.py` or start the API server
-3. The agent will autonomously analyze, modify, and validate its code according to the self-improvement cycle
+3. The agent will autonomously analyze, modify, autofix (isort + black), and validate its code according to the self-improvement cycle
 
 See [`docs/SELF_IMPROVEMENT_DEMO.md`](docs/SELF_IMPROVEMENT_DEMO.md) for a detailed walkthrough.
 
