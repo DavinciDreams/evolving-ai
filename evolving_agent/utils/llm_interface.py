@@ -4,13 +4,14 @@ LLM interface for communicating with various language model providers.
 
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional, Union, Tuple
 from enum import Enum
-import openai
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import anthropic
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
+import openai
 from loguru import logger
+from tenacity import RetryError, retry, stop_after_attempt, wait_exponential
 
 from ..utils.config import config
 from ..utils.logging import setup_logger
@@ -345,3 +346,4 @@ class LLMManager:
         for provider, status in self.provider_status.items():
             if not status['available']:
                 error_str
+llm_manager = LLMManager()

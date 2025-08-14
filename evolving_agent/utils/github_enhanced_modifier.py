@@ -2,12 +2,12 @@
 Enhanced self-modification system with GitHub integration.
 """
 
-import asyncio
 import ast
+import asyncio
 import os
-from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from evolving_agent.self_modification.code_analyzer import CodeAnalyzer
 from evolving_agent.self_modification.modifier import CodeModifier

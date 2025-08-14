@@ -3,8 +3,9 @@ Configuration management for the self-improving agent.
 """
 
 import os
-from typing import Dict, Any, Optional
 from pathlib import Path
+from typing import Any, Dict, Optional
+
 from dotenv import load_dotenv
 
 

@@ -4,19 +4,19 @@ Allows the agent to access its own repository and create pull requests with impr
 """
 
 import asyncio
-import os
 import json
-from typing import List, Dict, Any, Optional
+import os
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import git
 from github import Github, GithubException
-from github.Repository import Repository
 from github.PullRequest import PullRequest
+from github.Repository import Repository
 
-from evolving_agent.utils.logging import setup_logger
 from evolving_agent.utils.config import config
+from evolving_agent.utils.logging import setup_logger
 
 logger = setup_logger(__name__)
 
@@ -613,6 +613,8 @@ class GitHubIntegration:
             
             # Apply improvements
             updated_files = []
+            import subprocess
+
             for improvement in improvements:
                 file_path = improvement.get("file_path")
                 new_content = improvement.get("content")
@@ -620,12 +622,61 @@ class GitHubIntegration:
                 
                 if not file_path or not new_content:
                     continue
-                
+
+                # Write the new content to the local file before linting
+                abs_file_path = os.path.join(self.local_repo_path, file_path)
+                try:
+                    os.makedirs(os.path.dirname(abs_file_path), exist_ok=True)
+                    with open(abs_file_path, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+                except Exception as e:
+                    logger.error(f"Failed to write file {abs_file_path} before linting: {e}")
+                    continue
+
+                # Run isort and black autofix
+                lint_failed = False
+                for cmd, tool in [
+                    (["isort", abs_file_path], "isort"),
+                    (["black", abs_file_path], "black"),
+                ]:
+                    try:
+                        result = subprocess.run(cmd, capture_output=True, text=True)
+                        if result.returncode != 0:
+                            logger.error(f"{tool} failed for {file_path}: {result.stderr.strip()}")
+                            lint_failed = True
+                            break
+                    except Exception as e:
+                        logger.error(f"Exception running {tool} on {file_path}: {e}")
+                        lint_failed = True
+                        break
+
+                if lint_failed:
+                    logger.warning(f"Skipping commit for {file_path} due to linting failure.")
+                    continue
+
+                # Run flake8 and capture linting messages
+                flake8_output = ""
+                try:
+                    flake8_cmd = ["flake8", abs_file_path]
+                    flake8_proc = subprocess.run(flake8_cmd, capture_output=True, text=True)
+                    flake8_output = flake8_proc.stdout.strip() + ("\n" + flake8_proc.stderr.strip() if flake8_proc.stderr else "")
+                except Exception as e:
+                    logger.error(f"Exception running flake8 on {file_path}: {e}")
+                    flake8_output = f"flake8 execution error: {e}"
+
+                # Read back the possibly modified content after linting
+                try:
+                    with open(abs_file_path, "r", encoding="utf-8") as f:
+                        linted_content = f.read()
+                except Exception as e:
+                    logger.error(f"Failed to read linted file {abs_file_path}: {e}")
+                    continue
+
                 commit_message = f"AI Improvement: {description}"
                 
                 update_result = await self.update_file(
                     file_path=file_path,
-                    new_content=new_content,
+                    new_content=linted_content,
                     commit_message=commit_message,
                     branch=branch_name
                 )
@@ -634,7 +685,8 @@ class GitHubIntegration:
                     updated_files.append({
                         "file_path": file_path,
                         "description": description,
-                        "commit_sha": update_result.get("commit_sha")
+                        "commit_sha": update_result.get("commit_sha"),
+                        "flake8_lint": flake8_output
                     })
             
             if not updated_files:

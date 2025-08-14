@@ -8,15 +8,15 @@ pull requests, track improvements, and handle the self-improvement workflow.
 import asyncio
 import json
 from datetime import datetime
-from typing import Dict, List, Optional, Any
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
-from .github_integration import GitHubIntegration
 from ..self_modification.code_analyzer import CodeAnalyzer
 from ..self_modification.modifier import CodeModifier
 from ..self_modification.validator import CodeValidator
+from .github_integration import GitHubIntegration
 
 
 class AgentPRManager:

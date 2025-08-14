@@ -5,8 +5,9 @@ Enhanced logging utilities for the self-improving agent.
 import os
 import sys
 from pathlib import Path
-from loguru import logger
 from typing import Optional
+
+from loguru import logger
 
 
 def setup_logger(name: str, log_level: Optional[str] = None) -> object:
