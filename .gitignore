@@ -1,7 +1,30 @@
-# Environment files
+# Environment files and secrets
 .env
 .env.local
 .env.*.local
+*.key
+secrets/
+
+# NEVER commit API keys or credentials
+*_api_key*
+*_token*
+*_secret*
+
+# Project Organization - prevent misplaced files
+# Avoid committing test files in main directory
+/test_*.py
+/debug_*.py
+
+# Avoid committing docs in main directory (except README)
+/API_DOCUMENTATION.md
+/PRD.md
+/QUICKSTART.md
+/LLM_PROVIDERS.md
+/PROJECT_COMPLETION_SUMMARY.md
+/SWAGGER_IMPLEMENTATION_SUMMARY.md
+/GITHUB_*.md
+/*.md
+!/README.md
 
 # Log files
 *.log
