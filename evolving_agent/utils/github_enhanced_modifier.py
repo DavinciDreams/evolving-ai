@@ -363,7 +363,7 @@ class GitHubEnabledSelfModifier:
             
             # Check GitHub connection
             status["github_connected"] = (
-                self.github_integration.github is not None and 
+                self.github_integration.github_client is not None and
                 self.github_integration.repository is not None
             )
             
