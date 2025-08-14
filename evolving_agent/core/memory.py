@@ -114,17 +114,35 @@ class MemorySearchProcessor:
     async def process_results(self, results: Dict[str, Any], similarity_threshold: float) -> List[Tuple[MemoryEntry, float]]:
         """Process and filter search results."""
         memories = []
-        if results["ids"]:
-            for i, doc_id in enumerate(results["ids"][0]):
-                distance = results["distances"][0][i]
-                similarity = 1 - distance
-                
-                if similarity >= similarity_threshold:
-                    metadata = results["metadatas"][0][i]
-                    content = results["documents"][0][i]
-                    entry = MemoryEntry.from_chroma_result(doc_id, content, metadata)
-                    memories.append((entry, similarity))
+        if not results["ids"]:
+            return memories
+            
+        for i, doc_id in enumerate(results["ids"][0]):
+            memory = await self._process_single_result(
+                doc_id,
+                results["distances"][0][i],
+                results["metadatas"][0][i],
+                results["documents"][0][i],
+                similarity_threshold
+            )
+            if memory:
+                memories.append(memory)
         return memories
+
+    async def _process_single_result(
+        self, 
+        doc_id: str,
+        distance: float,
+        metadata: Dict[str, Any],
+        content: str,
+        similarity_threshold: float
+    ) -> Optional[Tuple[MemoryEntry, float]]:
+        """Process a single search result."""
+        similarity = 1 - distance
+        if similarity >= similarity_threshold:
+            entry = MemoryEntry.from_chroma_result(doc_id, content, metadata)
+            return (entry, similarity)
+        return None
 
     def get_where_clause(self, memory_type: Optional[str]) -> Optional[Dict[str, str]]:
         """Generate where clause for search query."""
@@ -200,21 +218,23 @@ class LongTermMemory:
         """Generate embedding for content."""
         return self.embedding_model.encode(content).tolist()
 
+    async def _add_entry_to_collection(self, entry: MemoryEntry):
+        """Add entry to ChromaDB collection."""
+        sanitized_metadata = self.metadata_handler.prepare_metadata(entry)
+        self.collection.add(
+            ids=[entry.id],
+            embeddings=[entry.embedding],
+            documents=[entry.content],
+            metadatas=[sanitized_metadata]
+        )
+
     async def add_memory(self, entry: MemoryEntry) -> str:
         """Add a memory entry to the database."""
         self._ensure_initialized()
         
         try:
             entry.embedding = await self._generate_embedding(entry.content)
-            sanitized_metadata = self.metadata_handler.prepare_metadata(entry)
-            
-            self.collection.add(
-                ids=[entry.id],
-                embeddings=[entry.embedding],
-                documents=[entry.content],
-                metadatas=[sanitized_metadata]
-            )
-            
+            await self._add_entry_to_collection(entry)
             logger.info(f"Added memory entry: {entry.id}")
             return entry.id
             
@@ -256,16 +276,19 @@ class LongTermMemory:
         
         try:
             results = self.collection.get(ids=[memory_id])
-            
-            if results["ids"]:
-                metadata = results["metadatas"][0]
-                content = results["documents"][0]
-                return MemoryEntry.from_chroma_result(memory_id, content, metadata)
-            return None
+            return await self._process_get_results(results, memory_id)
             
         except Exception as e:
             logger.error(f"Failed to get memory {memory_id}: {e}")
             raise
+
+    async def _process_get_results(self, results: Dict[str, Any], memory_id: str) -> Optional[MemoryEntry]:
+        """Process results from get operation."""
+        if results["ids"]:
+            metadata = results["metadatas"][0]
+            content = results["documents"][0]
+            return MemoryEntry.from_chroma_result(memory_id, content, metadata)
+        return None
 
     async def update_memory(self, memory_id: str, entry: MemoryEntry) -> bool:
         """Update an existing memory entry."""
@@ -275,16 +298,19 @@ class LongTermMemory:
             if not await self.get_memory(memory_id):
                 return False
                 
-            self.collection.delete(ids=[memory_id])
-            entry.id = memory_id
-            await self.add_memory(entry)
-            
+            await self._perform_update(memory_id, entry)
             logger.info(f"Updated memory entry: {memory_id}")
             return True
             
         except Exception as e:
             logger.error(f"Failed to update memory {memory_id}: {e}")
             raise
+
+    async def _perform_update(self, memory_id: str, entry: MemoryEntry):
+        """Perform memory update operation."""
+        self.collection.delete(ids=[memory_id])
+        entry.id = memory_id
+        await self.add_memory(entry)
 
     async def delete_memory(self, memory_id: str) -> bool:
         """Delete a memory entry."""
@@ -342,7 +368,7 @@ class LongTermMemory:
                 return 0
                 
             entries_to_delete = await self._get_entries_to_delete(current_count - max_entries)
-            self.collection.delete(ids=entries_to_delete)
+            await self._perform_cleanup(entries_to_delete)
             
             logger.info(f"Cleaned up {len(entries_to_delete)} old memory entries")
             return len(entries_to_delete)
@@ -364,3 +390,8 @@ class LongTermMemory:
         entries_with_timestamps.sort(key=lambda x: x[1])
         
         return [entry[0] for entry in entries_with_timestamps[:num_entries]]
+
+    async def _perform_cleanup(self, entries_to_delete: List[str]):
+        """Perform cleanup of old entries."""
+        if entries_to_delete:
+            self.collection.delete(ids=entries_to_delete)
