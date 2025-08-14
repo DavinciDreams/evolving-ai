@@ -212,10 +212,13 @@ class OpenRouterInterface(LLMInterface):
         self.api_key = api_key
         self.model = model
         self.base_url = "https://openrouter.ai/api/v1"
-        self.headers = {
-            "Authorization": f"Bearer {api_key}",
+    
+    def _get_headers(self) -> Dict[str, str]:
+        """Get fresh headers for each request."""
+        return {
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/evolving-ai-agent",
+            "HTTP-Referer": "https://github.com/DavinciDreams/evolving-ai",
             "X-Title": "Self-Improving AI Agent"
         }
     
@@ -247,10 +250,13 @@ class OpenRouterInterface(LLMInterface):
                 **valid_kwargs
             }
             
+            # Get fresh headers for each request
+            headers = self._get_headers()
+            
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
-                    headers=self.headers,
+                    headers=headers,
                     json=payload
                 )
                 response.raise_for_status()
@@ -284,10 +290,13 @@ class OpenRouterInterface(LLMInterface):
                 **valid_kwargs
             }
             
+            # Get fresh headers for each request
+            headers = self._get_headers()
+            
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
-                    headers=self.headers,
+                    headers=headers,
                     json=payload
                 )
                 response.raise_for_status()
@@ -319,8 +328,8 @@ class LLMManager:
         """Initialize available LLM interfaces."""
         self.default_provider = config.default_llm_provider
         
-        # Initialize OpenAI
-        if config.openai_api_key:
+        # Initialize OpenAI only if API key is properly configured (not placeholder)
+        if config.openai_api_key and config.openai_api_key != "your_openai_api_key_here":
             try:
                 self.interfaces["openai"] = OpenAIInterface(
                     config.openai_api_key,
@@ -329,19 +338,21 @@ class LLMManager:
                 logger.info("OpenAI interface initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize OpenAI interface: {e}")
+        else:
+            logger.info("OpenAI interface skipped - API key not configured")
         
-        # Initialize Anthropic
+        # Initialize Anthropic (Claude) - prioritized
         if config.anthropic_api_key:
             try:
                 self.interfaces["anthropic"] = AnthropicInterface(
                     config.anthropic_api_key,
                     config.default_model if config.default_llm_provider == "anthropic" else "claude-3-5-sonnet-20241022"
                 )
-                logger.info("Anthropic interface initialized")
+                logger.info("Anthropic (Claude) interface initialized - PRIMARY PROVIDER")
             except Exception as e:
                 logger.error(f"Failed to initialize Anthropic interface: {e}")
         
-        # Initialize OpenRouter
+        # Initialize OpenRouter as backup
         if config.openrouter_api_key:
             try:
                 # Use a working model that we verified
@@ -350,7 +361,7 @@ class LLMManager:
                     config.openrouter_api_key,
                     model
                 )
-                logger.info("OpenRouter interface initialized")
+                logger.info("OpenRouter interface initialized - BACKUP PROVIDER")
             except Exception as e:
                 logger.error(f"Failed to initialize OpenRouter interface: {e}")
         
@@ -379,7 +390,8 @@ class LLMManager:
     async def get_available_providers(self) -> List[str]:
         """Get list of currently available providers."""
         available = []
-        for provider in ['openai', 'anthropic', 'openrouter']:
+        # Check providers in priority order: anthropic -> openrouter -> openai
+        for provider in ['anthropic', 'openrouter', 'openai']:
             if provider in self.interfaces:
                 if await self.check_provider_availability(provider):
                     available.append(provider)
@@ -397,12 +409,18 @@ class LLMManager:
         if preferred_provider and preferred_provider in available:
             return preferred_provider
         
-        # Fallback order: openai -> anthropic -> openrouter
-        fallback_order = ['openai', 'anthropic', 'openrouter']
+        # Prioritize Claude (Anthropic) first, then fallback to OpenRouter, skip OpenAI
+        fallback_order = ['anthropic', 'openrouter', 'openai']
         for provider in fallback_order:
             if provider in available:
-                logger.info(f"Using fallback provider: {provider}")
-                return provider
+                if provider != 'openai':  # Skip OpenAI unless it's the only option
+                    logger.info(f"Using provider: {provider}")
+                    return provider
+        
+        # Only use OpenAI if it's the absolute last resort
+        if 'openai' in available and len(available) == 1:
+            logger.warning("Using OpenAI as last resort - consider setting up Claude/Anthropic")
+            return 'openai'
         
         # Return first available if no preferred order matches
         return available[0]
@@ -447,26 +465,28 @@ class LLMManager:
         
         # Provide helpful suggestions
         suggestions = []
-        if not self.provider_status['openai']['available']:
-            error_str = str(self.provider_status['openai'].get('last_error', ''))
-            if 'invalid_api_key' in error_str or 'Incorrect API key' in error_str:
-                suggestions.append("• Replace 'your_openai_api_key_here' with a valid OpenAI API key in .env")
-            else:
-                suggestions.append("• Check your OpenAI account credits and API key")
-        
         if not self.provider_status['anthropic']['available']:
             error_str = str(self.provider_status['anthropic'].get('last_error', ''))
             if 'credit balance' in error_str:
                 suggestions.append("• Add credits to your Anthropic account at https://console.anthropic.com/")
             elif 'system' in error_str:
                 suggestions.append("• Anthropic API format issue - checking latest code...")
+            else:
+                suggestions.append("• Check your Anthropic (Claude) API key and account status - PRIMARY PROVIDER")
         
         if not self.provider_status['openrouter']['available']:
             error_str = str(self.provider_status['openrouter'].get('last_error', ''))
             if '429' in error_str:
                 suggestions.append("• Wait for OpenRouter rate limit reset (daily limit: 50 requests)")
             else:
-                suggestions.append("• Check your OpenRouter account and API key")
+                suggestions.append("• Check your OpenRouter account and API key - BACKUP PROVIDER")
+        
+        if not self.provider_status['openai']['available'] and 'openai' in self.interfaces:
+            error_str = str(self.provider_status['openai'].get('last_error', ''))
+            if 'invalid_api_key' in error_str or 'Incorrect API key' in error_str:
+                suggestions.append("• OpenAI API key invalid - intentionally disabled, using Claude instead")
+            else:
+                suggestions.append("• OpenAI disabled by design - using Claude (Anthropic) as primary")
         
         if suggestions:
             logger.info("💡 Suggestions:")
@@ -525,6 +545,18 @@ class LLMManager:
         """Refresh all interfaces with current configuration."""
         self.interfaces.clear()
         self._initialized = False
+        
+        # Force reload the .env file to pick up any changes
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
+        
+        # Force reload the config module
+        import importlib
+        from ..utils import config as config_module
+        importlib.reload(config_module)
+        global config
+        config = config_module.config
+        
         self._ensure_initialized()
         logger.info("LLM interfaces refreshed with current configuration")
 
