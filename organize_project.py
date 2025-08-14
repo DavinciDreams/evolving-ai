@@ -4,11 +4,12 @@ Project organization maintenance script.
 Helps keep the project structure clean and organized.
 """
 
+import fnmatch
 import os
 import shutil
 from pathlib import Path
 from typing import List, Tuple
-import fnmatch
+
 
 def get_project_root() -> Path:
     """Get the project root directory."""
