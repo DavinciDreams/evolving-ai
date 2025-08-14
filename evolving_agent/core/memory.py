@@ -188,8 +188,8 @@ class MemoryOperations:
         self.collection.delete(ids=[memory_id])
         return True
 
-    async def process_memory_types(self, metadatas: List[Dict]) -> Dict[str, int]:
-        """Process memory types from metadata."""
+    async def process_memory_type_counts(self, metadatas: List[Dict]) -> Dict[str, int]:
+        """Process memory type counts from metadata."""
         memory_types = {}
         for metadata in metadatas:
             mem_type = metadata.get("memory_type", "general")
@@ -201,7 +201,7 @@ class MemoryOperations:
         all_data = self.collection.get()
         if not all_data["metadatas"]:
             return {}
-        return await self.process_memory_types(all_data["metadatas"])
+        return await self.process_memory_type_counts(all_data["metadatas"])
 
     async def sort_entries_by_timestamp(self, entries_data: Dict[str, Any]) -> List[str]:
         """Sort entries by timestamp and return IDs."""
@@ -217,7 +217,6 @@ class MemoryOperations:
         all_data = self.collection.get()
         if not all_data["ids"]:
             return []
-            
         sorted_entries = await self.sort_entries_by_timestamp(all_data)
         return sorted_entries[:num_entries]
 
