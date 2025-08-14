@@ -112,6 +112,15 @@ class MemorySearchProcessor:
     def __init__(self, collection):
         self.collection = collection
 
+    async def process_single_result(self, doc_id: str, distance: float, metadata: Dict, content: str, 
+                                  similarity_threshold: float) -> Optional[Tuple[MemoryEntry, float]]:
+        """Process a single search result."""
+        similarity = 1 - distance
+        if similarity >= similarity_threshold:
+            entry = MemoryEntry.from_chroma_result(doc_id, content, metadata)
+            return (entry, similarity)
+        return None
+
     async def process_results(self, results: Dict[str, Any], similarity_threshold: float) -> List[Tuple[MemoryEntry, float]]:
         """Process and filter search results."""
         if not results["ids"]:
@@ -124,10 +133,9 @@ class MemorySearchProcessor:
             results["metadatas"][0],
             results["documents"][0]
         )):
-            similarity = 1 - distance
-            if similarity >= similarity_threshold:
-                entry = MemoryEntry.from_chroma_result(doc_id, content, metadata)
-                memories.append((entry, similarity))
+            result = await self.process_single_result(doc_id, distance, metadata, content, similarity_threshold)
+            if result:
+                memories.append(result)
         return memories
 
     def get_where_clause(self, memory_type: Optional[str]) -> Optional[Dict[str, str]]:
@@ -147,10 +155,14 @@ class MemoryOperations:
         """Generate embedding for content."""
         return self.embedding_model.encode(content).tolist()
 
+    async def prepare_memory_for_storage(self, entry: MemoryEntry):
+        """Prepare memory entry for storage."""
+        entry.embedding = await self.generate_embedding(entry.content)
+        return self.metadata_handler.prepare_metadata(entry)
+
     async def add_memory(self, entry: MemoryEntry) -> str:
         """Add a memory entry."""
-        entry.embedding = await self.generate_embedding(entry.content)
-        sanitized_metadata = self.metadata_handler.prepare_metadata(entry)
+        sanitized_metadata = await self.prepare_memory_for_storage(entry)
         
         self.collection.add(
             ids=[entry.id],
@@ -176,17 +188,29 @@ class MemoryOperations:
         self.collection.delete(ids=[memory_id])
         return True
 
+    async def process_memory_types(self, metadatas: List[Dict]) -> Dict[str, int]:
+        """Process memory types from metadata."""
+        memory_types = {}
+        for metadata in metadatas:
+            mem_type = metadata.get("memory_type", "general")
+            memory_types[mem_type] = memory_types.get(mem_type, 0) + 1
+        return memory_types
+
     async def get_memory_type_distribution(self) -> Dict[str, int]:
         """Get distribution of memory types."""
-        memory_types = {}
         all_data = self.collection.get()
-        
-        if all_data["metadatas"]:
-            for metadata in all_data["metadatas"]:
-                mem_type = metadata.get("memory_type", "general")
-                memory_types[mem_type] = memory_types.get(mem_type, 0) + 1
-                
-        return memory_types
+        if not all_data["metadatas"]:
+            return {}
+        return await self.process_memory_types(all_data["metadatas"])
+
+    async def sort_entries_by_timestamp(self, entries_data: Dict[str, Any]) -> List[str]:
+        """Sort entries by timestamp and return IDs."""
+        entries_with_timestamps = [
+            (entry_id, datetime.fromisoformat(metadata["timestamp"]))
+            for entry_id, metadata in zip(entries_data["ids"], entries_data["metadatas"])
+        ]
+        entries_with_timestamps.sort(key=lambda x: x[1])
+        return [entry[0] for entry in entries_with_timestamps]
 
     async def get_entries_to_delete(self, num_entries: int) -> List[str]:
         """Get IDs of oldest entries to delete."""
@@ -194,13 +218,8 @@ class MemoryOperations:
         if not all_data["ids"]:
             return []
             
-        entries_with_timestamps = [
-            (entry_id, datetime.fromisoformat(metadata["timestamp"]))
-            for entry_id, metadata in zip(all_data["ids"], all_data["metadatas"])
-        ]
-        entries_with_timestamps.sort(key=lambda x: x[1])
-        
-        return [entry[0] for entry in entries_with_timestamps[:num_entries]]
+        sorted_entries = await self.sort_entries_by_timestamp(all_data)
+        return sorted_entries[:num_entries]
 
 
 class LongTermMemory:
