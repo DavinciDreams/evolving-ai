@@ -34,7 +34,7 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
 1. **Clone the repository**:
    ```bash
    git clone <repository-url>
-   cd evolving-ai-agent
+   cd evolving ai
    ```
 
 2. **Install dependencies**:
@@ -48,23 +48,55 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
    # Edit .env with your API keys and configuration
    ```
 
-4. **Initialize the system**:
-   ```bash
-   python main.py
-   ```
-
 ## 🚀 Usage
 
-### Running the Agent
-```bash
-# Run the main agent
-python main.py
+### Main Entry Points
 
-# Start the API server
-python -m uvicorn api_server:app --host 127.0.0.1 --port 8000 --reload
+- **Run the main agent:**
+  ```bash
+  python main.py
+  ```
+
+- **Start the API server:**
+  ```bash
+  python -m uvicorn api_server:app --host 127.0.0.1 --port 8000 --reload
+  ```
+
+- **Organize or clean up the project structure:**
+  ```bash
+  python organize_project.py
+  ```
+
+- **Generate or summarize Swagger API docs:**
+  ```bash
+  python swagger_summary.py
+  ```
+
+- **Run the complete system demo:**
+  ```bash
+  python demo_complete_system.py
+  ```
+
+### Self-Improvement System
+
+To enable autonomous self-improvement and code modification, set the following in your `.env` file:
+```env
+ENABLE_SELF_MODIFICATION=true
 ```
+When enabled, the agent will:
+- Analyze its own codebase for improvements
+- Propose and validate modifications
+- Optionally create GitHub pull requests for validated changes
+
+**Workflow:**
+1. Set `ENABLE_SELF_MODIFICATION=true` in `.env`
+2. Run `python main.py` or start the API server
+3. The agent will autonomously analyze, modify, and validate its code according to the self-improvement cycle
+
+See [`docs/SELF_IMPROVEMENT_DEMO.md`](docs/SELF_IMPROVEMENT_DEMO.md) for a detailed walkthrough.
 
 ### API Endpoints
+
 Access the interactive API documentation at: `http://localhost:8000/docs`
 
 Key endpoints:
@@ -75,16 +107,16 @@ Key endpoints:
 - `/github/*` - GitHub integration features
 
 ### GitHub Integration
+
 ```bash
 # Set up GitHub integration
 export GITHUB_TOKEN="your_github_token"
 export GITHUB_REPO_URL="https://github.com/username/repository"
-
-# The agent can now:
-# - Analyze its own code
-# - Create improvement pull requests
-# - Track development history
 ```
+With these set, the agent can:
+- Analyze its own code
+- Create improvement pull requests
+- Track development history
 
 ## 🔧 Configuration
 
@@ -102,30 +134,48 @@ GITHUB_REPO_URL=your_repository_url
 # Agent Settings
 AGENT_NAME=EvolveAI
 AGENT_ROLE=Senior Software Engineer
+
+# Self-Improvement
+ENABLE_SELF_MODIFICATION=true
 ```
 
 ## 🧪 Testing
 
+Run all tests:
 ```bash
-# Run all tests
 python -m pytest
-
-# Test specific components
-python test_complete_system.py
-python test_api_endpoints.py
-
-# Test GitHub integration
-python test_github_integration.py
 ```
 
-## 📚 Architecture
+Run individual test scripts:
+```bash
+python tests/test_complete_system.py
+python tests/test_api_endpoints.py
+python tests/test_github_integration.py
+python tests/test_end_to_end_self_improvement.py
+python tests/test_core_improvements.py
+python tests/test_agent_improvements.py
+python tests/test_fallback_system.py
+# ...and others in the tests/ directory
+```
+
+## 📚 Project Structure
 
 ```
 evolving_agent/
-├── core/           # Core agent functionality
-├── knowledge/      # Knowledge management
-├── self_modification/ # Code analysis and modification
-└── utils/          # Utilities and integrations
+├── core/                # Core agent functionality
+├── knowledge/           # Knowledge management
+├── self_modification/   # Code analysis and modification
+├── utils/               # Utilities and integrations
+├── tests/               # Test suite
+knowledge_base/          # Knowledge base data
+api_server.py            # FastAPI server entry point
+main.py                  # Main agent entry point
+organize_project.py      # Project organization/cleanup
+swagger_summary.py       # Swagger/OpenAPI summary
+demo_complete_system.py  # Demo script
+requirements.txt         # Python dependencies
+.env.example             # Example environment config
+docs/                    # Documentation
 ```
 
 ## 🤝 Contributing
