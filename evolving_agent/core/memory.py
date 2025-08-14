@@ -70,7 +70,7 @@ class MemoryEntry:
         self.metadata = metadata or {}
         self.timestamp = timestamp or datetime.now()
         self.embedding: Optional[List[float]] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert memory entry to dictionary."""
         return {
@@ -80,7 +80,7 @@ class MemoryEntry:
             "metadata": self.metadata,
             "timestamp": self.timestamp.isoformat(),
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MemoryEntry":
         """Create memory entry from dictionary."""
@@ -135,6 +135,74 @@ class MemorySearchProcessor:
         return {"memory_type": memory_type} if memory_type else None
 
 
+class MemoryOperations:
+    """Handles core memory operations"""
+    
+    def __init__(self, collection, embedding_model):
+        self.collection = collection
+        self.embedding_model = embedding_model
+        self.metadata_handler = MemoryMetadataHandler()
+
+    async def generate_embedding(self, content: str) -> List[float]:
+        """Generate embedding for content."""
+        return self.embedding_model.encode(content).tolist()
+
+    async def add_memory(self, entry: MemoryEntry) -> str:
+        """Add a memory entry."""
+        entry.embedding = await self.generate_embedding(entry.content)
+        sanitized_metadata = self.metadata_handler.prepare_metadata(entry)
+        
+        self.collection.add(
+            ids=[entry.id],
+            embeddings=[entry.embedding],
+            documents=[entry.content],
+            metadatas=[sanitized_metadata]
+        )
+        return entry.id
+
+    async def get_memory(self, memory_id: str) -> Optional[MemoryEntry]:
+        """Get a specific memory."""
+        results = self.collection.get(ids=[memory_id])
+        if not results["ids"]:
+            return None
+        return MemoryEntry.from_chroma_result(
+            memory_id,
+            results["documents"][0],
+            results["metadatas"][0]
+        )
+
+    async def delete_memory(self, memory_id: str) -> bool:
+        """Delete a memory."""
+        self.collection.delete(ids=[memory_id])
+        return True
+
+    async def get_memory_type_distribution(self) -> Dict[str, int]:
+        """Get distribution of memory types."""
+        memory_types = {}
+        all_data = self.collection.get()
+        
+        if all_data["metadatas"]:
+            for metadata in all_data["metadatas"]:
+                mem_type = metadata.get("memory_type", "general")
+                memory_types[mem_type] = memory_types.get(mem_type, 0) + 1
+                
+        return memory_types
+
+    async def get_entries_to_delete(self, num_entries: int) -> List[str]:
+        """Get IDs of oldest entries to delete."""
+        all_data = self.collection.get()
+        if not all_data["ids"]:
+            return []
+            
+        entries_with_timestamps = [
+            (entry_id, datetime.fromisoformat(metadata["timestamp"]))
+            for entry_id, metadata in zip(all_data["ids"], all_data["metadatas"])
+        ]
+        entries_with_timestamps.sort(key=lambda x: x[1])
+        
+        return [entry[0] for entry in entries_with_timestamps[:num_entries]]
+
+
 class LongTermMemory:
     """Long-term memory system using ChromaDB for vector storage."""
     
@@ -143,14 +211,15 @@ class LongTermMemory:
         self.client = None
         self.collection = None
         self.initialized = False
-        self.metadata_handler = MemoryMetadataHandler()
         self.search_processor = None
+        self.memory_ops = None
 
     async def initialize(self):
         """Initialize the memory system."""
         try:
             await self._init_components()
             self.search_processor = MemorySearchProcessor(self.collection)
+            self.memory_ops = MemoryOperations(self.collection, self.embedding_model)
             self.initialized = True
             logger.info("Long-term memory system initialized successfully")
         except Exception as e:
@@ -211,38 +280,23 @@ class LongTermMemory:
         if not self.initialized:
             raise RuntimeError("Memory system not initialized. Call initialize() first.")
 
-    async def _generate_embedding(self, content: str) -> List[float]:
-        """Generate embedding for content."""
-        return self.embedding_model.encode(content).tolist()
-
-    async def _add_memory_operation(self, entry: MemoryEntry) -> str:
-        entry.embedding = await self._generate_embedding(entry.content)
-        sanitized_metadata = self.metadata_handler.prepare_metadata(entry)
-        
-        self.collection.add(
-            ids=[entry.id],
-            embeddings=[entry.embedding],
-            documents=[entry.content],
-            metadatas=[sanitized_metadata]
-        )
-        return entry.id
-
     async def add_memory(self, entry: MemoryEntry) -> str:
         """Add a memory entry to the database."""
         return await self._handle_memory_operation(
             "add memory entry",
-            self._add_memory_operation,
+            self.memory_ops.add_memory,
             entry
         )
 
-    async def _search_memories_operation(
+    async def search_memories(
         self,
         query: str,
-        n_results: int,
-        memory_type: Optional[str],
-        similarity_threshold: float
+        n_results: int = 5,
+        memory_type: Optional[str] = None,
+        similarity_threshold: float = 0.5
     ) -> List[Tuple[MemoryEntry, float]]:
-        query_embedding = await self._generate_embedding(query)
+        """Search for relevant memories based on query."""
+        query_embedding = await self.memory_ops.generate_embedding(query)
         where_clause = self.search_processor.get_where_clause(memory_type)
         
         results = self.collection.query(
@@ -253,69 +307,35 @@ class LongTermMemory:
         
         return await self.search_processor.process_results(results, similarity_threshold)
 
-    async def search_memories(
-        self,
-        query: str,
-        n_results: int = 5,
-        memory_type: Optional[str] = None,
-        similarity_threshold: float = 0.5
-    ) -> List[Tuple[MemoryEntry, float]]:
-        """Search for relevant memories based on query."""
-        return await self._handle_memory_operation(
-            "search memories",
-            self._search_memories_operation,
-            query, n_results, memory_type, similarity_threshold
-        )
-
-    async def _get_memory_operation(self, memory_id: str) -> Optional[MemoryEntry]:
-        results = self.collection.get(ids=[memory_id])
-        if not results["ids"]:
-            return None
-        return MemoryEntry.from_chroma_result(
-            memory_id,
-            results["documents"][0],
-            results["metadatas"][0]
-        )
-
     async def get_memory(self, memory_id: str) -> Optional[MemoryEntry]:
         """Get a specific memory by ID."""
         return await self._handle_memory_operation(
             "get memory",
-            self._get_memory_operation,
+            self.memory_ops.get_memory,
             memory_id
         )
 
-    async def _update_memory_operation(self, memory_id: str, entry: MemoryEntry) -> bool:
-        if not await self.get_memory(memory_id):
-            return False
-        self.collection.delete(ids=[memory_id])
-        entry.id = memory_id
-        await self.add_memory(entry)
-        return True
-
     async def update_memory(self, memory_id: str, entry: MemoryEntry) -> bool:
         """Update an existing memory entry."""
-        return await self._handle_memory_operation(
-            "update memory",
-            self._update_memory_operation,
-            memory_id, entry
-        )
-
-    async def _delete_memory_operation(self, memory_id: str) -> bool:
-        self.collection.delete(ids=[memory_id])
+        if not await self.get_memory(memory_id):
+            return False
+        await self.delete_memory(memory_id)
+        entry.id = memory_id
+        await self.add_memory(entry)
         return True
 
     async def delete_memory(self, memory_id: str) -> bool:
         """Delete a memory entry."""
         return await self._handle_memory_operation(
             "delete memory",
-            self._delete_memory_operation,
+            self.memory_ops.delete_memory,
             memory_id
         )
 
-    async def _get_memory_stats_operation(self) -> Dict[str, Any]:
+    async def get_memory_stats(self) -> Dict[str, Any]:
+        """Get statistics about the memory system."""
         count = self.collection.count()
-        memory_types = await self._get_memory_type_distribution()
+        memory_types = await self.memory_ops.get_memory_type_distribution()
         
         return {
             "total_memories": count,
@@ -324,53 +344,14 @@ class LongTermMemory:
             "persist_directory": config.memory_persist_directory
         }
 
-    async def get_memory_stats(self) -> Dict[str, Any]:
-        """Get statistics about the memory system."""
-        return await self._handle_memory_operation(
-            "get memory stats",
-            self._get_memory_stats_operation
-        )
-
-    async def _get_memory_type_distribution(self) -> Dict[str, int]:
-        """Get distribution of memory types."""
-        memory_types = {}
-        all_data = self.collection.get()
-        
-        if all_data["metadatas"]:
-            for metadata in all_data["metadatas"]:
-                mem_type = metadata.get("memory_type", "general")
-                memory_types[mem_type] = memory_types.get(mem_type, 0) + 1
-                
-        return memory_types
-
-    async def _cleanup_old_memories_operation(self, max_entries: int) -> int:
-        current_count = self.collection.count()
-        if current_count <= max_entries:
-            return 0
-            
-        entries_to_delete = await self._get_entries_to_delete(current_count - max_entries)
-        self.collection.delete(ids=entries_to_delete)
-        return len(entries_to_delete)
-
     async def cleanup_old_memories(self, max_entries: Optional[int] = None) -> int:
         """Clean up old memories to maintain performance."""
         max_entries = max_entries or config.max_memory_entries
-        return await self._handle_memory_operation(
-            "cleanup memories",
-            self._cleanup_old_memories_operation,
-            max_entries
-        )
-
-    async def _get_entries_to_delete(self, num_entries: int) -> List[str]:
-        """Get IDs of oldest entries to delete."""
-        all_data = self.collection.get()
-        if not all_data["ids"]:
-            return []
-            
-        entries_with_timestamps = [
-            (entry_id, datetime.fromisoformat(metadata["timestamp"]))
-            for entry_id, metadata in zip(all_data["ids"], all_data["metadatas"])
-        ]
-        entries_with_timestamps.sort(key=lambda x: x[1])
+        current_count = self.collection.count()
         
-        return [entry[0] for entry in entries_with_timestamps[:num_entries]]
+        if current_count <= max_entries:
+            return 0
+            
+        entries_to_delete = await self.memory_ops.get_entries_to_delete(current_count - max_entries)
+        self.collection.delete(ids=entries_to_delete)
+        return len(entries_to_delete)
