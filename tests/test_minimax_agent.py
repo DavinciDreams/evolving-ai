@@ -3,8 +3,9 @@
 Test script to verify the self-improving agent works with MiniMax model
 """
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import asyncio
 import os
@@ -13,11 +14,13 @@ import sys
 # Add the project root to the path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from evolving_agent.core.agent import SelfImprovingAgent
-from evolving_agent.utils.config import config
+import pytest
 from loguru import logger
 
-import pytest
+from evolving_agent.core.agent import SelfImprovingAgent
+from evolving_agent.utils.config import config
+
+
 @pytest.mark.asyncio
 async def test_minimax_agent():
     """Test the agent with MiniMax model"""

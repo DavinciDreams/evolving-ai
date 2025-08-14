@@ -19,6 +19,8 @@ logger = setup_logger(__name__)
 
 
 import pytest
+
+
 @pytest.mark.asyncio
 async def run_end_to_end_self_improvement():
     """
@@ -51,8 +53,9 @@ async def run_end_to_end_self_improvement():
         try:
             # Import and use the AgentPRManager for comprehensive analysis
             from evolving_agent.utils.agent_pr_manager import AgentPRManager
-            from evolving_agent.utils.github_integration import GitHubIntegration
-            
+            from evolving_agent.utils.github_integration import \
+                GitHubIntegration
+
             # Initialize GitHub integration for PR management
             github_integration = GitHubIntegration()
             await github_integration.initialize()
@@ -200,7 +203,8 @@ response = await agent.process_query("Optimize this code")
             else:
                 # Fallback to direct GitHub integration
                 print("⚠️  Using direct GitHub integration...")
-                from evolving_agent.utils.github_integration import GitHubIntegration
+                from evolving_agent.utils.github_integration import \
+                    GitHubIntegration
                 
                 github_integration = GitHubIntegration()
                 await github_integration.initialize()

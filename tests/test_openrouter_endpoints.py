@@ -2,13 +2,15 @@
 Test OpenRouter API endpoint to verify the correct URL.
 """
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import asyncio
-import httpx
 import json
 import os
+
+import httpx
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -16,6 +18,8 @@ load_dotenv()
 
 
 import pytest
+
+
 @pytest.mark.asyncio
 async def test_openrouter_endpoints():
     """Test different OpenRouter API endpoints."""

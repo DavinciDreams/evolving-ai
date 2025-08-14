@@ -4,11 +4,12 @@ Test script for the FastAPI server endpoints.
 
 import asyncio
 import json
+from typing import Any, Dict
+
 import httpx
-from typing import Dict, Any
-
-
 import pytest
+
+
 @pytest.mark.asyncio
 async def test_api_endpoints():
     """Test all API endpoints."""

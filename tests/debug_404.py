@@ -3,8 +3,9 @@ Debug OpenRouter 404 issue with fresh instances.
 """
 
 import asyncio
-import sys
 import os
+import sys
+
 import httpx
 from dotenv import load_dotenv
 
@@ -13,7 +14,7 @@ load_dotenv(override=True)
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from evolving_agent.utils.llm_interface import OpenRouterInterface, LLMManager
+from evolving_agent.utils.llm_interface import LLMManager, OpenRouterInterface
 
 
 async def debug_404_issue():

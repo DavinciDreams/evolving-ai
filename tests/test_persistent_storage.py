@@ -3,17 +3,21 @@
 Test persistent storage functionality.
 """
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import asyncio
 import os
 import sys
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+import pytest
 
 from evolving_agent.utils.persistent_storage import persistent_data_manager
 
-import pytest
+
 @pytest.mark.asyncio
 async def test_persistent_storage():
     """Test the persistent storage system."""

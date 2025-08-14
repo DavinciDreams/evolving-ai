@@ -3,14 +3,17 @@ Direct HTTP test for OpenRouter API.
 """
 
 import asyncio
-import httpx
 import json
 import os
+
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
 
 import pytest
+
+
 @pytest.mark.asyncio
 async def test_direct_openrouter():
     """Test OpenRouter API with direct HTTP request."""

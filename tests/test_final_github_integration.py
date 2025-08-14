@@ -2,10 +2,11 @@
 Final integration test to demonstrate GitHub integration in the Self-Improving AI Agent.
 """
 
-import os
-import requests
 import json
+import os
 from datetime import datetime
+
+import requests
 
 # Server configuration
 API_BASE_URL = "http://localhost:8001"

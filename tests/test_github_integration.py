@@ -3,9 +3,10 @@ Comprehensive test for GitHub integration functionality.
 """
 
 import asyncio
-import os
 import json
+import os
 from pathlib import Path
+
 from evolving_agent.utils.github_integration import GitHubIntegration
 from evolving_agent.utils.logging import setup_logger
 
@@ -13,6 +14,8 @@ logger = setup_logger(__name__)
 
 
 import pytest
+
+
 @pytest.mark.asyncio
 async def test_github_integration():
     """Test the GitHub integration functionality."""

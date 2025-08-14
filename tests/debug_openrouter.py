@@ -3,8 +3,9 @@ Debug OpenRouter API requests to find the exact issue.
 """
 
 import asyncio
-import sys
 import os
+import sys
+
 import httpx
 from dotenv import load_dotenv
 

@@ -6,6 +6,7 @@ Test script for the code analyzer self-improvement pipeline.
 import asyncio
 import json
 from pathlib import Path
+
 from evolving_agent.self_modification.code_analyzer import CodeAnalyzer
 from evolving_agent.utils.logging import setup_logger
 
@@ -13,6 +14,8 @@ logger = setup_logger(__name__)
 
 
 import pytest
+
+
 @pytest.mark.asyncio
 async def test_code_analyzer_pipeline():
     """Test the complete code analyzer self-improvement pipeline."""

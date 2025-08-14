@@ -3,11 +3,12 @@ Test OpenRouter with correct model names.
 """
 
 import asyncio
-import httpx
 import json
 
-
+import httpx
 import pytest
+
+
 @pytest.mark.asyncio
 async def test_openrouter_models():
     """Test OpenRouter with different model names."""

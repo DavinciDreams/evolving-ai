@@ -3,18 +3,22 @@
 Test the LLM fallback system.
 """
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import asyncio
 import os
 import sys
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+import pytest
 
 from evolving_agent.utils.config import config
 from evolving_agent.utils.llm_interface import llm_manager
 
-import pytest
+
 @pytest.mark.asyncio
 async def test_fallback_system():
     """Test the intelligent fallback system."""

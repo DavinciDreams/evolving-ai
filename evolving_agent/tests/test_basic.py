@@ -2,18 +2,19 @@
 Basic tests for the self-improving agent.
 """
 
-import pytest
 import asyncio
-from pathlib import Path
 import sys
+from pathlib import Path
+
+import pytest
 
 # Add the project root to the path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from evolving_agent.core.memory import LongTermMemory, MemoryEntry
 from evolving_agent.core.context_manager import ContextManager
 from evolving_agent.core.evaluator import OutputEvaluator
+from evolving_agent.core.memory import LongTermMemory, MemoryEntry
 from evolving_agent.knowledge.base import KnowledgeBase, KnowledgeEntry
 from evolving_agent.utils.config import config
 

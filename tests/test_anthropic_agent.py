@@ -2,21 +2,26 @@
 Test the agent with Anthropic Claude to avoid OpenRouter rate limits.
 """
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import asyncio
-import sys
 import os
+import sys
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
+
 from evolving_agent.utils.llm_interface import llm_manager
 
 # Force reload environment
 load_dotenv(override=True)
 
 import pytest
+
+
 @pytest.mark.asyncio
 async def test_anthropic_agent():
     """Test the agent with Anthropic Claude."""

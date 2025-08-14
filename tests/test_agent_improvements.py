@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 """
@@ -10,18 +11,19 @@ and record successful merge feedback.
 
 import asyncio
 import json
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+import pytest
 
 from evolving_agent.core.agent import SelfImprovingAgent
-from evolving_agent.utils.github_integration import GitHubIntegration
-from evolving_agent.utils.agent_pr_manager import AgentPRManager
 from evolving_agent.self_modification.code_analyzer import CodeAnalyzer
 from evolving_agent.self_modification.modifier import CodeModifier
 from evolving_agent.self_modification.validator import CodeValidator
+from evolving_agent.utils.agent_pr_manager import AgentPRManager
+from evolving_agent.utils.github_integration import GitHubIntegration
 
 
-import pytest
 @pytest.mark.asyncio
 async def test_agent_improvements():
     """Test that the agent's improvements are working correctly."""

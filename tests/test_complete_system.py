@@ -6,11 +6,14 @@ Comprehensive test of the self-improving agent system.
 import asyncio
 import os
 import sys
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+import pytest
 
 from evolving_agent.core.agent import SelfImprovingAgent
 
-import pytest
+
 @pytest.mark.asyncio
 async def test_complete_system():
     """Test the complete self-improving agent system."""

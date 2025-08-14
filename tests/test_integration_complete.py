@@ -4,6 +4,7 @@ Complete integration test for the self-improving agent with code analysis.
 
 import asyncio
 from pathlib import Path
+
 from evolving_agent.core.agent import SelfImprovingAgent
 from evolving_agent.utils.logging import setup_logger
 
@@ -11,6 +12,8 @@ logger = setup_logger(__name__)
 
 
 import pytest
+
+
 @pytest.mark.asyncio
 async def test_complete_self_improvement_cycle():
     """Test the complete self-improvement cycle including code analysis."""

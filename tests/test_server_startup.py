@@ -10,6 +10,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
+
+
 @pytest.mark.asyncio
 async def test_server_startup():
     """Test that the API server components can be imported and initialized."""

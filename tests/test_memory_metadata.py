@@ -3,18 +3,23 @@
 Test memory system with complex metadata.
 """
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import asyncio
 import os
 import sys
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from evolving_agent.core.memory import LongTermMemory, MemoryEntry
 from datetime import datetime
 
 import pytest
+
+from evolving_agent.core.memory import LongTermMemory, MemoryEntry
+
+
 @pytest.mark.asyncio
 async def test_memory_metadata():
     """Test memory system with complex metadata."""

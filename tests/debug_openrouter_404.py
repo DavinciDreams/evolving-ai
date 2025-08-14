@@ -4,13 +4,16 @@ Debug OpenRouter API request formatting.
 """
 
 import asyncio
+import json
 import os
 import sys
+
 import httpx
-import json
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from evolving_agent.utils.config import config
+
 
 async def test_openrouter_request():
     """Test OpenRouter API request with various formats."""
