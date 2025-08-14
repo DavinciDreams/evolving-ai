@@ -10,6 +10,27 @@ This is a sophisticated self-improving AI agent with the following key capabilit
 - Automatic knowledge base updates
 - Code self-modification and optimization
 
+## 🚨 **PROJECT ORGANIZATION RULES - STRICTLY ENFORCE**
+
+### **File Placement (NEVER VIOLATE):**
+- ❌ **NO test files in main directory** - ALL tests go in `tests/` folder
+- ❌ **NO documentation in main** (except README.md) - ALL docs go in `docs/` folder  
+- ❌ **NO hardcoded API keys** - ALWAYS use environment variables from `.env`
+- ❌ **NO duplicate files** - Check for existing files before creating new ones
+
+### **Directory Structure:**
+```
+main/ - ONLY: main.py, requirements.txt, README.md, config files
+tests/ - ALL test_*.py and debug_*.py files
+docs/ - ALL *.md documentation files (except README.md)
+evolving_agent/ - Core application code
+```
+
+### **Security Rules:**
+- ✅ ALL API keys in `.env` file: `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, etc.
+- ✅ Use `os.getenv()` or config module for all sensitive data
+- ❌ NEVER hardcode: `api_key = "sk-ant-..."` 
+
 ## Code Style Guidelines
 - Use Python 3.8+ features and type hints for all functions
 - Follow async/await patterns for I/O operations
@@ -61,3 +82,9 @@ This is a sophisticated self-improving AI agent with the following key capabilit
 - Optimize memory usage for large vector databases
 - Monitor and log performance metrics
 - Use appropriate batch sizes for bulk operations
+
+## 🔄 **Before Every Code Change:**
+1. Check if creating files in correct directory (`tests/` for tests, `docs/` for docs)
+2. Verify no API keys are hardcoded (use environment variables)
+3. Remove any duplicate files that may exist
+4. Follow established naming conventions and project structure
