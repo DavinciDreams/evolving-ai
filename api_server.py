@@ -3,20 +3,21 @@ FastAPI web server for the Self-Improving AI Agent with Swagger documentation.
 """
 
 import asyncio
-import uuid
-from datetime import datetime
-from typing import List, Optional, Dict, Any
-from contextlib import asynccontextmanager
 import os
+import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+import uvicorn
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-import uvicorn
 
 from evolving_agent.core.agent import SelfImprovingAgent
+from evolving_agent.utils.github_enhanced_modifier import \
+    GitHubEnabledSelfModifier
 from evolving_agent.utils.logging import setup_logger
-from evolving_agent.utils.github_enhanced_modifier import GitHubEnabledSelfModifier
 
 logger = setup_logger(__name__)
 
