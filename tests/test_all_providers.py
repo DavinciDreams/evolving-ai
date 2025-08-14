@@ -13,6 +13,8 @@ from evolving_agent.utils.llm_interface import llm_manager
 # Force reload environment
 load_dotenv(override=True)
 
+import pytest
+@pytest.mark.asyncio
 async def test_all_providers():
     """Test all available providers to see which ones work."""
     print("=== Provider Availability Test ===")

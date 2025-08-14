@@ -10,6 +10,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from evolving_agent.utils.llm_interface import llm_manager
 
 
+import pytest
+@pytest.mark.asyncio
 async def test_free_agent():
     """Test the agent with free OpenRouter model."""
     print("=== Free Model Agent Test ===")

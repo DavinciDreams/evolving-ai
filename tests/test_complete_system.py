@@ -10,6 +10,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from evolving_agent.core.agent import SelfImprovingAgent
 
+import pytest
+@pytest.mark.asyncio
 async def test_complete_system():
     """Test the complete self-improving agent system."""
     print("=== Testing Complete Self-Improving Agent System ===")

@@ -17,6 +17,8 @@ from evolving_agent.self_modification.modifier import CodeModifier
 from evolving_agent.self_modification.validator import CodeValidator
 
 
+import pytest
+@pytest.mark.asyncio
 async def test_core_improvements():
     """Test core improvements without requiring LLM calls."""
     print("🔍 Testing Core Agent Improvements (No LLM Required)")

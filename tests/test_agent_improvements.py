@@ -17,6 +17,8 @@ from evolving_agent.self_modification.modifier import CodeModifier
 from evolving_agent.self_modification.validator import CodeValidator
 
 
+import pytest
+@pytest.mark.asyncio
 async def test_agent_improvements():
     """Test that the agent's improvements are working correctly."""
     print("🔍 Testing Agent Improvements After Merge")

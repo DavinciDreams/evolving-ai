@@ -13,6 +13,8 @@ from evolving_agent.utils.llm_interface import llm_manager
 # Force reload environment
 load_dotenv(override=True)
 
+import pytest
+@pytest.mark.asyncio
 async def test_anthropic_agent():
     """Test the agent with Anthropic Claude."""
     print("=== Anthropic Claude Agent Test ===")

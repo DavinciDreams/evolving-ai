@@ -10,6 +10,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from evolving_agent.utils.persistent_storage import persistent_data_manager
 
+import pytest
+@pytest.mark.asyncio
 async def test_persistent_storage():
     """Test the persistent storage system."""
     print("=== Testing Persistent Storage ===")

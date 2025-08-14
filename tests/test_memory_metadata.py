@@ -11,6 +11,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from evolving_agent.core.memory import LongTermMemory, MemoryEntry
 from datetime import datetime
 
+import pytest
+@pytest.mark.asyncio
 async def test_memory_metadata():
     """Test memory system with complex metadata."""
     print("=== Testing Memory System with Complex Metadata ===")

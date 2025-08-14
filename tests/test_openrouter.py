@@ -11,6 +11,8 @@ from evolving_agent.utils.config import config
 from evolving_agent.utils.llm_interface import OpenRouterInterface
 
 
+import pytest
+@pytest.mark.asyncio
 async def test_openrouter():
     """Test OpenRouter API connection directly."""
     print("=== Testing OpenRouter API ===")

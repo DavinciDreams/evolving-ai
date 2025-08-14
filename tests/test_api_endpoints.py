@@ -8,6 +8,8 @@ import httpx
 from typing import Dict, Any
 
 
+import pytest
+@pytest.mark.asyncio
 async def test_api_endpoints():
     """Test all API endpoints."""
     base_url = "http://localhost:8000"

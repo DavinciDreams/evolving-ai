@@ -12,6 +12,8 @@ from evolving_agent.utils.logging import setup_logger
 logger = setup_logger(__name__)
 
 
+import pytest
+@pytest.mark.asyncio
 async def test_github_integration():
     """Test the GitHub integration functionality."""
     print("🐙 Testing GitHub Integration for Self-Improving Agent")

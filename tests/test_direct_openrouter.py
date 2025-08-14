@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import pytest
+@pytest.mark.asyncio
 async def test_direct_openrouter():
     """Test OpenRouter API with direct HTTP request."""
     api_key = os.getenv("OPENROUTER_API_KEY")

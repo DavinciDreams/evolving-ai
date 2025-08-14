@@ -10,6 +10,8 @@ from evolving_agent.utils.logging import setup_logger
 logger = setup_logger(__name__)
 
 
+import pytest
+@pytest.mark.asyncio
 async def test_real_github_integration():
     """Test GitHub integration with real credentials."""
     print("🎯 Testing Real GitHub Integration")

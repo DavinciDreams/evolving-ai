@@ -7,6 +7,8 @@ import httpx
 import json
 
 
+import pytest
+@pytest.mark.asyncio
 async def test_openrouter_models():
     """Test OpenRouter with different model names."""
     

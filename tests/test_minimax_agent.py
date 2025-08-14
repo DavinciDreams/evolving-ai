@@ -14,6 +14,8 @@ from evolving_agent.core.agent import SelfImprovingAgent
 from evolving_agent.utils.config import config
 from loguru import logger
 
+import pytest
+@pytest.mark.asyncio
 async def test_minimax_agent():
     """Test the agent with MiniMax model"""
     logger.info("Testing self-improving agent with MiniMax model...")

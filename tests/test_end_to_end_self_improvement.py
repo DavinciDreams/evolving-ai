@@ -18,6 +18,8 @@ from evolving_agent.utils.logging import setup_logger
 logger = setup_logger(__name__)
 
 
+import pytest
+@pytest.mark.asyncio
 async def run_end_to_end_self_improvement():
     """
     Complete end-to-end test of self-improvement with GitHub integration.

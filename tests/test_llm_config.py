@@ -11,6 +11,8 @@ from evolving_agent.utils.config import config
 from evolving_agent.utils.llm_interface import LLMManager
 
 
+import pytest
+@pytest.mark.asyncio
 async def test_llm_configuration():
     """Test the updated LLM configuration."""
     print("=== LLM Configuration Test ===")

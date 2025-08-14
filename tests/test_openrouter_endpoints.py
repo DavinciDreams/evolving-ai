@@ -5,12 +5,23 @@ Test OpenRouter API endpoint to verify the correct URL.
 import asyncio
 import httpx
 import json
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 
+import pytest
+@pytest.mark.asyncio
 async def test_openrouter_endpoints():
     """Test different OpenRouter API endpoints."""
     
-    api_key = "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"
+    # Get API key from environment variable
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        print("❌ OPENROUTER_API_KEY not found in environment variables")
+        return
     
     # Test different possible endpoints
     endpoints = [
