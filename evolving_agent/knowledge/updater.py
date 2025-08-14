@@ -4,15 +4,15 @@ Knowledge base updater for automatic learning and improvement.
 
 import asyncio
 import json
-from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
-from .base import KnowledgeBase, KnowledgeEntry
-from ..core.memory import LongTermMemory, MemoryEntry
 from ..core.evaluator import EvaluationResult
+from ..core.memory import LongTermMemory, MemoryEntry
 from ..utils.config import config
-from ..utils.logging import setup_logger
 from ..utils.llm_interface import llm_manager
+from ..utils.logging import setup_logger
+from .base import KnowledgeBase, KnowledgeEntry
 
 logger = setup_logger(__name__)
 

@@ -2,12 +2,12 @@
 Knowledge base management system.
 """
 
-import json
 import asyncio
-from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime
 import hashlib
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..utils.config import config
 from ..utils.logging import setup_logger
