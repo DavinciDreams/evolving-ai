@@ -114,30 +114,34 @@ class MemorySearchProcessor:
         """Calculate similarity score from distance."""
         return 1 - distance
 
-    def _create_memory_entry(self, doc_id: str, content: str, metadata: Dict[str, Any]) -> MemoryEntry:
-        """Create memory entry from search result data."""
-        return MemoryEntry.from_chroma_result(doc_id, content, metadata)
+    def _process_single_result(self, result_data: Tuple) -> Tuple[MemoryEntry, float]:
+        """Process a single search result."""
+        doc_id, distance, metadata, content = result_data
+        similarity = self._calculate_similarity(distance)
+        entry = MemoryEntry.from_chroma_result(doc_id, content, metadata)
+        return entry, similarity
+
+    def _filter_results(self, processed_results: List[Tuple[MemoryEntry, float]], 
+                       similarity_threshold: float) -> List[Tuple[MemoryEntry, float]]:
+        """Filter results based on similarity threshold."""
+        return [(entry, sim) for entry, sim in processed_results if sim >= similarity_threshold]
 
     async def process_results(self, results: Dict[str, Any], similarity_threshold: float) -> List[Tuple[MemoryEntry, float]]:
         """Process and filter search results."""
         if not results["ids"]:
             return []
             
-        memories = []
-        for i, result in enumerate(zip(
-            results["ids"][0],
-            results["distances"][0],
-            results["metadatas"][0],
-            results["documents"][0]
-        )):
-            doc_id, distance, metadata, content = result
-            similarity = self._calculate_similarity(distance)
-            
-            if similarity >= similarity_threshold:
-                entry = self._create_memory_entry(doc_id, content, metadata)
-                memories.append((entry, similarity))
-                
-        return memories
+        processed_results = [
+            self._process_single_result(result)
+            for result in zip(
+                results["ids"][0],
+                results["distances"][0],
+                results["metadatas"][0],
+                results["documents"][0]
+            )
+        ]
+        
+        return self._filter_results(processed_results, similarity_threshold)
 
     def get_where_clause(self, memory_type: Optional[str]) -> Optional[Dict[str, str]]:
         """Generate where clause for search query."""
