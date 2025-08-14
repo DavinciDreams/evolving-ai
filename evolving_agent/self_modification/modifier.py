@@ -3,18 +3,18 @@ Code modification engine for self-improvement.
 """
 
 import asyncio
+import difflib
 import json
 import shutil
-from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
-import difflib
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
+from ..utils.config import config
+from ..utils.llm_interface import llm_manager
+from ..utils.logging import setup_logger
 from .code_analyzer import CodeAnalyzer
 from .validator import CodeValidator, ValidationResult
-from ..utils.config import config
-from ..utils.logging import setup_logger
-from ..utils.llm_interface import llm_manager
 
 logger = setup_logger(__name__)
 

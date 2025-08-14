@@ -3,17 +3,17 @@ Code analysis system for self-improvement.
 """
 
 import ast
-import inspect
 import importlib
-import sys
-from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime
+import inspect
 import json
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..utils.config import config
-from ..utils.logging import setup_logger
 from ..utils.llm_interface import llm_manager
+from ..utils.logging import setup_logger
 
 logger = setup_logger(__name__)
 
