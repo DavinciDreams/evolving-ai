@@ -29,9 +29,7 @@ class MemoryMetadataHandler:
         sanitized = {}
         
         for key, value in metadata.items():
-            if value is None:
-                sanitized[key] = None
-            elif isinstance(value, (str, int, float, bool)):
+            if value is None or isinstance(value, (str, int, float, bool)):
                 sanitized[key] = value
             elif isinstance(value, dict):
                 sanitized[f"{key}_json"] = json.dumps(value)
@@ -112,14 +110,13 @@ class MemorySearchProcessor:
     def __init__(self, collection):
         self.collection = collection
 
-    async def process_single_result(self, doc_id: str, distance: float, metadata: Dict, content: str, 
-                                  similarity_threshold: float) -> Optional[Tuple[MemoryEntry, float]]:
-        """Process a single search result."""
-        similarity = 1 - distance
-        if similarity >= similarity_threshold:
-            entry = MemoryEntry.from_chroma_result(doc_id, content, metadata)
-            return (entry, similarity)
-        return None
+    def _calculate_similarity(self, distance: float) -> float:
+        """Calculate similarity score from distance."""
+        return 1 - distance
+
+    def _create_memory_entry(self, doc_id: str, content: str, metadata: Dict[str, Any]) -> MemoryEntry:
+        """Create memory entry from search result data."""
+        return MemoryEntry.from_chroma_result(doc_id, content, metadata)
 
     async def process_results(self, results: Dict[str, Any], similarity_threshold: float) -> List[Tuple[MemoryEntry, float]]:
         """Process and filter search results."""
@@ -127,15 +124,19 @@ class MemorySearchProcessor:
             return []
             
         memories = []
-        for i, (doc_id, distance, metadata, content) in enumerate(zip(
+        for i, result in enumerate(zip(
             results["ids"][0],
             results["distances"][0],
             results["metadatas"][0],
             results["documents"][0]
         )):
-            result = await self.process_single_result(doc_id, distance, metadata, content, similarity_threshold)
-            if result:
-                memories.append(result)
+            doc_id, distance, metadata, content = result
+            similarity = self._calculate_similarity(distance)
+            
+            if similarity >= similarity_threshold:
+                entry = self._create_memory_entry(doc_id, content, metadata)
+                memories.append((entry, similarity))
+                
         return memories
 
     def get_where_clause(self, memory_type: Optional[str]) -> Optional[Dict[str, str]]:
@@ -155,14 +156,10 @@ class MemoryOperations:
         """Generate embedding for content."""
         return self.embedding_model.encode(content).tolist()
 
-    async def prepare_memory_for_storage(self, entry: MemoryEntry):
-        """Prepare memory entry for storage."""
-        entry.embedding = await self.generate_embedding(entry.content)
-        return self.metadata_handler.prepare_metadata(entry)
-
     async def add_memory(self, entry: MemoryEntry) -> str:
         """Add a memory entry."""
-        sanitized_metadata = await self.prepare_memory_for_storage(entry)
+        entry.embedding = await self.generate_embedding(entry.content)
+        sanitized_metadata = self.metadata_handler.prepare_metadata(entry)
         
         self.collection.add(
             ids=[entry.id],
@@ -188,37 +185,31 @@ class MemoryOperations:
         self.collection.delete(ids=[memory_id])
         return True
 
-    async def process_memory_type_counts(self, metadatas: List[Dict]) -> Dict[str, int]:
-        """Process memory type counts from metadata."""
-        memory_types = {}
-        for metadata in metadatas:
-            mem_type = metadata.get("memory_type", "general")
-            memory_types[mem_type] = memory_types.get(mem_type, 0) + 1
-        return memory_types
-
     async def get_memory_type_distribution(self) -> Dict[str, int]:
         """Get distribution of memory types."""
+        memory_types = {}
         all_data = self.collection.get()
-        if not all_data["metadatas"]:
-            return {}
-        return await self.process_memory_type_counts(all_data["metadatas"])
-
-    async def sort_entries_by_timestamp(self, entries_data: Dict[str, Any]) -> List[str]:
-        """Sort entries by timestamp and return IDs."""
-        entries_with_timestamps = [
-            (entry_id, datetime.fromisoformat(metadata["timestamp"]))
-            for entry_id, metadata in zip(entries_data["ids"], entries_data["metadatas"])
-        ]
-        entries_with_timestamps.sort(key=lambda x: x[1])
-        return [entry[0] for entry in entries_with_timestamps]
+        
+        if all_data["metadatas"]:
+            for metadata in all_data["metadatas"]:
+                mem_type = metadata.get("memory_type", "general")
+                memory_types[mem_type] = memory_types.get(mem_type, 0) + 1
+                
+        return memory_types
 
     async def get_entries_to_delete(self, num_entries: int) -> List[str]:
         """Get IDs of oldest entries to delete."""
         all_data = self.collection.get()
         if not all_data["ids"]:
             return []
-        sorted_entries = await self.sort_entries_by_timestamp(all_data)
-        return sorted_entries[:num_entries]
+            
+        entries_with_timestamps = [
+            (entry_id, datetime.fromisoformat(metadata["timestamp"]))
+            for entry_id, metadata in zip(all_data["ids"], all_data["metadatas"])
+        ]
+        entries_with_timestamps.sort(key=lambda x: x[1])
+        
+        return [entry[0] for entry in entries_with_timestamps[:num_entries]]
 
 
 class LongTermMemory:
@@ -236,8 +227,6 @@ class LongTermMemory:
         """Initialize the memory system."""
         try:
             await self._init_components()
-            self.search_processor = MemorySearchProcessor(self.collection)
-            self.memory_ops = MemoryOperations(self.collection, self.embedding_model)
             self.initialized = True
             logger.info("Long-term memory system initialized successfully")
         except Exception as e:
@@ -250,6 +239,12 @@ class LongTermMemory:
         await self._init_embedding_model()
         await self._init_chroma_client()
         await self._init_collection()
+        self._init_processors()
+
+    def _init_processors(self):
+        """Initialize search and memory processors."""
+        self.search_processor = MemorySearchProcessor(self.collection)
+        self.memory_ops = MemoryOperations(self.collection, self.embedding_model)
 
     async def _init_directories(self):
         """Initialize required directories."""
