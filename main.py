@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
+import argparse
 
 # Add the project root to the path to ensure imports work
 project_root = Path(__file__).parent
@@ -14,6 +15,9 @@ sys.path.insert(0, str(project_root))
 
 from evolving_agent.core.agent import SelfImprovingAgent
 from evolving_agent.utils.logging import setup_logger
+from evolving_agent.self_modification.code_analyzer import CodeAnalyzer
+from self_improve import run_self_improvement_cycle
+import json
 
 # Load environment variables
 load_dotenv()
@@ -60,6 +64,22 @@ async def main():
                 continue
             elif not user_input:
                 continue
+            elif user_input.lower() == 'analyze':
+                try:
+                    print("Enter evaluation_insights as JSON (dict):")
+                    eval_input = input("> ")
+                    evaluation_insights = json.loads(eval_input)
+                    print("Enter knowledge_suggestions as JSON (list):")
+                    know_input = input("> ")
+                    knowledge_suggestions = json.loads(know_input)
+                    analyzer = CodeAnalyzer()
+                    analysis_result = await analyzer.analyze_performance_patterns(evaluation_insights, knowledge_suggestions)
+                    print("\nAnalysis Result:")
+                    print(json.dumps(analysis_result, indent=2))
+                except Exception as e:
+                    logger.error(f"Error during analysis: {e}")
+                    print(f"Error: {e}")
+                continue
             
             # Process the input
             try:
@@ -92,6 +112,7 @@ Available commands:
 - memory: Show memory statistics
 - stats: Show session statistics
 - interactions: Show recent interactions
+- analyze: Analyze performance patterns using evaluation insights and knowledge suggestions (requires JSON input for both)
 - quit/exit: Exit the program
 
 You can also type any question or task for the agent to process.
@@ -133,5 +154,28 @@ def format_interactions(interactions):
     return formatted
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Self-Improving AI Agent CLI",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument(
+        "--self-improve",
+        action="store_true",
+        help="Run the self-improvement cycle and print the summary result."
+    )
+    return parser.parse_args()
+
+async def cli_self_improve():
+    logger.info("Running self-improvement cycle...")
+    agent = SelfImprovingAgent()
+    await agent.initialize()
+    summary = await run_self_improvement_cycle(agent)
+    print(json.dumps(summary, indent=2))
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    args = parse_args()
+    if args.self_improve:
+        asyncio.run(cli_self_improve())
+    else:
+        asyncio.run(main())
