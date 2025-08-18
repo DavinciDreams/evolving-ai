@@ -2,7 +2,6 @@
 LLM interface for communicating with various language model providers.
 """
 
-import asyncio
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -17,6 +16,9 @@ from ..utils.config import config
 from ..utils.logging import setup_logger
 
 logger = setup_logger(__name__)
+
+# Ensure logger does not propagate to avoid duplicate logs if root logger is configured elsewhere
+logger.propagate = False
 
 
 class LLMProvider(Enum):
@@ -438,6 +440,29 @@ class LLMManager:
                 available.append(provider)
         return available
 
+    async def generate_response(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        provider: Optional[str] = None,
+        **kwargs,
+    ) -> str:
+        """Generate a response using the specified or best available provider."""
+        self._ensure_initialized()
+        use_provider = provider or self.default_provider
+        if use_provider not in self.interfaces:
+            raise RuntimeError(f"LLM provider '{use_provider}' is not initialized")
+        interface = self.interfaces[use_provider]
+        return await interface.generate_response(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+
     async def get_best_provider(
         self, preferred_provider: Optional[str] = None
     ) -> Optional[str]:
@@ -467,7 +492,7 @@ class LLMManager:
         suggestions = []
         for provider, status in self.provider_status.items():
             if not status["available"]:
-                error_str
+                raise RuntimeError("LLM service is not available")
 
 
 llm_manager = LLMManager()

@@ -5,18 +5,21 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
 ## 🌟 Key Features
 
 ### 🧠 Advanced AI Capabilities
+
 - **Long-term Memory**: Persistent memory system using ChromaDB vector embeddings
 - **Dynamic Context Management**: Intelligent context retrieval and management
 - **Self-Evaluation**: Continuous output evaluation and improvement cycles
 - **Knowledge Base**: Automatic knowledge acquisition and updates
 
 ### 🔄 Self-Improvement Engine
+
 - **Code Analysis**: Automated analysis of its own codebase
 - **Autonomous Modifications**: Safe self-modification with validation
 - **GitHub Integration**: Automatic pull request creation for improvements
 - **Performance Monitoring**: Continuous performance tracking and optimization
 
 ### 🚀 Production Features
+
 - **FastAPI Web Server**: RESTful API with Swagger documentation
 - **Multiple LLM Providers**: Support for OpenAI, Anthropic, OpenRouter, and more
 - **Robust Error Handling**: Comprehensive error management and recovery
@@ -32,17 +35,20 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
 ## 🛠️ Installation
 
 1. **Clone the repository**:
+
    ```bash
    git clone <repository-url>
    cd evolving ai
    ```
 
 2. **Install dependencies**:
+
    ```bash
    pip install -r requirements.txt
    ```
 
 3. **Configure environment**:
+
    ```bash
    cp .env.example .env
    # Edit .env with your API keys and configuration
@@ -53,26 +59,31 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
 ### Main Entry Points
 
 - **Run the main agent:**
+
   ```bash
   python main.py
   ```
 
 - **Start the API server:**
+
   ```bash
   python -m uvicorn api_server:app --host 127.0.0.1 --port 8000 --reload
   ```
 
 - **Organize or clean up the project structure:**
+
   ```bash
   python organize_project.py
   ```
 
 - **Generate or summarize Swagger API docs:**
+
   ```bash
   python swagger_summary.py
   ```
 
 - **Run the complete system demo:**
+
   ```bash
   python demo_complete_system.py
   ```
@@ -80,10 +91,13 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
 ### Self-Improvement System
 
 To enable autonomous self-improvement and code modification, set the following in your `.env` file:
+
 ```env
 ENABLE_SELF_MODIFICATION=true
 ```
+
 When enabled, the agent will:
+
 - Analyze its own codebase for improvements
 - Propose and validate modifications
 - Optionally create GitHub pull requests for validated changes
@@ -95,6 +109,7 @@ If autofix fails for a file, that file is skipped and not committed.
 
 **Manual Linting:**
 To manually run the same linting autofix on your codebase:
+
 ```bash
 isort path/to/your/file.py
 black path/to/your/file.py
@@ -104,6 +119,7 @@ black .
 ```
 
 **Workflow:**
+
 1. Set `ENABLE_SELF_MODIFICATION=true` in `.env`
 2. Run `python main.py` or start the API server
 3. The agent will autonomously analyze, modify, autofix (isort + black), and validate its code according to the self-improvement cycle
@@ -115,6 +131,7 @@ See [`docs/SELF_IMPROVEMENT_DEMO.md`](docs/SELF_IMPROVEMENT_DEMO.md) for a detai
 Access the interactive API documentation at: `http://localhost:8000/docs`
 
 Key endpoints:
+
 - `/chat` - Interact with the agent
 - `/analyze` - Code analysis and suggestions
 - `/memory` - Memory management
@@ -128,7 +145,9 @@ Key endpoints:
 export GITHUB_TOKEN="your_github_token"
 export GITHUB_REPO_URL="https://github.com/username/repository"
 ```
+
 With these set, the agent can:
+
 - Analyze its own code
 - Create improvement pull requests
 - Track development history
@@ -136,6 +155,7 @@ With these set, the agent can:
 ## 🔧 Configuration
 
 Key configuration options in `.env`:
+
 ```env
 # LLM Configuration
 OPENAI_API_KEY=your_openai_key
@@ -157,11 +177,13 @@ ENABLE_SELF_MODIFICATION=true
 ## 🧪 Testing
 
 Run all tests:
+
 ```bash
 python -m pytest
 ```
 
 Run individual test scripts:
+
 ```bash
 python tests/test_complete_system.py
 python tests/test_api_endpoints.py

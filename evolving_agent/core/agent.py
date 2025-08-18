@@ -2,7 +2,6 @@
 Main Self-Improving AI Agent class.
 """
 
-import asyncio
 import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -20,7 +19,7 @@ from .context_manager import ContextManager
 from .evaluator import EvaluationResult, OutputEvaluator
 from .memory import LongTermMemory, MemoryEntry
 
-logger = setup_logger(__name__)
+
 
 
 class SelfImprovingAgent:
@@ -36,6 +35,8 @@ class SelfImprovingAgent:
     """
 
     def __init__(self):
+        # Logger instance for this agent
+        self.logger = setup_logger(__name__)
         # Core components
         self.memory = LongTermMemory()
         self.context_manager = None  # Will be initialized after memory
@@ -60,49 +61,69 @@ class SelfImprovingAgent:
     async def initialize(self):
         """Initialize all agent components."""
         try:
-            logger.info("Initializing Self-Improving Agent...")
+            self.logger.info("Initializing Self-Improving Agent...")
 
             # Ensure directories exist
             config.ensure_directories()
 
             # Initialize persistent data manager
             await self.data_manager.initialize()
-            logger.info("Persistent data manager initialized")
+            self.logger.info("Persistent data manager initialized")
 
             # Initialize core components
             await self.memory.initialize()
-            logger.info("Memory system initialized")
+            self.logger.info("Memory system initialized")
 
             self.context_manager = ContextManager(self.memory)
-            logger.info("Context manager initialized")
+            self.logger.info("Context manager initialized")
 
             await self.knowledge_base.initialize()
-            logger.info("Knowledge base initialized")
+            self.logger.info("Knowledge base initialized")
 
-            self.knowledge_updater = KnowledgeUpdater(self.knowledge_base, self.memory)
-            logger.info("Knowledge updater initialized")
+            self.knowledge_updater = KnowledgeUpdater(
+                self.knowledge_base, self.memory
+            )
+
+            self.logger.info("Knowledge updater initialized")
 
             # Initialize self-modification components if enabled
             if config.enable_self_modification:
                 self.code_modifier = CodeModifier(
                     analyzer=self.code_analyzer, validator=self.code_validator
                 )
-                logger.info("Self-modification system initialized")
+                self.logger.info("Self-modification system initialized")
 
             # Create session
-            self.session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            self.session_id = (
+                f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            )
 
             # Store initialization memory
-            await self._store_session_start()
+            try:
+                if hasattr(self, "_store_session_start") and callable(getattr(self, "_store_session_start", None)):
+                    await self._store_session_start()
+                else:
+                    if hasattr(self, "logger"):
+                        self.logger.warning("Session start storage method '_store_session_start' is not implemented.")
+                    else:
+                        print("Session start storage method '_store_session_start' is not implemented.")
+            except Exception as e:
+                if hasattr(self, "logger"):
+                    self.logger.error(f"Failed to store session start: {e}")
+                else:
+                    print(f"Failed to store session start: {e}")
 
             self.initialized = True
-            logger.info("Agent initialization completed successfully")
+            self.logger.info("Agent initialization completed successfully")
 
         except Exception as e:
-            logger.error(f"Failed to initialize agent: {e}")
+            self.logger.error(f"Failed to initialize agent: {e}")
             raise
 
-    async def run(self, query: str, context_hints: Optional[List[str]] = None) -> str:
+    async def run(
+        self, query: str, context_hints: Optional[List[str]] = None
+    ) -> str:
+
         """
         Main processing method for the agent.
 
@@ -114,10 +135,12 @@ class SelfImprovingAgent:
             The agent's response
         """
         if not self.initialized:
-            raise RuntimeError("Agent not initialized. Call initialize() first.")
+            raise RuntimeError(
+                "Agent not initialized. Call initialize() first."
+            )
 
         try:
-            logger.info(f"Processing query: {query[:100]}...")
+            self.logger.info(f"Processing query: {query[:100]}...")
             self.interaction_count += 1
 
             # Step 1: Retrieve relevant context
@@ -161,7 +184,9 @@ class SelfImprovingAgent:
                 confidence=evaluation.confidence,
             )
 
-            await self._store_interaction(query, final_response, context, evaluation)
+            await self._store_interaction(
+                query, final_response, context, evaluation
+            )
 
             # Step 6: Update knowledge base
             if config.auto_update_knowledge:
@@ -175,50 +200,81 @@ class SelfImprovingAgent:
             ):  # Every 10 interactions
                 await self._consider_self_modification()
 
-            logger.info(
-                f"Query processed successfully. Evaluation score: {evaluation.overall_score:.2f}"
+            self.logger.info(
+                f"Query processed successfully. "
+                f"Evaluation score: {evaluation.overall_score:.2f}"
             )
             return final_response
 
         except Exception as e:
-            logger.error(f"Failed to process query: {e}")
+            self.logger.error(f"Failed to process query: {e}")
             # Store error for learning
-            await self._store_error(query, str(e))
+            # Store error for learning
+            try:
+                await self._store_error(query, str(e))
+            except AttributeError:
+                self.logger.error(f"'SelfImprovingAgent' object has no attribute '_store_error'")
             raise
 
-    async def _generate_response(self, query: str, context: Dict[str, Any]) -> str:
+    async def _generate_response(
+        self, query: str, context: Dict[str, Any]
+    ) -> str:
+
         """Generate initial response using context."""
         try:
             # Prepare context information
             context_text = self._format_context_for_prompt(context)
 
             # Create system prompt
-            system_prompt = f"""
-            You are a self-improving AI agent with access to your long-term memory and knowledge base.
-            
-            Current session: {self.session_id}
-            Interaction count: {self.interaction_count}
-            
-            Use the provided context to give a comprehensive, accurate, and helpful response.
-            Be specific, actionable, and consider lessons learned from previous interactions.
-            """
+            system_prompt = (
+                "You are a self-improving AI with the ability to analyze and modify your own code.\n"
+                "You have access to long-term memory and a knowledge base, enabling you to learn from past interactions and improve over time.\n"
+                f"Current session: {self.session_id}\n"
+                f"Interaction count: {self.interaction_count}\n"
+                "Use the provided context to give a comprehensive, accurate, and helpful response.\n"
+                "Be specific, actionable, and consider lessons learned from previous interactions."
+            )
 
             # Create user prompt
-            user_prompt = f"""
-            Query: {query}
-            
-            Relevant Context:
-            {context_text}
-            
-            Please provide a detailed response that addresses the query while incorporating relevant insights from the context.
-            """
+            user_prompt = (
+                f"Query: {query}\n\n"
+                f"Relevant Context:\n{context_text}\n\n"
+                "Please provide a detailed response that addresses the query while "
+                "incorporating relevant insights from the context."
+            )
 
             # Generate response with fallback
-            response, error = await llm_manager.generate_response_with_fallback(
-                message=user_prompt,
-                system_prompt=system_prompt,
-                preferred_provider=config.default_llm_provider,
-            )
+            # Use generate_response and handle fallback manually
+            try:
+                response = await llm_manager.generate_response(
+                    prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
+                    provider=config.default_llm_provider,
+                )
+                error = None
+            except Exception as e:
+                self.logger.error(f"Primary LLM provider failed: {e}")
+                # Try fallback provider if available
+                fallback_provider = (
+                    "openrouter"
+                    if config.default_llm_provider != "openrouter"
+                    else "anthropic"
+                )
+                try:
+                    response = await llm_manager.generate_response(
+                        prompt=user_prompt,
+                        system_prompt=system_prompt,
+                        temperature=config.temperature,
+                        max_tokens=config.max_tokens,
+                        provider=fallback_provider,
+                    )
+                    error = None
+                except Exception as e2:
+                    self.logger.error(f"Fallback LLM provider failed: {e2}")
+                    response = None
+                    error = str(e2)
 
             if response is None:
                 raise Exception(f"No available LLM providers: {error}")
@@ -226,7 +282,7 @@ class SelfImprovingAgent:
             return response.strip()
 
         except Exception as e:
-            logger.error(f"Failed to generate response: {e}")
+            self.logger.error(f"Failed to generate response: {e}")
             raise
 
     def _format_context_for_prompt(self, context: Dict[str, Any]) -> str:
@@ -263,55 +319,9 @@ class SelfImprovingAgent:
             return "\n".join(formatted_parts)
 
         except Exception as e:
-            logger.error(f"Failed to format context: {e}")
+            self.logger.error(f"Failed to format context: {e}")
             return "Context formatting error"
 
-    async def _improve_response(
-        self,
-        query: str,
-        initial_response: str,
-        evaluation: EvaluationResult,
-        context: Dict[str, Any],
-    ) -> str:
-        """Improve response based on evaluation feedback."""
-        try:
-            # If the response is already good, return it
-            if evaluation.overall_score >= 0.8:
-                logger.info("Response quality is high, no improvement needed")
-                return initial_response
-
-            # If there are specific improvement suggestions, apply them
-            if evaluation.improvement_suggestions:
-                logger.info("Applying improvement suggestions")
-
-                improvement_prompt = f"""
-                Original Query: {query}
-                
-                Initial Response: {initial_response}
-                
-                Evaluation Feedback:
-                - Overall Score: {evaluation.overall_score:.2f}
-                - Weaknesses: {'; '.join(evaluation.weaknesses)}
-                - Improvement Suggestions: {'; '.join(evaluation.improvement_suggestions)}
-                
-                Please provide an improved version of the response that addresses the feedback.
-                Focus on fixing the identified weaknesses and implementing the suggestions.
-                """
-
-                improved_response = await llm_manager.generate_response(
-                    prompt=improvement_prompt,
-                    temperature=config.temperature
-                    * 0.8,  # Slightly lower temperature for improvement
-                    max_tokens=config.max_tokens,
-                )
-
-                return improved_response.strip()
-
-            return initial_response
-
-        except Exception as e:
-            logger.error(f"Failed to improve response: {e}")
-            return initial_response
 
     async def _store_interaction(
         self,
@@ -350,10 +360,10 @@ class SelfImprovingAgent:
                 query, response, context, {"evaluation": evaluation.overall_score}
             )
 
-            logger.info("Interaction stored successfully")
+            self.logger.info("Interaction stored successfully")
 
         except Exception as e:
-            logger.error(f"Failed to store interaction: {e}")
+            self.logger.error(f"Failed to store interaction: {e}")
 
     async def _store_error(self, query: str, error: str):
         """Store error information for learning."""
@@ -363,17 +373,16 @@ class SelfImprovingAgent:
                 content=error_content,
                 memory_type="error",
                 metadata={
-                    "session_id": self.session_id,
-                    "interaction_count": self.interaction_count,
-                    "error_type": type(error).__name__,
+                    "session_id": getattr(self, "session_id", None),
+                    "interaction_count": getattr(self, "interaction_count", None),
+                    "error_message": error,
                 },
             )
-
-            await self.memory.add_memory(error_memory)
-            logger.info("Error information stored for learning")
-
+            if hasattr(self, "memory") and self.memory:
+                await self.memory.add_memory(error_memory)
+            self.logger.info("Error information stored for learning")
         except Exception as e:
-            logger.error(f"Failed to store error: {e}")
+            self.logger.error(f"Failed to store error: {e}")
 
     async def _store_session_start(self):
         """Store session initialization information."""
@@ -405,7 +414,7 @@ class SelfImprovingAgent:
             await self.memory.add_memory(session_memory)
 
         except Exception as e:
-            logger.error(f"Failed to store session start: {e}")
+            self.logger.error(f"Failed to store session start: {e}")
 
     async def _consider_self_modification(self):
         """Consider and potentially implement self-modifications."""
@@ -413,7 +422,7 @@ class SelfImprovingAgent:
             if not config.enable_self_modification:
                 return
 
-            logger.info("Considering self-modification opportunities...")
+            self.logger.info("Considering self-modification opportunities...")
             self.improvement_cycle_count += 1
 
             # Analyze recent performance
@@ -435,7 +444,7 @@ class SelfImprovingAgent:
                 and evaluation_insights.get("recent_average_score", 1.0) < 0.7
             ):
 
-                logger.info("Significant improvement potential detected")
+                self.logger.info("Significant improvement potential detected")
 
                 # Generate and validate modifications
                 if self.code_modifier:
@@ -458,16 +467,15 @@ class SelfImprovingAgent:
             await self.memory.add_memory(modification_memory)
 
         except Exception as e:
-            logger.error(f"Failed during self-modification consideration: {e}")
+            self.logger.error(f"Failed during self-modification consideration: {e}")
 
-    async def print_status(self):
-        """Print current agent status."""
-        try:
-            memory_stats = await self.memory.get_memory_stats()
-            evaluation_insights = await self.evaluator.get_evaluation_insights()
-
-            print(
-                f"""
+async def print_status(self):
+    """Print current agent status."""
+    try:
+        memory_stats = await self.memory.get_memory_stats()
+        evaluation_insights = await self.evaluator.get_evaluation_insights()
+        print(
+            f"""
 Agent Status:
 =============
 Session ID: {self.session_id}
@@ -487,18 +495,17 @@ Configuration:
 - LLM Provider: {config.default_llm_provider}
 - Model: {config.default_model}
 - Self-modification: {config.enable_self_modification}
-            """
-            )
+        """
+        )
+    except Exception as e:
+        print(f"Error getting status: {e}")
 
-        except Exception as e:
-            print(f"Error getting status: {e}")
-
-    async def print_memory_stats(self):
-        """Print detailed memory statistics."""
-        try:
-            stats = await self.memory.get_memory_stats()
-            print(
-                f"""
+async def print_memory_stats(self):
+    """Print detailed memory statistics."""
+    try:
+        stats = await self.memory.get_memory_stats()
+        print(
+            f"""
 Memory Statistics:
 ==================
 Total memories: {stats.get('total_memories', 0)}
@@ -507,51 +514,81 @@ Directory: {stats.get('persist_directory', 'N/A')}
 
 Memory Types:
 {json.dumps(stats.get('memory_types', {}), indent=2)}
-            """
-            )
+        """
+        )
+    except Exception as e:
+        print(f"Error getting memory stats: {e}")
 
-        except Exception as e:
-            print(f"Error getting memory stats: {e}")
-
-    async def cleanup(self):
-        """Cleanup agent resources."""
+    async def _improve_response(
+        self,
+        query: str,
+        initial_response: str,
+        evaluation: "EvaluationResult",
+        context: dict,
+    ) -> str:
+        """Improve response based on evaluation feedback."""
         try:
-            logger.info("Cleaning up agent resources...")
+            # If the response is already good, return it
+            if evaluation.overall_score >= 0.8:
+                self.logger.info("Response quality is high, no improvement needed")
+                return initial_response
 
-            # Save final agent state
-            agent_state = {
-                "session_id": self.session_id,
-                "interaction_count": self.interaction_count,
-                "improvement_cycle_count": self.improvement_cycle_count,
-                "final_timestamp": datetime.now().isoformat(),
-            }
-            await self.data_manager.save_agent_state(agent_state)
-
-            # Cleanup persistent data manager
-            await self.data_manager.cleanup()
-
-            # Store session end
-            if self.memory and self.session_id:
-                session_end_memory = MemoryEntry(
-                    content=f"Session {self.session_id} ended with {self.interaction_count} interactions",
-                    memory_type="session_end",
-                    metadata={
-                        "session_id": self.session_id,
-                        "total_interactions": self.interaction_count,
-                        "improvement_cycles": self.improvement_cycle_count,
-                    },
+            # If there are specific improvement suggestions, apply them
+            if getattr(evaluation, "improvement_suggestions", None):
+                self.logger.info("Applying improvement suggestions")
+                improvement_prompt = (
+                    f"Original Query: {query}\n\n"
+                    f"Initial Response: {initial_response}\n\n"
+                    "Evaluation Feedback:\n"
+                    f"- Overall Score: {getattr(evaluation, 'overall_score', 0):.2f}\n"
+                    f"- Weaknesses: {'; '.join(getattr(evaluation, 'weaknesses', []))}\n"
+                    f"- Improvement Suggestions: {'; '.join(getattr(evaluation, 'improvement_suggestions', []))}\n"
+                    "Please provide an improved version of the response that addresses the feedback.\n"
+                    "Focus on fixing the identified weaknesses and implementing the suggestions."
                 )
-                await self.memory.add_memory(session_end_memory)
 
-            logger.info("Agent cleanup completed")
+                improved_response = await llm_manager.generate_response(
+                    prompt=improvement_prompt,
+                    temperature=getattr(config, "temperature", 0.7) * 0.8,
+                    max_tokens=getattr(config, "max_tokens", 2048),
+                )
+
+                return improved_response.strip()
+
+            return initial_response
 
         except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
+            self.logger.error(f"Failed to improve response: {e}")
+            return initial_response
 
-    def __del__(self):
-        """Destructor to ensure cleanup."""
-        try:
-            if self.initialized:
-                asyncio.create_task(self.cleanup())
-        except:
-            pass
+
+    try:
+        self.logger.info("Cleaning up agent resources...")
+        agent_state = {
+            "session_id": self.session_id,
+            "interaction_count": self.interaction_count,
+            "improvement_cycle_count": self.improvement_cycle_count,
+            "final_timestamp": datetime.now().isoformat(),
+        }
+        await self.data_manager.save_agent_state(agent_state)
+        await self.data_manager.cleanup()
+        if self.memory and self.session_id:
+            session_end_memory = MemoryEntry(
+                content=(
+                    f"Session {self.session_id} ended with "
+                    f"{self.interaction_count} interactions"
+                ),
+                memory_type="session_end",
+                metadata={
+                    "session_id": self.session_id,
+                    "total_interactions": self.interaction_count,
+                    "improvement_cycles": self.improvement_cycle_count,
+                },
+            )
+            await self.memory.add_memory(session_end_memory)
+        self.logger.info("Agent cleanup completed")
+    except Exception as e:
+        self.logger.error(f"Error during cleanup: {e}")
+
+
+

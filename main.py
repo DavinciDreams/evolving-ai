@@ -15,6 +15,7 @@ sys.path.insert(0, str(project_root))
 
 from evolving_agent.core.agent import SelfImprovingAgent
 from evolving_agent.utils.logging import setup_logger
+from logging import Logger
 
 # Load environment variables
 load_dotenv()
@@ -50,6 +51,26 @@ async def main():
                 continue
             elif user_input.lower() == "memory":
                 await agent.print_memory_stats()
+                continue
+            elif user_input.lower() == "analyze":
+                # Trigger self-analysis and print results
+                try:
+                    evaluation_insights = await agent.evaluator.get_evaluation_insights()
+                    knowledge_suggestions = await agent.knowledge_updater.get_improvement_suggestions() if agent.knowledge_updater else []
+                    result = await agent.code_analyzer.analyze_performance_patterns(
+                        evaluation_insights, knowledge_suggestions
+                    )
+                    print("\nSelf-Analysis Results:")
+                    print(f"Improvement Potential: {result.get('improvement_potential', 0):.2f}")
+                    print("Opportunities:")
+                    for opp in result.get("improvement_opportunities", []):
+                        print(f"- {opp}")
+                    print("Recommendations:")
+                    for rec in result.get("recommendations", []):
+                        print(f"- {rec}")
+                except Exception as e:
+                    logger.error(f"Error during self-analysis: {e}")
+                    print(f"Error during self-analysis: {e}")
                 continue
             elif user_input.lower() == "stats":
                 stats = await agent.data_manager.get_session_statistics()
@@ -92,6 +113,7 @@ Available commands:
 - help: Show this help message
 - status: Show agent status and performance
 - memory: Show memory statistics
+- analyze: Run self-analysis and print improvement recommendations
 - stats: Show session statistics
 - interactions: Show recent interactions
 - quit/exit: Exit the program

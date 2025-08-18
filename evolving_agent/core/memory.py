@@ -2,15 +2,14 @@
 Long-term memory management using vector embeddings and ChromaDB.
 """
 
-import asyncio
 import json
 import uuid
 from datetime import datetime
-from pathlib import Path
+# from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import chromadb
-import numpy as np
+# import numpy as np  # Removed unused import
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 

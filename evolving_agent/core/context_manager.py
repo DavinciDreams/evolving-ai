@@ -2,7 +2,6 @@
 Dynamic context management for intelligent query processing.
 """
 
-import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -110,13 +109,10 @@ class ContextManager:
             for ctx_type in context_types:
                 prompt = f"""
                 Given the main query: "{main_query}"
-                
-                Generate a specific search query to find relevant {ctx_type.replace('_', ' ')}.
-                
-                Context type: {ctx_type}
+\1                Generate a specific search query to find relevant {ctx_type.replace('_', ' ')}.
+\1                Context type: {ctx_type}
                 Main query: {main_query}
-                
-                Return only the search query, no explanations:
+\1                Return only the search query, no explanations:
                 """
 
                 try:
@@ -312,10 +308,8 @@ class ContextManager:
 
             prompt = f"""
             Summarize the following {context_type.replace('_', ' ')} in 2-3 sentences:
-            
-            {combined_content}
-            
-            Focus on the key patterns, insights, and actionable information.
+\1            {combined_content}
+\1            Focus on the key patterns, insights, and actionable information.
             """
 
             summary = await llm_manager.generate_response(

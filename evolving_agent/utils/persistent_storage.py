@@ -3,7 +3,6 @@ Persistent data storage manager for the self-improving agent.
 Ensures all data is preserved across sessions.
 """
 
-import asyncio
 import json
 import shutil
 import sqlite3
@@ -330,13 +329,15 @@ class PersistentDataManager:
 
             # Get average evaluation score
             cursor.execute(
-                """
-                SELECT AVG(evaluation_score) FROM interactions 
-                WHERE session_id = ? AND evaluation_score IS NOT NULL
-            """,
+                (
+                    "SELECT AVG(evaluation_score) "
+                    "FROM interactions "
+                    "WHERE session_id = ? AND evaluation_score IS NOT NULL"
+                ),
                 (self.session_id,),
             )
-            avg_score = cursor.fetchone()[0] or 0.0
+            result = cursor.fetchone()
+            avg_score = result[0] if result and result[0] is not None else 0.0
 
             conn.close()
 

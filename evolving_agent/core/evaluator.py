@@ -2,7 +2,6 @@
 Output evaluation system for self-improvement.
 """
 
-import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -208,17 +207,13 @@ class OutputEvaluator:
 
         return f"""
         Evaluate the following output based on {criterion.upper()}.
-        
-        {description}
-        
-        ORIGINAL QUERY:
+\1        {description}
+\1        ORIGINAL QUERY:
         {query}
-        
-        OUTPUT TO EVALUATE:
+\1        OUTPUT TO EVALUATE:
         {output}
         {context_info}
-        
-        Please provide your evaluation in the following JSON format:
+\1        Please provide your evaluation in the following JSON format:
         {{
             "score": <float between 0.0 and 1.0>,
             "reasoning": "<detailed explanation of the score>",
@@ -226,8 +221,7 @@ class OutputEvaluator:
             "strengths": ["<list of strengths identified>"],
             "suggestions": ["<list of improvement suggestions>"]
         }}
-        
-        Be objective and provide specific, actionable feedback.
+\1        Be objective and provide specific, actionable feedback.
         """
 
     def _parse_evaluation_response(
@@ -279,7 +273,7 @@ class OutputEvaluator:
 
                 return score, {"reasoning": response, "parse_error": str(e)}
 
-            except:
+            except Exception:
                 return 0.5, {"error": f"Failed to parse evaluation: {e}"}
 
     def _extract_strengths_weaknesses(
@@ -333,15 +327,11 @@ class OutputEvaluator:
 
             if weak_criteria:
                 prompt = f"""
-                Based on the evaluation results, generate 3-5 specific, actionable improvement suggestions.
-                
-                Original Query: {query}
-                
-                Output: {output}
-                
-                Weak Areas: {', '.join(weak_criteria)}
-                
-                Focus on practical improvements that would address the weak areas.
+                Based on the evaluation results, generate 3-5 specific, actionable improvements.
+\1                Original Query: {query}
+\1                Output: {output}
+\1                Weak Areas: {', '.join(weak_criteria)}
+\1                Focus on practical changes that address the weak areas holistically.
                 Return as a JSON list of strings.
                 """
 
@@ -353,7 +343,7 @@ class OutputEvaluator:
                     additional_suggestions = json.loads(response)
                     if isinstance(additional_suggestions, list):
                         all_suggestions.extend(additional_suggestions)
-                except:
+                except Exception:
                     # Fallback: split by lines
                     lines = response.strip().split("\n")
                     for line in lines:
@@ -392,7 +382,8 @@ class OutputEvaluator:
             # Map std_dev [0, 0.5] to confidence [1.0, 0.5]
             confidence = max(0.5, 1.0 - (std_dev * 2))
             return confidence
-        except:
+        except Exception as e:
+            logger.error(f"Error calculating confidence: {e}", exc_info=True)
             return 0.7
 
     async def get_evaluation_insights(self) -> Dict[str, Any]:
@@ -468,8 +459,7 @@ class OutputEvaluator:
         Query: {query}
         Output: {output[:200]}...
         Overall Score: {evaluation.overall_score:.2f}
-        
-        Strengths: {', '.join(evaluation.strengths)}
+\1        Strengths: {', '.join(evaluation.strengths)}
         Weaknesses: {', '.join(evaluation.weaknesses)}
         Suggestions: {', '.join(evaluation.improvement_suggestions)}
         """

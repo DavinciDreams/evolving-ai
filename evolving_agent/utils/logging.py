@@ -55,5 +55,8 @@ def setup_logger(name: str, log_level: Optional[str] = None) -> object:
     return logger
 
 
-# Configure the logger for this module
+# Configure the logger for this module using best practices
 logger = setup_logger(__name__)
+
+# Prevent log duplication if handlers are attached to the root logger
+logger.propagate = False
