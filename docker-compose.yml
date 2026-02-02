@@ -3,7 +3,8 @@ version: '3.8'
 services:
   api:
     build: .
-    # Port is exposed in Dockerfile, no host mapping needed for Traefik
+    ports:
+      - "8000:8000"
     environment:
       # LLM Provider Configuration
       # Default: ZAI with GLM-4.7

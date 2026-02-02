@@ -583,8 +583,10 @@ async def get_memories(
                                 metadata=metadata,
                             )
                         )
+                else:
+                    logger.warning(f"No documents in results. Results keys: {results.keys() if results else 'None'}")
             except Exception as e:
-                logger.warning(f"Could not retrieve all memories: {e}")
+                logger.error(f"Could not retrieve all memories: {e}", exc_info=True)
 
         return memories[offset : offset + limit]
 
