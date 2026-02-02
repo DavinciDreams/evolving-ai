@@ -5,7 +5,6 @@ Long-term memory management using vector embeddings and ChromaDB.
 import json
 import uuid
 from datetime import datetime
-# from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import chromadb
@@ -20,15 +19,12 @@ logger = setup_logger(__name__)
 
 
 class MemoryMetadataHandler:
-    """Handles memory metadata operations"""
+    """Handles memory metadata operations."""
 
     @staticmethod
-    def sanitize_for_chroma(
-        metadata: Dict[str, Any],
-    ) -> Dict[str, Union[str, int, float, bool, None]]:
+    def sanitize_for_chroma(metadata: Dict[str, Any]) -> Dict[str, Union[str, int, float, bool, None]]:
         """Sanitize metadata for ChromaDB storage."""
         sanitized = {}
-
         for key, value in metadata.items():
             if value is None or isinstance(value, (str, int, float, bool)):
                 sanitized[key] = value
@@ -38,7 +34,6 @@ class MemoryMetadataHandler:
                 sanitized[f"{key}_json"] = json.dumps(list(value))
             else:
                 sanitized[key] = str(value)
-
         return sanitized
 
     @staticmethod
@@ -109,18 +104,18 @@ class MemoryEntry:
 
 
 class MemorySearchProcessor:
-    """Handles memory search operations"""
+    """Handles memory search operations."""
 
     def __init__(self, collection):
         self.collection = collection
 
-    def _calculate_similarity(self, distance: float) -> float:
+    @staticmethod
+    def _calculate_similarity(distance: float) -> float:
         """Calculate similarity score from distance."""
         return 1 - distance
 
-    def _create_memory_entry(
-        self, doc_id: str, content: str, metadata: Dict[str, Any]
-    ) -> MemoryEntry:
+    @staticmethod
+    def _create_memory_entry(doc_id: str, content: str, metadata: Dict[str, Any]) -> MemoryEntry:
         """Create memory entry from search result data."""
         return MemoryEntry.from_chroma_result(doc_id, content, metadata)
 
@@ -131,22 +126,17 @@ class MemorySearchProcessor:
         if not results["ids"]:
             return []
 
-        memories = []
-        for i, result in enumerate(
-            zip(
-                results["ids"][0],
-                results["distances"][0],
-                results["metadatas"][0],
-                results["documents"][0],
-            )
+        memories: List[Tuple[MemoryEntry, float]] = []
+        for doc_id, distance, metadata, content in zip(
+            results["ids"][0],
+            results["distances"][0],
+            results["metadatas"][0],
+            results["documents"][0],
         ):
-            doc_id, distance, metadata, content = result
             similarity = self._calculate_similarity(distance)
-
             if similarity >= similarity_threshold:
                 entry = self._create_memory_entry(doc_id, content, metadata)
                 memories.append((entry, similarity))
-
         return memories
 
     def get_where_clause(self, memory_type: Optional[str]) -> Optional[Dict[str, str]]:
@@ -155,7 +145,7 @@ class MemorySearchProcessor:
 
 
 class MemoryOperations:
-    """Handles core memory operations"""
+    """Handles core memory operations."""
 
     def __init__(self, collection, embedding_model):
         self.collection = collection
@@ -166,18 +156,24 @@ class MemoryOperations:
         """Generate embedding for content."""
         return self.embedding_model.encode(content).tolist()
 
-    async def add_memory(self, entry: MemoryEntry) -> str:
-        """Add a memory entry."""
+    async def _sanitize_and_add(
+        self, entry: MemoryEntry
+    ) -> Tuple[str, Dict[str, Any], List[float]]:
+        """Prepare entry and add to collection; returns id, sanitized metadata, embedding."""
         entry.embedding = await self.generate_embedding(entry.content)
         sanitized_metadata = self.metadata_handler.prepare_metadata(entry)
+        return entry.id, sanitized_metadata, entry.embedding
 
+    async def add_memory(self, entry: MemoryEntry) -> str:
+        """Add a memory entry."""
+        entry_id, sanitized_metadata, embedding = await self._sanitize_and_add(entry)
         self.collection.add(
-            ids=[entry.id],
-            embeddings=[entry.embedding],
+            ids=[entry_id],
+            embeddings=[embedding],
             documents=[entry.content],
             metadatas=[sanitized_metadata],
         )
-        return entry.id
+        return entry_id
 
     async def get_memory(self, memory_id: str) -> Optional[MemoryEntry]:
         """Get a specific memory."""
@@ -195,29 +191,30 @@ class MemoryOperations:
 
     async def get_memory_type_distribution(self) -> Dict[str, int]:
         """Get distribution of memory types."""
-        memory_types = {}
+        memory_types: Dict[str, int] = {}
         all_data = self.collection.get()
-
         if all_data["metadatas"]:
             for metadata in all_data["metadatas"]:
                 mem_type = metadata.get("memory_type", "general")
                 memory_types[mem_type] = memory_types.get(mem_type, 0) + 1
-
         return memory_types
 
-    async def get_entries_to_delete(self, num_entries: int) -> List[str]:
-        """Get IDs of oldest entries to delete."""
+    async def _get_sorted_entries(self) -> List[Tuple[str, datetime]]:
+        """Return list of (entry_id, timestamp) sorted by timestamp ascending."""
         all_data = self.collection.get()
         if not all_data["ids"]:
             return []
-
         entries_with_timestamps = [
             (entry_id, datetime.fromisoformat(metadata["timestamp"]))
             for entry_id, metadata in zip(all_data["ids"], all_data["metadatas"])
         ]
         entries_with_timestamps.sort(key=lambda x: x[1])
+        return entries_with_timestamps
 
-        return [entry[0] for entry in entries_with_timestamps[:num_entries]]
+    async def get_entries_to_delete(self, num_entries: int) -> List[str]:
+        """Get IDs of oldest entries to delete."""
+        sorted_entries = await self._get_sorted_entries()
+        return [entry[0] for entry in sorted_entries[:num_entries]]
 
 
 class LongTermMemory:
@@ -326,9 +323,10 @@ class LongTermMemory:
         where_clause = self.search_processor.get_where_clause(memory_type)
 
         results = self.collection.query(
-            query_embeddings=[query_embedding], n_results=n_results, where=where_clause
+            query_embeddings=[query_embedding],
+            n_results=n_results,
+            where=where_clause,
         )
-
         return await self.search_processor.process_results(
             results, similarity_threshold
         )
