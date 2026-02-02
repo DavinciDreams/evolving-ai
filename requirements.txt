@@ -31,3 +31,11 @@ python-multipart>=0.0.6
 # GitHub integration dependencies
 PyGithub>=1.59.0
 GitPython>=3.1.40
+
+# Discord integration dependencies
+discord.py>=2.3.0
+
+# Web search integration dependencies
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+duckduckgo-search>=3.9.0

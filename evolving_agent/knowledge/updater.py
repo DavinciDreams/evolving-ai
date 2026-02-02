@@ -28,15 +28,19 @@ class KnowledgeUpdater:
 
     async def update_from_interaction(
         self, query: str, response: str, evaluation: EvaluationResult
-    ):
-        """Update knowledge base from a successful interaction."""
+    ) -> int:
+        """Update knowledge base from a successful interaction.
+
+        Returns:
+            Number of knowledge items actually added
+        """
         try:
             logger.info("Analyzing interaction for knowledge updates...")
 
             # Only update from high-quality interactions
             if evaluation.overall_score < 0.7:
                 logger.info("Interaction quality too low for knowledge update")
-                return
+                return 0
 
             # Extract potential knowledge from the interaction
             knowledge_candidates = await self._extract_knowledge_candidates(
@@ -44,13 +48,17 @@ class KnowledgeUpdater:
             )
 
             # Process each candidate
+            added_count = 0
             for candidate in knowledge_candidates:
-                await self._process_knowledge_candidate(candidate)
+                if await self._process_knowledge_candidate(candidate):
+                    added_count += 1
 
-            logger.info(f"Processed {len(knowledge_candidates)} knowledge candidates")
+            logger.info(f"Processed {len(knowledge_candidates)} knowledge candidates, added {added_count}")
+            return added_count
 
         except Exception as e:
             logger.error(f"Failed to update knowledge from interaction: {e}")
+            return 0
 
     async def _extract_knowledge_candidates(
         self, query: str, response: str, evaluation: EvaluationResult
@@ -150,14 +158,18 @@ class KnowledgeUpdater:
             logger.error(f"Fallback knowledge extraction failed: {e}")
             return []
 
-    async def _process_knowledge_candidate(self, candidate: Dict[str, Any]):
-        """Process a knowledge candidate for potential addition."""
+    async def _process_knowledge_candidate(self, candidate: Dict[str, Any]) -> bool:
+        """Process a knowledge candidate for potential addition.
+
+        Returns:
+            True if knowledge was added, False otherwise
+        """
         try:
             # Validate candidate
             required_fields = ["content", "category", "confidence"]
             if not all(field in candidate for field in required_fields):
                 logger.warning(f"Invalid knowledge candidate: {candidate}")
-                return
+                return False
 
             # Create knowledge entry
             entry = KnowledgeEntry(
@@ -180,7 +192,7 @@ class KnowledgeUpdater:
 
             if similar:
                 logger.info(f"Similar knowledge exists, skipping: {entry.id}")
-                return
+                return False
 
             # Add to knowledge base if confidence is high enough
             if entry.confidence >= 0.6:
@@ -197,6 +209,7 @@ class KnowledgeUpdater:
                         "category": entry.category,
                     }
                 )
+                return True
             else:
                 # Add to pending updates for review
                 self.pending_updates.append(
@@ -209,9 +222,11 @@ class KnowledgeUpdater:
                 logger.info(
                     f"Added to pending updates (low confidence): {entry.confidence}"
                 )
+                return False
 
         except Exception as e:
             logger.error(f"Failed to process knowledge candidate: {e}")
+            return False
 
     async def update_from_errors(self):
         """Update knowledge base from error patterns."""

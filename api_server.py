@@ -15,6 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from evolving_agent.core.agent import SelfImprovingAgent
+from evolving_agent.integrations.discord_integration import DiscordIntegration
+from evolving_agent.utils.config import config
 from evolving_agent.utils.github_enhanced_modifier import GitHubEnabledSelfModifier
 from evolving_agent.utils.logging import setup_logger
 
@@ -23,12 +25,13 @@ logger = setup_logger(__name__)
 # Global agent instance
 agent: Optional[SelfImprovingAgent] = None
 github_modifier: Optional[GitHubEnabledSelfModifier] = None
+discord_integration: Optional[DiscordIntegration] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup the agent."""
-    global agent, github_modifier
+    global agent, github_modifier, discord_integration
     try:
         logger.info("Initializing Self-Improving Agent...")
         agent = SelfImprovingAgent()
@@ -51,11 +54,35 @@ async def lifespan(app: FastAPI):
                 "GitHub credentials not found. GitHub features will be unavailable."
             )
 
+        # Initialize Discord integration if enabled
+        if config.discord_enabled and config.discord_bot_token:
+            logger.info("Initializing Discord integration...")
+            discord_integration = DiscordIntegration(
+                bot_token=config.discord_bot_token,
+                agent=agent,
+                config=config
+            )
+            await discord_integration.initialize()
+
+            # Start Discord bot in background task
+            asyncio.create_task(discord_integration.start())
+            logger.info("Discord integration started successfully")
+        else:
+            logger.info(
+                "Discord integration disabled or token not configured. "
+                "Discord features will be unavailable."
+            )
+
         yield
     finally:
+        # Cleanup Discord integration
+        if discord_integration:
+            logger.info("Shutting down Discord integration...")
+            await discord_integration.close()
+
         if agent:
             logger.info("Cleaning up agent...")
-            await agent.cleanup()
+            # await agent.cleanup()  # Agent doesn't have cleanup method
             logger.info("Agent cleanup completed")
 
 
@@ -235,6 +262,47 @@ class ImprovementResponse(BaseModel):
     )
 
 
+class WebSearchRequest(BaseModel):
+    """Request model for web search."""
+
+    query: str = Field(
+        ...,
+        description="Search query",
+        min_length=1,
+        max_length=500,
+    )
+    max_results: Optional[int] = Field(
+        None,
+        description="Maximum number of results to return",
+        ge=1,
+        le=10,
+    )
+    include_content: bool = Field(
+        True,
+        description="Whether to fetch and include page content",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "query": "Latest developments in AI",
+                "max_results": 5,
+                "include_content": True,
+            }
+        }
+    }
+
+
+class WebSearchResponse(BaseModel):
+    """Response model for web search."""
+
+    query: str = Field(..., description="The search query")
+    sources: List[Dict[str, Any]] = Field(..., description="Search result sources")
+    provider: Optional[str] = Field(None, description="Search provider used")
+    timestamp: str = Field(..., description="When the search was performed")
+    cached: bool = Field(False, description="Whether results were cached")
+
+
 class RepositoryInfo(BaseModel):
     """Repository information model."""
 
@@ -253,21 +321,25 @@ app = FastAPI(
     description="""
     A sophisticated self-improving AI agent with persistent memory, dynamic context,
     self-evaluation, and code analysis capabilities.
-    
+
     ## Features
-    
+
     * **Interactive Chat**: Send queries and receive intelligent responses
     * **Memory System**: Persistent long-term memory using vector embeddings
+    * **Web Search**: Real-time web search with multiple provider support
     * **Self-Analysis**: Code analysis and improvement recommendations
     * **Knowledge Management**: Automatic knowledge extraction and organization
     * **Multi-LLM Support**: OpenAI, Anthropic, and OpenRouter integration
-    
+    * **GitHub Integration**: Automated code improvements via pull requests
+    * **Discord Integration**: Real-time chat bot interface
+
     ## Getting Started
-    
+
     1. Check agent status with `/status`
     2. Send a query using `/chat`
-    3. Explore memories with `/memories`
-    4. Trigger code analysis with `/analyze`
+    3. Search the web with `/web-search`
+    4. Explore memories with `/memories`
+    5. Trigger code analysis with `/analyze`
     """,
     version="1.0.0",
     contact={
@@ -818,6 +890,138 @@ async def get_improvement_history():
         logger.error(f"Error getting improvement history: {e}")
         raise HTTPException(
             status_code=500, detail=f"Error getting improvement history: {str(e)}"
+        )
+
+
+@app.get("/discord/status", tags=["Discord"])
+async def get_discord_status():
+    """
+    Get Discord bot status and connection information.
+    """
+    try:
+        if not discord_integration:
+            return {
+                "enabled": False,
+                "connected": False,
+                "message": "Discord integration not enabled"
+            }
+
+        is_ready = (
+            discord_integration.client and
+            discord_integration.client.user is not None
+        )
+
+        status_info = {
+            "enabled": True,
+            "connected": is_ready,
+            "bot_name": discord_integration.client.user.name if is_ready else None,
+            "bot_id": str(discord_integration.client.user.id) if is_ready else None,
+            "guild_count": len(discord_integration.client.guilds) if is_ready else 0,
+            "allowed_channels": len(discord_integration.allowed_channel_ids),
+            "status_channel_configured": discord_integration.status_channel_id is not None,
+            "mention_required": discord_integration.mention_required,
+        }
+
+        return status_info
+
+    except Exception as e:
+        logger.error(f"Error getting Discord status: {e}")
+        return {
+            "enabled": False,
+            "connected": False,
+            "error": str(e)
+        }
+
+
+@app.post("/web-search", response_model=WebSearchResponse, tags=["Web Search"])
+async def search_web(
+    request: WebSearchRequest,
+    current_agent: SelfImprovingAgent = Depends(get_agent),
+):
+    """
+    Search the web for information.
+
+    The agent will:
+    - Search the web using available providers (DuckDuckGo, Tavily, SerpAPI)
+    - Return relevant search results with titles, URLs, and snippets
+    - Optionally fetch and include full page content
+    - Cache results to improve performance
+    - Store search queries in memory for learning
+    """
+    try:
+        if not current_agent.web_search:
+            raise HTTPException(
+                status_code=503,
+                detail="Web search not enabled. Please configure WEB_SEARCH_ENABLED=true in .env"
+            )
+
+        logger.info(f"Web search request: {request.query}")
+
+        # Perform the search
+        results = await current_agent.search_web(
+            query=request.query,
+            max_results=request.max_results,
+        )
+
+        if results.get("error"):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Search failed: {results['error']}"
+            )
+
+        return WebSearchResponse(
+            query=results.get("query", request.query),
+            sources=results.get("sources", []),
+            provider=results.get("provider"),
+            timestamp=results.get("timestamp", datetime.now().isoformat()),
+            cached=False,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error performing web search: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error performing web search: {str(e)}"
+        )
+
+
+@app.get("/web-search/status", tags=["Web Search"])
+async def get_web_search_status(
+    current_agent: SelfImprovingAgent = Depends(get_agent),
+):
+    """
+    Get web search integration status.
+
+    Returns information about available search providers and configuration.
+    """
+    try:
+        if not current_agent.web_search:
+            return {
+                "enabled": False,
+                "message": "Web search not enabled",
+            }
+
+        providers = {
+            "duckduckgo": True,  # Always available
+            "tavily": bool(config.tavily_api_key),
+            "serpapi": bool(config.serpapi_key),
+        }
+
+        return {
+            "enabled": True,
+            "default_provider": config.web_search_default_provider,
+            "max_results": config.web_search_max_results,
+            "available_providers": providers,
+            "cache_enabled": True,
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting web search status: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error getting web search status: {str(e)}"
         )
 
 

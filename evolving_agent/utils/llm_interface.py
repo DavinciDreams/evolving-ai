@@ -3,6 +3,7 @@ LLM interface for communicating with various language model providers.
 """
 
 from abc import ABC, abstractmethod
+import asyncio
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -27,6 +28,7 @@ class LLMProvider(Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     OPENROUTER = "openrouter"
+    ZAI = "zai"
 
 
 class LLMInterface(ABC):
@@ -333,6 +335,101 @@ class OpenRouterInterface(LLMInterface):
         return await self._make_completion_request(payload)
 
 
+class ZAIInterface(LLMInterface):
+    """Z AI API interface for GLM models."""
+
+    def __init__(self, api_key: str, model: str = "glm-4.7"):
+        self.api_key = api_key
+        self.model = model
+        # Z.AI Coding API endpoint (international/overseas)
+        # Separate endpoint specifically for coding tasks
+        self.base_url = "https://api.z.ai/api/coding/paas/v4"
+
+    def _get_headers(self) -> Dict[str, str]:
+        """Get headers for Z AI requests."""
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def _filter_kwargs(self, kwargs: Dict) -> Dict:
+        """Filter valid kwargs for Z AI API."""
+        valid_keys = ["top_p", "stop", "stream"]
+        return {k: v for k, v in kwargs.items() if k in valid_keys}
+
+    def _prepare_payload(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        **kwargs,
+    ) -> Dict:
+        """Prepare payload for Z AI API request."""
+        return {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            **kwargs,
+        }
+
+    async def _make_completion_request(self, payload: Dict) -> str:
+        """Make completion request to Z AI API."""
+        try:
+            headers = self._get_headers()
+            # GLM-4.7 is a coding model - use standard chat completions endpoint
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/chat/completions", headers=headers, json=payload
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data["choices"][0]["message"]["content"]
+        except Exception as e:
+            logger.error(f"Z AI API error: {e}")
+            raise
+
+    @retry(
+        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10)
+    )
+    async def generate_response(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        **kwargs,
+    ) -> str:
+        """Generate a response using Z AI."""
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        valid_kwargs = self._filter_kwargs(kwargs)
+        payload = self._prepare_payload(
+            messages, temperature, max_tokens, **valid_kwargs
+        )
+        return await self._make_completion_request(payload)
+
+    @retry(
+        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10)
+    )
+    async def generate_chat_response(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+        **kwargs,
+    ) -> str:
+        """Generate a response from chat messages."""
+        valid_kwargs = self._filter_kwargs(kwargs)
+        payload = self._prepare_payload(
+            messages, temperature, max_tokens, **valid_kwargs
+        )
+        return await self._make_completion_request(payload)
+
+
 class LLMManager:
     """Manager for LLM interfaces."""
 
@@ -392,13 +489,24 @@ class LLMManager:
                 "openrouter", OpenRouterInterface, config.openrouter_api_key, model
             )
 
+        # Initialize Z AI
+        if config.zai_api_key:
+            model = (
+                config.default_model
+                if config.default_llm_provider == "zai"
+                else "glm-4.7"
+            )
+            self._initialize_provider(
+                "zai", ZAIInterface, config.zai_api_key, model
+            )
+
         self._initialize_provider_status()
 
     def _initialize_provider_status(self):
         """Initialize provider status tracking."""
         self.provider_status = {
             provider: {"available": False, "last_error": None, "last_check": None}
-            for provider in ["openai", "anthropic", "openrouter"]
+            for provider in ["openai", "anthropic", "openrouter", "zai"]
         }
 
     def _ensure_initialized(self):
@@ -433,7 +541,7 @@ class LLMManager:
     async def get_available_providers(self) -> List[str]:
         """Get list of currently available providers."""
         available = []
-        for provider in ["anthropic", "openrouter", "openai"]:
+        for provider in ["anthropic", "openrouter", "zai", "openai"]:
             if provider in self.interfaces and await self.check_provider_availability(
                 provider
             ):
@@ -476,7 +584,7 @@ class LLMManager:
         if preferred_provider and preferred_provider in available:
             return preferred_provider
 
-        for provider in ["anthropic", "openrouter", "openai"]:
+        for provider in ["anthropic", "openrouter", "zai", "openai"]:
             if provider in available and provider != "openai":
                 logger.info(f"Using provider: {provider}")
                 return provider

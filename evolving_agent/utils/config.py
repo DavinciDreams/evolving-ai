@@ -35,6 +35,11 @@ class Config:
         return os.getenv("OPENROUTER_API_KEY", "")
 
     @property
+    def zai_api_key(self) -> str:
+        """Get Z AI API key."""
+        return os.getenv("ZAI_API_KEY", "")
+
+    @property
     def log_level(self) -> str:
         """Get logging level."""
         return os.getenv("LOG_LEVEL", "INFO")
@@ -105,6 +110,11 @@ class Config:
         return os.getenv("REQUIRE_VALIDATION", "true").lower() == "true"
 
     @property
+    def enable_evaluation(self) -> bool:
+        """Get evaluation enabled setting."""
+        return os.getenv("ENABLE_EVALUATION", "true").lower() == "true"
+
+    @property
     def knowledge_base_path(self) -> str:
         """Get knowledge base path."""
         return os.getenv("KNOWLEDGE_BASE_PATH", "./knowledge_base")
@@ -119,12 +129,116 @@ class Config:
         """Get knowledge similarity threshold."""
         return float(os.getenv("KNOWLEDGE_SIMILARITY_THRESHOLD", "0.8"))
 
+    # Discord Integration Configuration
+    @property
+    def discord_bot_token(self) -> str:
+        """Get Discord bot token."""
+        return os.getenv("DISCORD_BOT_TOKEN", "")
+
+    @property
+    def discord_enabled(self) -> bool:
+        """Get Discord integration enabled setting."""
+        return os.getenv("DISCORD_ENABLED", "false").lower() == "true"
+
+    @property
+    def discord_channel_ids(self) -> list:
+        """Get Discord channel IDs."""
+        channels = os.getenv("DISCORD_CHANNEL_IDS", "")
+        return [c.strip() for c in channels.split(",") if c.strip()]
+
+    @property
+    def discord_status_channel_id(self) -> str:
+        """Get Discord status channel ID."""
+        return os.getenv("DISCORD_STATUS_CHANNEL_ID", "")
+
+    @property
+    def discord_mention_required(self) -> bool:
+        """Get Discord mention required setting."""
+        return os.getenv("DISCORD_MENTION_REQUIRED", "false").lower() == "true"
+
+    @property
+    def discord_max_message_length(self) -> int:
+        """Get Discord max message length."""
+        return int(os.getenv("DISCORD_MAX_MESSAGE_LENGTH", "2000"))
+
+    @property
+    def discord_typing_indicator(self) -> bool:
+        """Get Discord typing indicator setting."""
+        return os.getenv("DISCORD_TYPING_INDICATOR", "true").lower() == "true"
+
+    @property
+    def discord_embed_responses(self) -> bool:
+        """Get Discord embed responses setting."""
+        return os.getenv("DISCORD_EMBED_RESPONSES", "true").lower() == "true"
+
+    @property
+    def discord_command_prefix(self) -> str:
+        """Get Discord command prefix."""
+        return os.getenv("DISCORD_COMMAND_PREFIX", "")
+
+    @property
+    def discord_rate_limit_messages(self) -> int:
+        """Get Discord rate limit messages."""
+        return int(os.getenv("DISCORD_RATE_LIMIT_MESSAGES", "10"))
+
+    @property
+    def discord_cooldown_seconds(self) -> int:
+        """Get Discord cooldown seconds."""
+        return int(os.getenv("DISCORD_COOLDOWN_SECONDS", "2"))
+
+    @property
+    def discord_status_updates_enabled(self) -> bool:
+        """Get Discord status updates enabled setting."""
+        return os.getenv("DISCORD_STATUS_UPDATES_ENABLED", "true").lower() == "true"
+
+    @property
+    def discord_status_on_improvement(self) -> bool:
+        """Get Discord status on improvement setting."""
+        return os.getenv("DISCORD_STATUS_ON_IMPROVEMENT", "true").lower() == "true"
+
+    @property
+    def discord_status_on_knowledge_update(self) -> bool:
+        """Get Discord status on knowledge update setting."""
+        return os.getenv("DISCORD_STATUS_ON_KNOWLEDGE_UPDATE", "true").lower() == "true"
+
+    @property
+    def discord_status_on_high_quality(self) -> bool:
+        """Get Discord status on high quality interaction setting."""
+        return os.getenv("DISCORD_STATUS_ON_HIGH_QUALITY", "false").lower() == "true"
+
+    # Web Search Integration Configuration
+    @property
+    def web_search_enabled(self) -> bool:
+        """Get web search enabled setting."""
+        return os.getenv("WEB_SEARCH_ENABLED", "true").lower() == "true"
+
+    @property
+    def web_search_default_provider(self) -> str:
+        """Get default web search provider."""
+        return os.getenv("WEB_SEARCH_DEFAULT_PROVIDER", "duckduckgo")
+
+    @property
+    def web_search_max_results(self) -> int:
+        """Get max web search results."""
+        return int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
+
+    @property
+    def tavily_api_key(self) -> str:
+        """Get Tavily API key."""
+        return os.getenv("TAVILY_API_KEY", "")
+
+    @property
+    def serpapi_key(self) -> str:
+        """Get SerpAPI key."""
+        return os.getenv("SERPAPI_KEY", "")
+
     def get_all_config(self) -> Dict[str, Any]:
         """Get all configuration as a dictionary."""
         return {
             "openai_api_key": "***" if self.openai_api_key else "",
             "anthropic_api_key": "***" if self.anthropic_api_key else "",
             "openrouter_api_key": "***" if self.openrouter_api_key else "",
+            "zai_api_key": "***" if self.zai_api_key else "",
             "log_level": self.log_level,
             "log_file": self.log_file,
             "memory_persist_directory": self.memory_persist_directory,
@@ -142,6 +256,26 @@ class Config:
             "knowledge_base_path": self.knowledge_base_path,
             "auto_update_knowledge": self.auto_update_knowledge,
             "knowledge_similarity_threshold": self.knowledge_similarity_threshold,
+            "discord_bot_token": "***" if self.discord_bot_token else "",
+            "discord_enabled": self.discord_enabled,
+            "discord_channel_ids": self.discord_channel_ids,
+            "discord_status_channel_id": self.discord_status_channel_id,
+            "discord_mention_required": self.discord_mention_required,
+            "discord_max_message_length": self.discord_max_message_length,
+            "discord_typing_indicator": self.discord_typing_indicator,
+            "discord_embed_responses": self.discord_embed_responses,
+            "discord_command_prefix": self.discord_command_prefix,
+            "discord_rate_limit_messages": self.discord_rate_limit_messages,
+            "discord_cooldown_seconds": self.discord_cooldown_seconds,
+            "discord_status_updates_enabled": self.discord_status_updates_enabled,
+            "discord_status_on_improvement": self.discord_status_on_improvement,
+            "discord_status_on_knowledge_update": self.discord_status_on_knowledge_update,
+            "discord_status_on_high_quality": self.discord_status_on_high_quality,
+            "web_search_enabled": self.web_search_enabled,
+            "web_search_default_provider": self.web_search_default_provider,
+            "web_search_max_results": self.web_search_max_results,
+            "tavily_api_key": "***" if self.tavily_api_key else "",
+            "serpapi_key": "***" if self.serpapi_key else "",
         }
 
     def ensure_directories(self):

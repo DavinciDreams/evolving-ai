@@ -21,7 +21,9 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
 ### 🚀 Production Features
 
 - **FastAPI Web Server**: RESTful API with Swagger documentation
-- **Multiple LLM Providers**: Support for OpenAI, Anthropic, OpenRouter, and more
+- **Multiple LLM Providers**: Support for OpenAI, Anthropic, OpenRouter, Z AI (GLM-4.7 with coding endpoint), and more
+- **Web Search Integration**: Real-time web search with multiple provider support (DuckDuckGo, Tavily, SerpAPI)
+- **Discord Bot**: Real-time chat integration with Discord
 - **Robust Error Handling**: Comprehensive error management and recovery
 - **Configurable Environment**: Flexible configuration system
 
@@ -133,10 +135,12 @@ Access the interactive API documentation at: `http://localhost:8000/docs`
 Key endpoints:
 
 - `/chat` - Interact with the agent
+- `/web-search` - Search the web for information
 - `/analyze` - Code analysis and suggestions
 - `/memory` - Memory management
 - `/knowledge` - Knowledge base operations
 - `/github/*` - GitHub integration features
+- `/discord/status` - Discord bot status
 
 ### GitHub Integration
 
@@ -152,6 +156,76 @@ With these set, the agent can:
 - Create improvement pull requests
 - Track development history
 
+### Web Search Integration
+
+The agent can search the web in real-time using multiple providers:
+
+**Available Providers:**
+- **DuckDuckGo** (default, free, no API key required)
+- **Tavily** (AI-optimized search, requires API key from [tavily.com](https://tavily.com))
+- **SerpAPI** (Google search results, requires API key from [serpapi.com](https://serpapi.com))
+
+**Setup:**
+
+```bash
+# Enable web search (DuckDuckGo is always available)
+WEB_SEARCH_ENABLED=true
+WEB_SEARCH_DEFAULT_PROVIDER=duckduckgo
+WEB_SEARCH_MAX_RESULTS=5
+
+# Optional: Add API keys for better search results
+TAVILY_API_KEY=your_tavily_api_key
+SERPAPI_KEY=your_serpapi_key
+```
+
+**Test Web Search:**
+
+```bash
+python test_web_search.py
+```
+
+**API Usage:**
+
+```python
+# Via API endpoint
+POST /web-search
+{
+  "query": "Latest developments in AI",
+  "max_results": 5,
+  "include_content": true
+}
+```
+
+**Features:**
+- Automatic fallback between providers
+- Result caching for improved performance
+- Full page content extraction
+- Search query storage in memory for learning
+
+### Discord Integration
+
+Connect the agent to Discord for real-time chat interactions:
+
+**Setup:**
+
+1. Create a Discord bot at [discord.com/developers](https://discord.com/developers)
+2. Enable "Message Content Intent" in bot settings
+3. Copy bot token and channel IDs
+4. Configure in `.env`:
+
+```bash
+DISCORD_BOT_TOKEN=your_bot_token
+DISCORD_ENABLED=true
+DISCORD_CHANNEL_IDS=channel_id_1,channel_id_2
+DISCORD_STATUS_CHANNEL_ID=status_channel_id
+```
+
+**Features:**
+- Real-time message responses
+- Status updates for improvements
+- Rate limiting and cooldown
+- Rich embed responses
+
 ## 🔧 Configuration
 
 Key configuration options in `.env`:
@@ -161,10 +235,22 @@ Key configuration options in `.env`:
 OPENAI_API_KEY=your_openai_key
 ANTHROPIC_API_KEY=your_anthropic_key
 OPENROUTER_API_KEY=your_openrouter_key
+ZAI_API_KEY=your_zai_key
 
 # GitHub Integration
 GITHUB_TOKEN=your_github_token
 GITHUB_REPO_URL=your_repository_url
+
+# Web Search Integration
+WEB_SEARCH_ENABLED=true
+WEB_SEARCH_DEFAULT_PROVIDER=duckduckgo
+TAVILY_API_KEY=your_tavily_key  # Optional
+SERPAPI_KEY=your_serpapi_key     # Optional
+
+# Discord Integration
+DISCORD_BOT_TOKEN=your_discord_token
+DISCORD_ENABLED=true
+DISCORD_CHANNEL_IDS=your_channel_ids
 
 # Agent Settings
 AGENT_NAME=EvolveAI

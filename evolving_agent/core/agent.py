@@ -18,6 +18,7 @@ from ..utils.persistent_storage import persistent_data_manager
 from .context_manager import ContextManager
 from .evaluator import EvaluationResult, OutputEvaluator
 from .memory import LongTermMemory, MemoryEntry
+from ..integrations.web_search import WebSearchIntegration
 
 
 
@@ -52,11 +53,17 @@ class SelfImprovingAgent:
         # Persistent storage
         self.data_manager = persistent_data_manager
 
+        # Web search integration
+        self.web_search = None  # Will be initialized if enabled
+
         # State tracking
         self.initialized = False
         self.session_id = None
         self.interaction_count = 0
         self.improvement_cycle_count = 0
+
+        # Status update callbacks (for Discord/external integrations)
+        self._status_callbacks: List = []
 
     async def initialize(self):
         """Initialize all agent components."""
@@ -93,6 +100,17 @@ class SelfImprovingAgent:
                 )
                 self.logger.info("Self-modification system initialized")
 
+            # Initialize web search integration if enabled
+            if config.web_search_enabled:
+                self.web_search = WebSearchIntegration(
+                    tavily_api_key=config.tavily_api_key,
+                    serpapi_key=config.serpapi_key,
+                    default_provider=config.web_search_default_provider,
+                    max_results=config.web_search_max_results,
+                )
+                await self.web_search.initialize()
+                self.logger.info("Web search integration initialized")
+
             # Create session
             self.session_id = (
                 f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -119,6 +137,83 @@ class SelfImprovingAgent:
         except Exception as e:
             self.logger.error(f"Failed to initialize agent: {e}")
             raise
+
+    def register_status_callback(self, callback) -> None:
+        """Register a callback for status updates.
+
+        Args:
+            callback: Async function that takes (event_type: str, data: Dict[str, Any])
+        """
+        self._status_callbacks.append(callback)
+        self.logger.info(f"Registered status callback: {callback.__name__ if hasattr(callback, '__name__') else 'anonymous'}")
+
+    async def search_web(
+        self, query: str, max_results: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Search the web for information.
+
+        Args:
+            query: Search query
+            max_results: Optional maximum number of results
+
+        Returns:
+            Dictionary containing search results and metadata
+        """
+        if not self.web_search:
+            self.logger.warning("Web search not enabled")
+            return {
+                "query": query,
+                "results": [],
+                "error": "Web search not enabled",
+            }
+
+        try:
+            self.logger.info(f"Searching web for: {query[:100]}")
+            results = await self.web_search.search_and_summarize(
+                query, max_results=max_results or config.web_search_max_results
+            )
+
+            # Store search in memory for future reference
+            search_memory = MemoryEntry(
+                content=f"Web search: {query}\n\nResults: {len(results.get('sources', []))} sources found",
+                memory_type="web_search",
+                metadata={
+                    "query": query,
+                    "source_count": len(results.get("sources", [])),
+                    "provider": results.get("provider"),
+                    "session_id": self.session_id,
+                },
+            )
+            await self.memory.add_memory(search_memory)
+
+            return results
+
+        except Exception as e:
+            self.logger.error(f"Web search failed: {e}")
+            return {
+                "query": query,
+                "results": [],
+                "error": str(e),
+            }
+
+    async def _notify_status(self, event_type: str, data: Dict[str, Any]) -> None:
+        """Notify all registered callbacks of a status event.
+
+        Args:
+            event_type: Type of status event
+            data: Event data dictionary
+        """
+        if not self._status_callbacks:
+            return
+
+        self.logger.debug(f"Notifying {len(self._status_callbacks)} callbacks of event: {event_type}")
+
+        for callback in self._status_callbacks:
+            try:
+                await callback(event_type, data)
+            except Exception as e:
+                self.logger.error(f"Status callback error for {event_type}: {e}")
 
     async def run(
         self, query: str, context_hints: Optional[List[str]] = None
@@ -151,15 +246,31 @@ class SelfImprovingAgent:
             # Step 2: Generate initial response
             initial_response = await self._generate_response(query, context)
 
-            # Step 3: Evaluate the response
-            evaluation = await self.evaluator.evaluate_output(
-                query=query, output=initial_response, context=context
-            )
+            # Step 3: Evaluate the response (if enabled)
+            if config.enable_evaluation:
+                evaluation = await self.evaluator.evaluate_output(
+                    query=query, output=initial_response, context=context
+                )
 
-            # Step 4: Improve response based on evaluation
-            final_response = await self._improve_response(
-                query, initial_response, evaluation, context
-            )
+                # Step 4: Improve response based on evaluation
+                final_response = await self._improve_response(
+                    query, initial_response, evaluation, context
+                )
+            else:
+                # Skip evaluation and use initial response
+                final_response = initial_response
+                # Create a dummy evaluation for storage
+                from .evaluator import EvaluationResult
+                evaluation = EvaluationResult(
+                    overall_score=0.8,
+                    criteria_scores={},
+                    strengths=[],
+                    weaknesses=[],
+                    improvement_suggestions=[],
+                    feedback="Evaluation disabled",
+                    confidence=1.0,
+                    metadata={"evaluation_disabled": True}
+                )
 
             # Step 5: Store interaction and learn
             interaction_id = await self.data_manager.save_interaction(
@@ -190,9 +301,25 @@ class SelfImprovingAgent:
 
             # Step 6: Update knowledge base
             if config.auto_update_knowledge:
-                await self.knowledge_updater.update_from_interaction(
+                knowledge_added_count = await self.knowledge_updater.update_from_interaction(
                     query, final_response, evaluation
                 )
+
+                # Notify about significant knowledge updates (only if knowledge was actually added)
+                if (
+                    config.discord_status_on_knowledge_update
+                    and knowledge_added_count > 0
+                    and evaluation.overall_score >= 0.8
+                ):
+                    await self._notify_status(
+                        "knowledge_update",
+                        {
+                            "query": query[:200],
+                            "evaluation_score": evaluation.overall_score,
+                            "interaction_count": self.interaction_count,
+                            "knowledge_added": knowledge_added_count,
+                        }
+                    )
 
             # Step 7: Consider self-modification (periodically)
             if (
@@ -226,11 +353,22 @@ class SelfImprovingAgent:
             context_text = self._format_context_for_prompt(context)
 
             # Create system prompt
+            web_search_info = ""
+            if self.web_search:
+                web_search_info = (
+                    "\n\nIMPORTANT: You have access to web search capabilities. "
+                    "When you need current information, recent events, or data beyond your training, "
+                    "you can indicate that you would like to search the web by mentioning it in your response. "
+                    "For example: 'I should search the web for current information about [topic].' "
+                    "However, the search will need to be triggered separately - you cannot directly invoke it."
+                )
+
             system_prompt = (
                 "You are a self-improving AI with the ability to analyze and modify your own code.\n"
                 "You have access to long-term memory and a knowledge base, enabling you to learn from past interactions and improve over time.\n"
                 f"Current session: {self.session_id}\n"
                 f"Interaction count: {self.interaction_count}\n"
+                f"{web_search_info}\n"
                 "Use the provided context to give a comprehensive, accurate, and helpful response.\n"
                 "Be specific, actionable, and consider lessons learned from previous interactions."
             )
@@ -465,6 +603,18 @@ class SelfImprovingAgent:
             )
 
             await self.memory.add_memory(modification_memory)
+
+            # Notify status callbacks about self-improvement cycle
+            if config.discord_status_on_improvement:
+                await self._notify_status(
+                    "self_improvement",
+                    {
+                        "cycle_count": self.improvement_cycle_count,
+                        "improvement_potential": code_analysis.get("improvement_potential", 0),
+                        "recent_score": evaluation_insights.get("recent_average_score", "N/A"),
+                        "improvements": code_analysis.get("improvements", []),
+                    }
+                )
 
         except Exception as e:
             self.logger.error(f"Failed during self-modification consideration: {e}")
