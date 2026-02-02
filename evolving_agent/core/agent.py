@@ -619,13 +619,13 @@ class SelfImprovingAgent:
         except Exception as e:
             self.logger.error(f"Failed during self-modification consideration: {e}")
 
-async def print_status(self):
-    """Print current agent status."""
-    try:
-        memory_stats = await self.memory.get_memory_stats()
-        evaluation_insights = await self.evaluator.get_evaluation_insights()
-        print(
-            f"""
+    async def print_status(self):
+        """Print current agent status."""
+        try:
+            memory_stats = await self.memory.get_memory_stats()
+            evaluation_insights = await self.evaluator.get_evaluation_insights()
+            print(
+                f"""
 Agent Status:
 =============
 Session ID: {self.session_id}
@@ -645,17 +645,17 @@ Configuration:
 - LLM Provider: {config.default_llm_provider}
 - Model: {config.default_model}
 - Self-modification: {config.enable_self_modification}
-        """
-        )
-    except Exception as e:
-        print(f"Error getting status: {e}")
+            """
+            )
+        except Exception as e:
+            print(f"Error getting status: {e}")
 
-async def print_memory_stats(self):
-    """Print detailed memory statistics."""
-    try:
-        stats = await self.memory.get_memory_stats()
-        print(
-            f"""
+    async def print_memory_stats(self):
+        """Print detailed memory statistics."""
+        try:
+            stats = await self.memory.get_memory_stats()
+            print(
+                f"""
 Memory Statistics:
 ==================
 Total memories: {stats.get('total_memories', 0)}
@@ -664,10 +664,10 @@ Directory: {stats.get('persist_directory', 'N/A')}
 
 Memory Types:
 {json.dumps(stats.get('memory_types', {}), indent=2)}
-        """
-        )
-    except Exception as e:
-        print(f"Error getting memory stats: {e}")
+            """
+            )
+        except Exception as e:
+            print(f"Error getting memory stats: {e}")
 
     async def _improve_response(
         self,
@@ -711,34 +711,35 @@ Memory Types:
             self.logger.error(f"Failed to improve response: {e}")
             return initial_response
 
-
-    try:
-        self.logger.info("Cleaning up agent resources...")
-        agent_state = {
-            "session_id": self.session_id,
-            "interaction_count": self.interaction_count,
-            "improvement_cycle_count": self.improvement_cycle_count,
-            "final_timestamp": datetime.now().isoformat(),
-        }
-        await self.data_manager.save_agent_state(agent_state)
-        await self.data_manager.cleanup()
-        if self.memory and self.session_id:
-            session_end_memory = MemoryEntry(
-                content=(
-                    f"Session {self.session_id} ended with "
-                    f"{self.interaction_count} interactions"
-                ),
-                memory_type="session_end",
-                metadata={
-                    "session_id": self.session_id,
-                    "total_interactions": self.interaction_count,
-                    "improvement_cycles": self.improvement_cycle_count,
-                },
-            )
-            await self.memory.add_memory(session_end_memory)
-        self.logger.info("Agent cleanup completed")
-    except Exception as e:
-        self.logger.error(f"Error during cleanup: {e}")
+    async def cleanup(self):
+        """Clean up agent resources."""
+        try:
+            self.logger.info("Cleaning up agent resources...")
+            agent_state = {
+                "session_id": self.session_id,
+                "interaction_count": self.interaction_count,
+                "improvement_cycle_count": self.improvement_cycle_count,
+                "final_timestamp": datetime.now().isoformat(),
+            }
+            await self.data_manager.save_agent_state(agent_state)
+            await self.data_manager.cleanup()
+            if self.memory and self.session_id:
+                session_end_memory = MemoryEntry(
+                    content=(
+                        f"Session {self.session_id} ended with "
+                        f"{self.interaction_count} interactions"
+                    ),
+                    memory_type="session_end",
+                    metadata={
+                        "session_id": self.session_id,
+                        "total_interactions": self.interaction_count,
+                        "improvement_cycles": self.improvement_cycle_count,
+                    },
+                )
+                await self.memory.add_memory(session_end_memory)
+            self.logger.info("Agent cleanup completed")
+        except Exception as e:
+            self.logger.error(f"Error during cleanup: {e}")
 
 
 
