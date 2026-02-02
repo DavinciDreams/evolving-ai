@@ -7,13 +7,16 @@ services:
       - "8000:8000"
     environment:
       # LLM Provider Configuration
+      # Default: ZAI with GLM-4.7
+      # Anthropic: use claude-sonnet-4-5-20250929
+      # OpenAI: use gpt-4 or gpt-4-turbo
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - ZAI_API_KEY=${ZAI_API_KEY}
-      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-openai}
-      - DEFAULT_MODEL=${DEFAULT_MODEL:-gpt-4}
-      - EVALUATION_MODEL=${EVALUATION_MODEL}
+      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-zai}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-glm-4.7}
+      - EVALUATION_MODEL=${EVALUATION_MODEL:-glm-4.7}
       - TEMPERATURE=${TEMPERATURE:-0.7}
       - MAX_TOKENS=${MAX_TOKENS:-2048}
 
