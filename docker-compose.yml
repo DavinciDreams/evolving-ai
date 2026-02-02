@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # LLM Provider Configuration
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - MODEL_NAME=${MODEL_NAME:-gpt-4}
+
+      # Memory Configuration
+      - CHROMA_PERSIST_DIR=/app/data/chroma
+      - MEMORY_COLLECTION_NAME=${MEMORY_COLLECTION_NAME:-agent_memories}
+
+      # GitHub Integration
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_REPO=${GITHUB_REPO}
+      - ENABLE_SELF_MODIFICATION=${ENABLE_SELF_MODIFICATION:-false}
+
+      # Discord Integration
+      - DISCORD_ENABLED=${DISCORD_ENABLED:-false}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - DISCORD_ALLOWED_CHANNEL_IDS=${DISCORD_ALLOWED_CHANNEL_IDS}
+
+      # Web Search
+      - WEB_SEARCH_ENABLED=${WEB_SEARCH_ENABLED:-true}
+      - WEB_SEARCH_DEFAULT_PROVIDER=${WEB_SEARCH_DEFAULT_PROVIDER:-duckduckgo}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - SERPAPI_KEY=${SERPAPI_KEY}
+
+      # Application Settings
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    volumes:
+      - chroma-data:/app/data
+      - app-logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  chroma-data:
+  app-logs:
