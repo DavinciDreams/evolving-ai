@@ -8,7 +8,8 @@ export const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 30000,
+  // Increased timeout to 90s to accommodate LLM response times (especially with improvement evaluation)
+  timeout: 90000,
 });
 
 // Request interceptor
