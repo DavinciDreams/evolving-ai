@@ -33,14 +33,14 @@ const GitHubPage = () => {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-gray-600">Status</span>
-                <Badge variant={status.connected ? 'success' : 'danger'}>
-                  {status.connected ? 'Connected' : 'Disconnected'}
+                <Badge variant={status.github_connected ? 'success' : 'danger'}>
+                  {status.github_connected ? 'Connected' : 'Disconnected'}
                 </Badge>
               </div>
-              {status.repository && (
+              {status.repository_name && (
                 <div className="flex items-center justify-between">
                   <span className="text-gray-600">Repository</span>
-                  <span className="text-gray-900 font-medium">{status.repository}</span>
+                  <span className="text-gray-900 font-medium">{status.repository_name}</span>
                 </div>
               )}
             </div>

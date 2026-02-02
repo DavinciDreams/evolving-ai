@@ -69,4 +69,6 @@ export const githubService = {
   },
 };
 
+export const getGitHubStatus = githubService.getStatus;
+
 export default githubService;
