@@ -15,8 +15,8 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - ZAI_API_KEY=${ZAI_API_KEY}
       - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-openrouter}
-      - DEFAULT_MODEL=${DEFAULT_MODEL:-anthropic/claude-3.5-sonnet}
-      - EVALUATION_MODEL=${EVALUATION_MODEL:-anthropic/claude-3.5-sonnet}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-nvidia/nemotron-3-nano-30b-a3b:free}
+      - EVALUATION_MODEL=${EVALUATION_MODEL:-nvidia/nemotron-3-nano-30b-a3b:free}
       - TEMPERATURE=${TEMPERATURE:-0.7}
       - MAX_TOKENS=${MAX_TOKENS:-2048}
 
