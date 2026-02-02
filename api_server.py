@@ -546,21 +546,45 @@ async def get_memories(
         if search:
             # Search for relevant memories
             search_results = await current_agent.memory.search_memories(
-                search, top_k=limit
+                search, top_k=limit + offset
             )
             for result in search_results:
+                metadata = result.get("metadata", {})
+                # Get timestamp from metadata or use current time as fallback
+                timestamp_str = metadata.get("timestamp")
+                timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now()
+
                 memories.append(
                     MemoryItem(
                         id=result.get("id", "unknown"),
                         content=result.get("content", ""),
-                        timestamp=datetime.now(),  # Would need actual timestamp from metadata
-                        metadata=result.get("metadata", {}),
+                        timestamp=timestamp,
+                        metadata=metadata,
                     )
                 )
         else:
-            # Get recent memories (would need to implement this in the memory system)
-            # For now, return empty list as we don't have a "get_all" method
-            pass
+            # Get all memories by querying the collection directly
+            try:
+                collection = current_agent.memory.collection
+                results = collection.get(limit=limit + offset, include=["documents", "metadatas"])
+
+                if results and results.get("documents"):
+                    for i, doc in enumerate(results["documents"]):
+                        metadata = results["metadatas"][i] if "metadatas" in results and i < len(results["metadatas"]) else {}
+                        # Get timestamp from metadata or use current time as fallback
+                        timestamp_str = metadata.get("timestamp")
+                        timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now()
+
+                        memories.append(
+                            MemoryItem(
+                                id=results["ids"][i] if "ids" in results else f"mem_{i}",
+                                content=doc,
+                                timestamp=timestamp,
+                                metadata=metadata,
+                            )
+                        )
+            except Exception as e:
+                logger.warning(f"Could not retrieve all memories: {e}")
 
         return memories[offset : offset + limit]
 

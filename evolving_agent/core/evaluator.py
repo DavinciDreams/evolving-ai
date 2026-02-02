@@ -471,6 +471,6 @@ class OutputEvaluator:
                 "overall_score": evaluation.overall_score,
                 "criteria_scores": evaluation.criteria_scores,
                 "confidence": evaluation.confidence,
-                "evaluation_timestamp": evaluation.metadata["timestamp"],
+                "evaluation_timestamp": evaluation.metadata.get("timestamp", datetime.now().isoformat()),
             },
         )
