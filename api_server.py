@@ -623,20 +623,20 @@ async def get_knowledge(
             filtered_items = {
                 k: v
                 for k, v in all_items.items()
-                if v.get("category", "").lower() == category.lower()
+                if v.category.lower() == category.lower()
             }
         else:
             filtered_items = all_items
 
         # Convert to response format
-        for item_id, item_data in list(filtered_items.items())[offset : offset + limit]:
+        for item_id, entry in list(filtered_items.items())[offset : offset + limit]:
             knowledge_items.append(
                 KnowledgeItem(
                     id=item_id,
-                    content=item_data.get("content", ""),
-                    category=item_data.get("category", "general"),
-                    priority=item_data.get("priority", 0.5),
-                    timestamp=datetime.now(),  # Would need actual timestamp
+                    content=entry.content,
+                    category=entry.category,
+                    priority=entry.confidence,  # Use confidence as priority
+                    timestamp=entry.created_at,
                 )
             )
 
