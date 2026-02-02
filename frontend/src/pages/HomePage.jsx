@@ -63,7 +63,18 @@ const HomePage = () => {
           <p className="text-gray-600 mb-4">
             Monitor agent health, API status, and system resources.
           </p>
-          <Button size="sm" variant="secondary">Coming Soon</Button>
+          <Link to={ROUTES.STATUS}>
+            <Button size="sm" variant="secondary">View Status</Button>
+          </Link>
+        </Card>
+
+        <Card title="API Documentation">
+          <p className="text-gray-600 mb-4">
+            Explore the complete API reference and interactive documentation.
+          </p>
+          <Link to={ROUTES.DOCS}>
+            <Button size="sm" variant="secondary">View Docs</Button>
+          </Link>
         </Card>
       </div>
     </div>

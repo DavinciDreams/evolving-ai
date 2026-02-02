@@ -11,4 +11,6 @@ export const discordService = {
   },
 };
 
+export const getDiscordStatus = discordService.getStatus;
+
 export default discordService;

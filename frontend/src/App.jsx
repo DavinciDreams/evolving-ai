@@ -6,6 +6,8 @@ import MemoryPage from './pages/MemoryPage';
 import KnowledgePage from './pages/KnowledgePage';
 import GitHubPage from './pages/GitHubPage';
 import AnalyticsPage from './pages/AnalyticsPage';
+import StatusPage from './pages/StatusPage';
+import DocsPage from './pages/DocsPage';
 import { ROUTES } from './utils/constants';
 
 function App() {
@@ -19,6 +21,8 @@ function App() {
           <Route path={ROUTES.KNOWLEDGE} element={<KnowledgePage />} />
           <Route path={ROUTES.GITHUB} element={<GitHubPage />} />
           <Route path={ROUTES.ANALYTICS} element={<AnalyticsPage />} />
+          <Route path={ROUTES.STATUS} element={<StatusPage />} />
+          <Route path={ROUTES.DOCS} element={<DocsPage />} />
           <Route path="*" element={<Navigate to={ROUTES.HOME} replace />} />
         </Routes>
       </Layout>

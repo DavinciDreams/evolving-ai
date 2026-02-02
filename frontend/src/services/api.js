@@ -43,4 +43,15 @@ api.interceptors.response.use(
   }
 );
 
+// Agent Status API
+export const getAgentStatus = async () => {
+  const response = await api.get('/status');
+  return response.data;
+};
+
+export const getHealthStatus = async () => {
+  const response = await api.get('/health');
+  return response.data;
+};
+
 export default api;

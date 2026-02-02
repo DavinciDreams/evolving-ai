@@ -7,6 +7,8 @@ import {
   BookOpenIcon,
   CodeBracketSquareIcon,
   ChartBarIcon,
+  SignalIcon,
+  DocumentTextIcon,
 } from '@heroicons/react/24/outline';
 import { ROUTES } from '../../utils/constants';
 import { useApp } from '../../context/AppContext';
@@ -18,6 +20,8 @@ const navigation = [
   { name: 'Knowledge', href: ROUTES.KNOWLEDGE, icon: BookOpenIcon },
   { name: 'GitHub', href: ROUTES.GITHUB, icon: CodeBracketSquareIcon },
   { name: 'Analytics', href: ROUTES.ANALYTICS, icon: ChartBarIcon },
+  { name: 'Status', href: ROUTES.STATUS, icon: SignalIcon },
+  { name: 'Docs', href: ROUTES.DOCS, icon: DocumentTextIcon },
 ];
 
 export const Sidebar = () => {

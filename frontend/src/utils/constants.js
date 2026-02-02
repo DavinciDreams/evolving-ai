@@ -10,6 +10,8 @@ export const ROUTES = {
   KNOWLEDGE: '/knowledge',
   GITHUB: '/github',
   ANALYTICS: '/analytics',
+  STATUS: '/status',
+  DOCS: '/docs',
   SETTINGS: '/settings',
 };
 
