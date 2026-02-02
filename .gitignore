@@ -225,3 +225,4 @@ evolving_agent/utils/__pycache__/llm_interface.cpython-313.pyc
 # Roo configuration and mode files
 .roo/
 .roomodes/
+COOLIFY_ENV_CHECKLIST.md

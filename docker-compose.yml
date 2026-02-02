@@ -7,37 +7,73 @@ services:
       - "8000:8000"
     environment:
       # LLM Provider Configuration
-      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - MODEL_NAME=${MODEL_NAME:-gpt-4}
+      - ZAI_API_KEY=${ZAI_API_KEY}
+      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-openai}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-gpt-4}
+      - EVALUATION_MODEL=${EVALUATION_MODEL}
+      - TEMPERATURE=${TEMPERATURE:-0.7}
+      - MAX_TOKENS=${MAX_TOKENS:-2048}
 
-      # Memory Configuration
-      - CHROMA_PERSIST_DIR=/app/data/chroma
-      - MEMORY_COLLECTION_NAME=${MEMORY_COLLECTION_NAME:-agent_memories}
+      # Memory Configuration (ChromaDB)
+      - MEMORY_PERSIST_DIRECTORY=/app/data/memory_db
+      - MEMORY_COLLECTION_NAME=${MEMORY_COLLECTION_NAME:-agent_memory}
+      - MAX_MEMORY_ENTRIES=${MAX_MEMORY_ENTRIES:-10000}
 
       # GitHub Integration
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - GITHUB_REPO=${GITHUB_REPO}
+      - GITHUB_BRANCH=${GITHUB_BRANCH:-main}
+      - GITHUB_LOCAL_REPO_PATH=/app
+      - GITHUB_REPO_URL=${GITHUB_REPO_URL}
       - ENABLE_SELF_MODIFICATION=${ENABLE_SELF_MODIFICATION:-false}
+      - BACKUP_DIRECTORY=/app/data/backups
+      - MAX_MODIFICATION_ATTEMPTS=${MAX_MODIFICATION_ATTEMPTS:-3}
+      - REQUIRE_VALIDATION=${REQUIRE_VALIDATION:-true}
+
+      # Knowledge Base Configuration
+      - KNOWLEDGE_BASE_PATH=/app/data/knowledge_base
+      - AUTO_UPDATE_KNOWLEDGE=${AUTO_UPDATE_KNOWLEDGE:-true}
+      - KNOWLEDGE_SIMILARITY_THRESHOLD=${KNOWLEDGE_SIMILARITY_THRESHOLD:-0.8}
 
       # Discord Integration
       - DISCORD_ENABLED=${DISCORD_ENABLED:-false}
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
-      - DISCORD_ALLOWED_CHANNEL_IDS=${DISCORD_ALLOWED_CHANNEL_IDS}
+      - DISCORD_CHANNEL_IDS=${DISCORD_CHANNEL_IDS}
+      - DISCORD_STATUS_CHANNEL_ID=${DISCORD_STATUS_CHANNEL_ID}
+      - DISCORD_MENTION_REQUIRED=${DISCORD_MENTION_REQUIRED:-false}
+      - DISCORD_MAX_MESSAGE_LENGTH=${DISCORD_MAX_MESSAGE_LENGTH:-2000}
+      - DISCORD_TYPING_INDICATOR=${DISCORD_TYPING_INDICATOR:-true}
+      - DISCORD_EMBED_RESPONSES=${DISCORD_EMBED_RESPONSES:-true}
+      - DISCORD_COMMAND_PREFIX=${DISCORD_COMMAND_PREFIX}
+      - DISCORD_RATE_LIMIT_MESSAGES=${DISCORD_RATE_LIMIT_MESSAGES:-10}
+      - DISCORD_COOLDOWN_SECONDS=${DISCORD_COOLDOWN_SECONDS:-2}
+      - DISCORD_STATUS_UPDATES_ENABLED=${DISCORD_STATUS_UPDATES_ENABLED:-true}
+      - DISCORD_STATUS_ON_IMPROVEMENT=${DISCORD_STATUS_ON_IMPROVEMENT:-true}
+      - DISCORD_STATUS_ON_KNOWLEDGE_UPDATE=${DISCORD_STATUS_ON_KNOWLEDGE_UPDATE:-true}
+      - DISCORD_STATUS_ON_HIGH_QUALITY=${DISCORD_STATUS_ON_HIGH_QUALITY:-false}
 
       # Web Search
       - WEB_SEARCH_ENABLED=${WEB_SEARCH_ENABLED:-true}
       - WEB_SEARCH_DEFAULT_PROVIDER=${WEB_SEARCH_DEFAULT_PROVIDER:-duckduckgo}
+      - WEB_SEARCH_MAX_RESULTS=${WEB_SEARCH_MAX_RESULTS:-5}
       - TAVILY_API_KEY=${TAVILY_API_KEY}
       - SERPAPI_KEY=${SERPAPI_KEY}
 
-      # Application Settings
+      # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FILE=/app/logs/agent.log
+
+      # Evaluation
+      - ENABLE_EVALUATION=${ENABLE_EVALUATION:-false}
 
     volumes:
-      - chroma-data:/app/data
+      # Persistent data storage
+      - memory-data:/app/data/memory_db
+      - knowledge-data:/app/data/knowledge_base
+      - backup-data:/app/data/backups
       - app-logs:/app/logs
     restart: unless-stopped
     healthcheck:
@@ -48,5 +84,11 @@ services:
       start_period: 40s
 
 volumes:
-  chroma-data:
+  memory-data:
+    driver: local
+  knowledge-data:
+    driver: local
+  backup-data:
+    driver: local
   app-logs:
+    driver: local
