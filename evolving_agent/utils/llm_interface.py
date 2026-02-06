@@ -6,6 +6,9 @@ from abc import ABC, abstractmethod
 import asyncio
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
+from datetime import datetime
+from collections import defaultdict
+import uuid
 
 import anthropic
 import httpx
@@ -15,6 +18,13 @@ from tenacity import RetryError, retry, stop_after_attempt, wait_exponential
 
 from ..utils.config import config
 from ..utils.logging import setup_logger
+from .error_recovery import (
+    error_recovery_manager,
+    CircuitBreakerConfig,
+    RetryConfig,
+    CircuitBreakerOpenError,
+    FallbackExhaustedError
+)
 
 logger = setup_logger(__name__)
 
@@ -431,13 +441,19 @@ class ZAIInterface(LLMInterface):
 
 
 class LLMManager:
-    """Manager for LLM interfaces."""
+    """Manager for LLM interfaces with intelligent error recovery."""
 
     def __init__(self):
         self.interfaces: Dict[str, LLMInterface] = {}
         self.default_provider = None
         self._initialized = False
         self.provider_status: Dict[str, Dict[str, Any]] = {}
+        self.request_queue: Dict[str, List[Dict]] = defaultdict(list)
+        self.partial_responses: Dict[str, Dict] = {}
+        self.provider_priority: List[str] = ["anthropic", "openrouter", "zai", "openai"]
+        self.last_health_check: Dict[str, float] = {}
+        self.health_check_interval = 60.0  # seconds
+        self.request_timeout = 120.0
 
     def _initialize_provider(
         self, provider: str, interface_class: type, api_key: str, model: str
@@ -505,9 +521,25 @@ class LLMManager:
     def _initialize_provider_status(self):
         """Initialize provider status tracking."""
         self.provider_status = {
-            provider: {"available": False, "last_error": None, "last_check": None}
+            provider: {
+                "available": False,
+                "last_error": None,
+                "last_check": None,
+                "consecutive_failures": 0,
+                "consecutive_successes": 0,
+                "average_response_time": 0.0,
+                "request_count": 0,
+                "circuit_breaker_state": "closed"
+            }
             for provider in ["openai", "anthropic", "openrouter", "zai"]
         }
+        
+        # Register health checks with error recovery manager
+        for provider in ["openai", "anthropic", "openrouter", "zai"]:
+            error_recovery_manager.register_health_check(
+                f"llm_{provider}",
+                lambda p=provider: self._check_provider_health(p)
+            )
 
     def _ensure_initialized(self):
         """Ensure interfaces are initialized with current config."""
@@ -517,36 +549,73 @@ class LLMManager:
 
     async def check_provider_availability(self, provider: str) -> bool:
         """Check if a provider is currently available."""
+        # Check if we've recently verified this provider
+        current_time = datetime.now().timestamp()
+        last_check = self.last_health_check.get(provider, 0)
+        
+        if current_time - last_check < self.health_check_interval:
+            return self.provider_status[provider]["available"]
+        
         try:
             test_message = "Hello"
-            response = await self.generate_response(test_message, provider=provider)
+            response = await self.generate_response(test_message, provider=provider, timeout=30.0)
             self._update_provider_status(provider, True)
+            self.last_health_check[provider] = current_time
             return True
         except Exception as e:
             self._update_provider_status(provider, False, str(e))
+            self.last_health_check[provider] = current_time
             return False
+    
+    async def _check_provider_health(self, provider: str) -> bool:
+        """Health check function for error recovery manager."""
+        return await self.check_provider_availability(provider)
 
     def _update_provider_status(
         self, provider: str, available: bool, error: Optional[str] = None
     ):
         """Update provider status information."""
-        self.provider_status[provider].update(
-            {
-                "available": available,
-                "last_error": error,
-                "last_check": asyncio.get_event_loop().time(),
-            }
-        )
+        status = self.provider_status[provider]
+        status["available"] = available
+        status["last_error"] = error
+        status["last_check"] = asyncio.get_event_loop().time()
+        
+        if available:
+            status["consecutive_successes"] += 1
+            status["consecutive_failures"] = 0
+        else:
+            status["consecutive_failures"] += 1
+            status["consecutive_successes"] = 0
+        
+        # Track error patterns
+        if error:
+            error_recovery_manager.track_error_pattern(
+                f"llm_{provider}",
+                type(Exception(error).__name__ if isinstance(error, str) else error).__name__,
+                {"error": error}
+            )
 
     async def get_available_providers(self) -> List[str]:
-        """Get list of currently available providers."""
+        """Get list of currently available providers sorted by priority."""
         available = []
-        for provider in ["anthropic", "openrouter", "zai", "openai"]:
+        for provider in self.provider_priority:
             if provider in self.interfaces and await self.check_provider_availability(
                 provider
             ):
                 available.append(provider)
         return available
+    
+    def get_provider_health_status(self) -> Dict[str, Dict[str, Any]]:
+        """Get health status of all providers."""
+        return {
+            provider: {
+                **status,
+                "circuit_breaker": error_recovery_manager.circuit_breakers.get(
+                    f"llm_{provider}", {}
+                ).get_state() if f"llm_{provider}" in error_recovery_manager.circuit_breakers else None
+            }
+            for provider, status in self.provider_status.items()
+        }
 
     async def generate_response(
         self,
@@ -555,26 +624,226 @@ class LLMManager:
         temperature: float = 0.7,
         max_tokens: int = 2048,
         provider: Optional[str] = None,
+        timeout: Optional[float] = None,
+        request_id: Optional[str] = None,
         **kwargs,
     ) -> str:
         """Generate a response using the specified or best available provider."""
         self._ensure_initialized()
-        use_provider = provider or self.default_provider
-        if use_provider not in self.interfaces:
-            raise RuntimeError(f"LLM provider '{use_provider}' is not initialized")
-        interface = self.interfaces[use_provider]
-        return await interface.generate_response(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **kwargs,
+        
+        # Generate request ID if not provided
+        request_id = request_id or str(uuid.uuid4())
+        timeout = timeout or self.request_timeout
+        
+        # Try specified provider first
+        if provider:
+            if provider not in self.interfaces:
+                raise RuntimeError(f"LLM provider '{provider}' is not initialized")
+            
+            try:
+                return await self._generate_with_recovery(
+                    provider,
+                    request_id,
+                    prompt,
+                    system_prompt,
+                    temperature,
+                    max_tokens,
+                    timeout,
+                    **kwargs
+                )
+            except Exception as e:
+                logger.warning(f"Provider {provider} failed: {e}, trying alternatives")
+                # Fall back to other providers
+                return await self._generate_with_fallback(
+                    provider,
+                    request_id,
+                    prompt,
+                    system_prompt,
+                    temperature,
+                    max_tokens,
+                    timeout,
+                    **kwargs
+                )
+        
+        # Use intelligent provider selection
+        use_provider = await self.get_best_provider()
+        if not use_provider:
+            raise RuntimeError("No LLM providers are currently available")
+        
+        try:
+            return await self._generate_with_recovery(
+                use_provider,
+                request_id,
+                prompt,
+                system_prompt,
+                temperature,
+                max_tokens,
+                timeout,
+                **kwargs
+            )
+        except Exception as e:
+            logger.warning(f"Provider {use_provider} failed: {e}, trying alternatives")
+            return await self._generate_with_fallback(
+                use_provider,
+                request_id,
+                prompt,
+                system_prompt,
+                temperature,
+                max_tokens,
+                timeout,
+                **kwargs
+            )
+    
+    async def _generate_with_recovery(
+        self,
+        provider: str,
+        request_id: str,
+        prompt: str,
+        system_prompt: Optional[str],
+        temperature: float,
+        max_tokens: int,
+        timeout: float,
+        **kwargs
+    ) -> str:
+        """Generate response with error recovery."""
+        interface = self.interfaces[provider]
+        
+        # Store partial response data
+        error_recovery_manager.store_partial_response(
+            request_id,
+            {
+                "provider": provider,
+                "prompt": prompt[:100],  # Store partial prompt
+                "timestamp": datetime.now().isoformat(),
+                "status": "in_progress"
+            }
         )
+        
+        try:
+            # Use error recovery manager for the request
+            result = await error_recovery_manager.execute_with_recovery(
+                f"llm_{provider}",
+                interface.generate_response,
+                prompt=prompt,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs
+            )
+            
+            # Clear partial response on success
+            error_recovery_manager.clear_partial_response(request_id)
+            
+            return result
+        except CircuitBreakerOpenError:
+            # Queue the request if circuit is open
+            logger.info(f"Circuit breaker open for {provider}, queuing request")
+            return await self._queue_request(
+                provider,
+                request_id,
+                prompt,
+                system_prompt,
+                temperature,
+                max_tokens,
+                **kwargs
+            )
+        except Exception as e:
+            # Record failure
+            self._update_provider_status(provider, False, str(e))
+            raise
+    
+    async def _generate_with_fallback(
+        self,
+        failed_provider: str,
+        request_id: str,
+        prompt: str,
+        system_prompt: Optional[str],
+        temperature: float,
+        max_tokens: int,
+        timeout: float,
+        **kwargs
+    ) -> str:
+        """Generate response with fallback to other providers."""
+        available = await self.get_available_providers()
+        
+        # Filter out the failed provider
+        available = [p for p in available if p != failed_provider]
+        
+        if not available:
+            raise RuntimeError(f"All LLM providers failed. Original error from {failed_provider}")
+        
+        for provider in available:
+            try:
+                logger.info(f"Falling back to provider {provider}")
+                return await self._generate_with_recovery(
+                    provider,
+                    request_id,
+                    prompt,
+                    system_prompt,
+                    temperature,
+                    max_tokens,
+                    timeout,
+                    **kwargs
+                )
+            except Exception as e:
+                logger.warning(f"Fallback provider {provider} also failed: {e}")
+                continue
+        
+        raise RuntimeError(f"All fallback providers failed")
+    
+    async def _queue_request(
+        self,
+        provider: str,
+        request_id: str,
+        prompt: str,
+        system_prompt: Optional[str],
+        temperature: float,
+        max_tokens: int,
+        **kwargs
+    ) -> str:
+        """Queue a request when provider is unavailable."""
+        future = asyncio.Future()
+        self.request_queue[provider].append({
+            "future": future,
+            "request_id": request_id,
+            "prompt": prompt,
+            "system_prompt": system_prompt,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "kwargs": kwargs
+        })
+        
+        # Wait for the request to be processed or timeout
+        try:
+            return await asyncio.wait_for(future, timeout=300.0)
+        except asyncio.TimeoutError:
+            raise RuntimeError(f"Request timed out waiting for provider {provider} to recover")
+    
+    async def process_queued_requests(self, provider: str):
+        """Process queued requests when provider becomes available."""
+        while self.request_queue[provider]:
+            queued = self.request_queue[provider].pop(0)
+            try:
+                result = await self._generate_with_recovery(
+                    provider,
+                    queued["request_id"],
+                    queued["prompt"],
+                    queued["system_prompt"],
+                    queued["temperature"],
+                    queued["max_tokens"],
+                    self.request_timeout,
+                    **queued["kwargs"]
+                )
+                if not queued["future"].done():
+                    queued["future"].set_result(result)
+            except Exception as e:
+                if not queued["future"].done():
+                    queued["future"].set_exception(e)
 
     async def get_best_provider(
         self, preferred_provider: Optional[str] = None
     ) -> Optional[str]:
-        """Get the best available provider, optionally preferring one."""
+        """Get the best available provider based on health and performance."""
         available = await self.get_available_providers()
 
         if not available:
@@ -584,23 +853,55 @@ class LLMManager:
         if preferred_provider and preferred_provider in available:
             return preferred_provider
 
-        for provider in ["anthropic", "openrouter", "zai", "openai"]:
-            if provider in available and provider != "openai":
-                logger.info(f"Using provider: {provider}")
-                return provider
-
-        if "openai" in available and len(available) == 1:
-            logger.warning("Using OpenAI as last resort")
-            return "openai"
-
-        return available[0]
+        # Score providers based on multiple factors
+        provider_scores = []
+        for provider in available:
+            status = self.provider_status[provider]
+            score = 0
+            
+            # Priority based on provider order
+            if provider in self.provider_priority:
+                score += (len(self.provider_priority) - self.provider_priority.index(provider)) * 10
+            
+            # Success rate bonus
+            total_requests = status["consecutive_successes"] + status["consecutive_failures"]
+            if total_requests > 0:
+                success_rate = status["consecutive_successes"] / total_requests
+                score += success_rate * 20
+            
+            # Penalty for recent failures
+            if status["consecutive_failures"] > 0:
+                score -= status["consecutive_failures"] * 5
+            
+            # Check circuit breaker state
+            breaker = error_recovery_manager.circuit_breakers.get(f"llm_{provider}")
+            if breaker and breaker.state.value == "open":
+                score -= 100
+            elif breaker and breaker.state.value == "half_open":
+                score -= 20
+            
+            provider_scores.append((provider, score))
+        
+        # Sort by score (descending)
+        provider_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        best_provider = provider_scores[0][0]
+        logger.info(f"Selected best provider: {best_provider} (score: {provider_scores[0][1]})")
+        return best_provider
+    
+    def get_partial_response(self, request_id: str) -> Optional[Dict[str, Any]]:
+        """Get partial response data for a request."""
+        return error_recovery_manager.get_partial_response(request_id)
 
     def _log_provider_suggestions(self):
         """Log helpful suggestions based on provider status."""
         suggestions = []
         for provider, status in self.provider_status.items():
             if not status["available"]:
-                raise RuntimeError("LLM service is not available")
+                suggestions.append(f"Provider {provider} is unavailable: {status.get('last_error', 'Unknown error')}")
+        
+        if suggestions:
+            logger.warning("Provider status issues: " + "; ".join(suggestions))
 
 
 llm_manager = LLMManager()

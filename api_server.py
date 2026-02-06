@@ -5,13 +5,15 @@ FastAPI web server for the Self-Improving AI Agent with Swagger documentation.
 import asyncio
 import os
 import uuid
+import signal
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import uvicorn
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from evolving_agent.core.agent import SelfImprovingAgent
@@ -19,6 +21,7 @@ from evolving_agent.integrations.discord_integration import DiscordIntegration
 from evolving_agent.utils.config import config
 from evolving_agent.utils.github_enhanced_modifier import GitHubEnabledSelfModifier
 from evolving_agent.utils.logging import setup_logger
+from evolving_agent.utils.error_recovery import error_recovery_manager
 
 logger = setup_logger(__name__)
 
@@ -27,11 +30,15 @@ agent: Optional[SelfImprovingAgent] = None
 github_modifier: Optional[GitHubEnabledSelfModifier] = None
 discord_integration: Optional[DiscordIntegration] = None
 
+# Server state
+server_shutdown = False
+graceful_shutdown_timeout = 30  # seconds
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize and cleanup the agent."""
-    global agent, github_modifier, discord_integration
+    """Initialize and cleanup the agent with graceful shutdown."""
+    global agent, github_modifier, discord_integration, server_shutdown
     try:
         logger.info("Initializing Self-Improving Agent...")
         agent = SelfImprovingAgent()
@@ -75,16 +82,71 @@ async def lifespan(app: FastAPI):
 
         yield
     finally:
+        # Graceful shutdown
+        logger.info("Initiating graceful shutdown...")
+        server_shutdown = True
+        
         # Cleanup Discord integration
         if discord_integration:
             logger.info("Shutting down Discord integration...")
-            await discord_integration.close()
+            try:
+                await discord_integration.close()
+                logger.info("Discord integration shut down successfully")
+            except Exception as e:
+                logger.error(f"Error shutting down Discord: {e}")
 
         if agent:
             logger.info("Cleaning up agent...")
-            # await agent.cleanup()  # Agent doesn't have cleanup method
-            logger.info("Agent cleanup completed")
+            try:
+                await agent.cleanup()
+                logger.info("Agent cleanup completed")
+            except Exception as e:
+                logger.error(f"Error during agent cleanup: {e}")
+        
+        # Clean up error recovery resources
+        try:
+            error_recovery_manager.cleanup_old_checkpoints()
+            logger.info("Error recovery resources cleaned up")
+        except Exception as e:
+            logger.error(f"Error cleaning up error recovery: {e}")
+        
+        logger.info("Graceful shutdown completed")
 
+
+# Error recovery middleware
+@app.middleware("http")
+async def error_recovery_middleware(request: Request, call_next):
+    """Middleware for error recovery and graceful degradation."""
+    try:
+        response = await call_next(request)
+        return response
+    except HTTPException as e:
+        # Let HTTP exceptions propagate normally
+        raise e
+    except Exception as e:
+        logger.error(f"Unhandled error in request {request.url}: {e}")
+        
+        # Check if we should return a degraded response
+        if error_recovery_manager.is_degraded_mode():
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "Service temporarily unavailable",
+                    "message": "The system is operating in degraded mode. Please try again later.",
+                    "degraded_mode": True,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+        
+        # Return generic error response
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Internal server error",
+                "message": "An unexpected error occurred. Please try again.",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
 
 # Pydantic models for API requests and responses
 class QueryRequest(BaseModel):
@@ -1051,7 +1113,203 @@ async def get_web_search_status(
         )
 
 
+# Health check endpoints with recovery status
+@app.get("/health", tags=["System"])
+async def health_check():
+    """
+    Comprehensive health check endpoint with recovery status.
+    
+    Returns overall system health and component status.
+    """
+    try:
+        # Get recovery status
+        recovery_status = error_recovery_manager.get_recovery_status()
+        
+        # Get agent health if available
+        agent_health = {}
+        if agent:
+            agent_health = await agent.check_system_health()
+        
+        # Get LLM provider health
+        llm_health = {}
+        try:
+            llm_health = llm_manager.get_provider_health_status()
+        except Exception as e:
+            llm_health = {"error": str(e)}
+        
+        # Get GitHub integration health
+        github_health = {}
+        if github_modifier:
+            try:
+                github_health = github_modifier.github_integration.get_status()
+            except Exception as e:
+                github_health = {"error": str(e)}
+        
+        # Get Discord integration health
+        discord_health = {}
+        if discord_integration:
+            try:
+                discord_status = await discord_integration.get_status() if hasattr(discord_integration, 'get_status') else {}
+                discord_health = {
+                    "enabled": config.discord_enabled,
+                    "connected": discord_status.get("connected", False),
+                }
+            except Exception as e:
+                discord_health = {"error": str(e)}
+        
+        # Determine overall health
+        all_healthy = True
+        degraded_mode = recovery_status.get("degraded_mode", False)
+        
+        if degraded_mode:
+            overall_status = "degraded"
+            all_healthy = False
+        elif agent_health.get("overall") != "healthy":
+            overall_status = agent_health.get("overall", "unknown")
+            all_healthy = False
+        else:
+            overall_status = "healthy"
+        
+        return {
+            "status": overall_status,
+            "timestamp": datetime.now().isoformat(),
+            "degraded_mode": degraded_mode,
+            "components": {
+                "agent": agent_health,
+                "llm_providers": llm_health,
+                "github": github_health,
+                "discord": discord_health,
+                "error_recovery": {
+                    "circuit_breakers": recovery_status.get("circuit_breakers", {}),
+                    "active_checkpoints": recovery_status.get("active_checkpoints", 0),
+                    "recovery_history_count": recovery_status.get("recovery_history_count", 0),
+                }
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error in health check: {e}")
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        }
+
+@app.get("/health/recovery", tags=["System"])
+async def recovery_status():
+    """
+    Get detailed error recovery status.
+    
+    Returns information about circuit breakers, error patterns, and recovery history.
+    """
+    try:
+        recovery_status = error_recovery_manager.get_recovery_status()
+        recovery_history = error_recovery_manager.get_recovery_history(limit=10)
+        health_checks = await error_recovery_manager.perform_health_checks()
+        
+        return {
+            "recovery_status": recovery_status,
+            "health_checks": health_checks,
+            "recent_recoveries": recovery_history,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting recovery status: {e}")
+        return {
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.post("/system/trigger-recovery", tags=["System"])
+async def trigger_recovery():
+    """
+    Trigger recovery operations for failed components.
+    
+    This endpoint can be used to manually trigger recovery attempts.
+    """
+    try:
+        # Process pending GitHub operations if any
+        if github_modifier and github_modifier.github_integration:
+            try:
+                results = await github_modifier.github_integration.process_pending_operations()
+                return {
+                    "message": "Recovery triggered",
+                    "github_operations_processed": len(results),
+                    "results": results
+                }
+            except Exception as e:
+                logger.error(f"Error processing GitHub operations: {e}")
+                return {
+                    "message": "Recovery partially completed",
+                    "error": str(e)
+                }
+        
+        return {
+            "message": "No pending operations to process"
+        }
+    except Exception as e:
+        logger.error(f"Error triggering recovery: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error triggering recovery: {str(e)}"
+        )
+
+@app.post("/system/enable-degraded-mode", tags=["System"])
+async def enable_degraded_mode():
+    """
+    Manually enable degraded mode.
+    
+    This can be useful for maintenance or when issues are detected.
+    """
+    try:
+        error_recovery_manager.set_degraded_mode(True)
+        if agent:
+            agent.degraded_mode = True
+        
+        return {
+            "message": "Degraded mode enabled",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error enabling degraded mode: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error enabling degraded mode: {str(e)}"
+        )
+
+@app.post("/system/disable-degraded-mode", tags=["System"])
+async def disable_degraded_mode():
+    """
+    Manually disable degraded mode.
+    
+    This can be used to attempt to return to normal operation.
+    """
+    try:
+        error_recovery_manager.set_degraded_mode(False)
+        if agent:
+            agent.degraded_mode = False
+        
+        return {
+            "message": "Degraded mode disabled",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error disabling degraded mode: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error disabling degraded mode: {str(e)}"
+        )
+
+
 if __name__ == "__main__":
+    # Setup signal handlers for graceful shutdown
+    def signal_handler(signum, frame):
+        global server_shutdown
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        server_shutdown = True
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     # Run the server
     uvicorn.run(
         "api_server:app", host="0.0.0.0", port=8000, reload=True, log_level="info"

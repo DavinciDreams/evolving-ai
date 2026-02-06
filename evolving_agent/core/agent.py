@@ -3,6 +3,7 @@ Main Self-Improving AI Agent class.
 """
 
 import json
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -15,6 +16,7 @@ from ..utils.config import config
 from ..utils.llm_interface import llm_manager
 from ..utils.logging import setup_logger
 from ..utils.persistent_storage import persistent_data_manager
+from ..utils.error_recovery import error_recovery_manager
 from .context_manager import ContextManager
 from .evaluator import EvaluationResult, OutputEvaluator
 from .memory import LongTermMemory, MemoryEntry
@@ -44,72 +46,115 @@ class SelfImprovingAgent:
         self.evaluator = OutputEvaluator()
         self.knowledge_base = KnowledgeBase()
         self.knowledge_updater = None  # Will be initialized after knowledge base
-
+        
         # Self-modification components
         self.code_analyzer = CodeAnalyzer()
         self.code_modifier = None  # Will be initialized with proper parameters
         self.code_validator = CodeValidator()
-
+        
         # Persistent storage
         self.data_manager = persistent_data_manager
-
+        
         # Web search integration
         self.web_search = None  # Will be initialized if enabled
-
+        
         # State tracking
         self.initialized = False
         self.session_id = None
         self.interaction_count = 0
         self.improvement_cycle_count = 0
-
+        
         # Status update callbacks (for Discord/external integrations)
         self._status_callbacks: List = []
+        
+        # Error recovery and graceful degradation
+        self.degraded_mode = False
+        self.component_health: Dict[str, bool] = {}
+        self.recovery_status: Dict[str, Any] = {}
+        self.active_operations: Dict[str, Dict] = {}
+        self.operation_checkpoints: Dict[str, Dict] = {}
+        self.error_count: Dict[str, int] = {}
+        self.max_error_threshold = 5
 
     async def initialize(self):
-        """Initialize all agent components."""
+        """Initialize all agent components with error recovery."""
         try:
             self.logger.info("Initializing Self-Improving Agent...")
 
             # Ensure directories exist
             config.ensure_directories()
 
-            # Initialize persistent data manager
-            await self.data_manager.initialize()
-            self.logger.info("Persistent data manager initialized")
+            # Initialize persistent data manager with error recovery
+            try:
+                await self.data_manager.initialize()
+                self.component_health["persistent_storage"] = True
+                self.logger.info("Persistent data manager initialized")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize persistent storage: {e}")
+                self.component_health["persistent_storage"] = False
+                self._handle_component_failure("persistent_storage", str(e))
 
             # Initialize core components
-            await self.memory.initialize()
-            self.logger.info("Memory system initialized")
+            try:
+                await self.memory.initialize()
+                self.component_health["memory"] = True
+                self.logger.info("Memory system initialized")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize memory: {e}")
+                self.component_health["memory"] = False
+                self._handle_component_failure("memory", str(e))
+                # Continue in degraded mode
+                self.degraded_mode = True
 
             self.context_manager = ContextManager(self.memory)
             self.logger.info("Context manager initialized")
 
-            await self.knowledge_base.initialize()
-            self.logger.info("Knowledge base initialized")
+            try:
+                await self.knowledge_base.initialize()
+                self.component_health["knowledge_base"] = True
+                self.logger.info("Knowledge base initialized")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize knowledge base: {e}")
+                self.component_health["knowledge_base"] = False
+                self._handle_component_failure("knowledge_base", str(e))
 
             self.knowledge_updater = KnowledgeUpdater(
                 self.knowledge_base, self.memory
             )
-
             self.logger.info("Knowledge updater initialized")
 
             # Initialize self-modification components if enabled
             if config.enable_self_modification:
-                self.code_modifier = CodeModifier(
-                    analyzer=self.code_analyzer, validator=self.code_validator
-                )
-                self.logger.info("Self-modification system initialized")
+                try:
+                    self.code_modifier = CodeModifier(
+                        analyzer=self.code_analyzer, validator=self.code_validator
+                    )
+                    self.component_health["self_modification"] = True
+                    self.logger.info("Self-modification system initialized")
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize self-modification: {e}")
+                    self.component_health["self_modification"] = False
+                    self._handle_component_failure("self_modification", str(e))
 
             # Initialize web search integration if enabled
             if config.web_search_enabled:
-                self.web_search = WebSearchIntegration(
-                    tavily_api_key=config.tavily_api_key,
-                    serpapi_key=config.serpapi_key,
-                    default_provider=config.web_search_default_provider,
-                    max_results=config.web_search_max_results,
-                )
-                await self.web_search.initialize()
-                self.logger.info("Web search integration initialized")
+                try:
+                    self.web_search = WebSearchIntegration(
+                        tavily_api_key=config.tavily_api_key,
+                        serpapi_key=config.serpapi_key,
+                        default_provider=config.web_search_default_provider,
+                        max_results=config.web_search_max_results,
+                    )
+                    await self.web_search.initialize()
+                    self.component_health["web_search"] = True
+                    self.logger.info("Web search integration initialized")
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize web search: {e}")
+                    self.component_health["web_search"] = False
+                    self._handle_component_failure("web_search", str(e))
+
+            # Register health checks
+            self._register_health_checks()
 
             # Create session
             self.session_id = (
@@ -137,6 +182,112 @@ class SelfImprovingAgent:
         except Exception as e:
             self.logger.error(f"Failed to initialize agent: {e}")
             raise
+    
+    def _register_health_checks(self):
+        """Register health checks for all components."""
+        async def check_memory():
+            return self.component_health.get("memory", False) and await self._check_memory_health()
+        
+        async def check_llm():
+            try:
+                providers = await llm_manager.get_available_providers()
+                return len(providers) > 0
+            except Exception:
+                return False
+        
+        error_recovery_manager.register_health_check("agent_memory", check_memory)
+        error_recovery_manager.register_health_check("agent_llm", check_llm)
+    
+    async def _check_memory_health(self) -> bool:
+        """Check if memory is healthy."""
+        try:
+            stats = await self.memory.get_memory_stats()
+            return stats is not None
+        except Exception:
+            return False
+    
+    def _handle_component_failure(self, component: str, error: str):
+        """Handle component failure with graceful degradation."""
+        self.error_count[component] = self.error_count.get(component, 0) + 1
+        
+        # Check if we should enter degraded mode
+        if self.error_count[component] >= self.max_error_threshold:
+            self.logger.warning(f"Component {component} has failed {self.error_count[component]} times, entering degraded mode")
+            self.degraded_mode = True
+            error_recovery_manager.set_degraded_mode(True)
+        
+        # Record error for recovery tracking
+        error_recovery_manager.track_error_pattern(
+            f"agent_{component}",
+            type(Exception(error)).__name__,
+            {"error": error, "component": component}
+        )
+    
+    def _handle_component_recovery(self, component: str):
+        """Handle component recovery."""
+        self.error_count[component] = 0
+        self.component_health[component] = True
+        self.logger.info(f"Component {component} has recovered")
+        
+        # Check if we can exit degraded mode
+        if all(self.component_health.values()):
+            self.degraded_mode = False
+            error_recovery_manager.set_degraded_mode(False)
+            self.logger.info("All components recovered, exiting degraded mode")
+    
+    def create_operation_checkpoint(self, operation_id: str = None, data: Dict = None):
+        """Create a checkpoint for a long-running operation."""
+        if operation_id is None:
+            operation_id = str(uuid.uuid4())
+        
+        checkpoint_data = {
+            "operation_id": operation_id,
+            "timestamp": datetime.now().isoformat(),
+            "session_id": self.session_id,
+            "interaction_count": self.interaction_count,
+            "data": data or {}
+        }
+        
+        self.operation_checkpoints[operation_id] = checkpoint_data
+        error_recovery_manager.create_checkpoint(operation_id, checkpoint_data)
+        
+        return operation_id
+    
+    def get_operation_checkpoint(self, operation_id: str) -> Optional[Dict]:
+        """Get a checkpoint for an operation."""
+        return self.operation_checkpoints.get(operation_id)
+    
+    def complete_operation_checkpoint(self, operation_id: str, result: Any = None):
+        """Mark an operation checkpoint as completed."""
+        if operation_id in self.operation_checkpoints:
+            self.operation_checkpoints[operation_id]["status"] = "completed"
+            self.operation_checkpoints[operation_id]["completed_at"] = datetime.now().isoformat()
+            if result is not None:
+                self.operation_checkpoints[operation_id]["result"] = result
+            
+            error_recovery_manager.complete_checkpoint(operation_id)
+    
+    def fail_operation_checkpoint(self, operation_id: str, error: str):
+        """Mark an operation checkpoint as failed."""
+        if operation_id in self.operation_checkpoints:
+            self.operation_checkpoints[operation_id]["status"] = "failed"
+            self.operation_checkpoints[operation_id]["error"] = error
+            self.operation_checkpoints[operation_id]["failed_at"] = datetime.now().isoformat()
+            
+            error_recovery_manager.fail_checkpoint(operation_id, error)
+    
+    def get_recovery_status(self) -> Dict[str, Any]:
+        """Get comprehensive recovery status."""
+        return {
+            "degraded_mode": self.degraded_mode,
+            "component_health": self.component_health,
+            "error_counts": self.error_count,
+            "active_operations": len(self.active_operations),
+            "active_checkpoints": len(self.operation_checkpoints),
+            "session_id": self.session_id,
+            "interaction_count": self.interaction_count,
+            "timestamp": datetime.now().isoformat()
+        }
 
     def register_status_callback(self, callback) -> None:
         """Register a callback for status updates.
@@ -712,34 +863,88 @@ Memory Types:
             return initial_response
 
     async def cleanup(self):
-        """Clean up agent resources."""
+        """Clean up agent resources with error recovery."""
         try:
             self.logger.info("Cleaning up agent resources...")
+            
+            # Save final recovery status
+            final_status = self.get_recovery_status()
+            
             agent_state = {
                 "session_id": self.session_id,
                 "interaction_count": self.interaction_count,
                 "improvement_cycle_count": self.improvement_cycle_count,
                 "final_timestamp": datetime.now().isoformat(),
+                "recovery_status": final_status,
+                "component_health": self.component_health,
             }
-            await self.data_manager.save_agent_state(agent_state)
-            await self.data_manager.cleanup()
-            if self.memory and self.session_id:
-                session_end_memory = MemoryEntry(
-                    content=(
-                        f"Session {self.session_id} ended with "
-                        f"{self.interaction_count} interactions"
-                    ),
-                    memory_type="session_end",
-                    metadata={
-                        "session_id": self.session_id,
-                        "total_interactions": self.interaction_count,
-                        "improvement_cycles": self.improvement_cycle_count,
-                    },
-                )
-                await self.memory.add_memory(session_end_memory)
+            
+            try:
+                await self.data_manager.save_agent_state(agent_state)
+            except Exception as e:
+                self.logger.error(f"Failed to save agent state: {e}")
+            
+            try:
+                await self.data_manager.cleanup()
+            except Exception as e:
+                self.logger.error(f"Failed to cleanup data manager: {e}")
+            
+            try:
+                if self.memory and self.session_id:
+                    session_end_memory = MemoryEntry(
+                        content=(
+                            f"Session {self.session_id} ended with "
+                            f"{self.interaction_count} interactions"
+                        ),
+                        memory_type="session_end",
+                        metadata={
+                            "session_id": self.session_id,
+                            "total_interactions": self.interaction_count,
+                            "improvement_cycles": self.improvement_cycle_count,
+                            "degraded_mode": self.degraded_mode,
+                        },
+                    )
+                    await self.memory.add_memory(session_end_memory)
+            except Exception as e:
+                self.logger.error(f"Failed to store session end: {e}")
+            
+            # Clean up checkpoints
+            error_recovery_manager.cleanup_old_checkpoints()
+            
             self.logger.info("Agent cleanup completed")
         except Exception as e:
             self.logger.error(f"Error during cleanup: {e}")
+    
+    async def check_system_health(self) -> Dict[str, Any]:
+        """Check overall system health."""
+        health_status = {
+            "overall": "healthy",
+            "components": {},
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Check each component
+        health_status["components"]["memory"] = await self._check_memory_health()
+        
+        try:
+            providers = await llm_manager.get_available_providers()
+            health_status["components"]["llm"] = len(providers) > 0
+        except Exception:
+            health_status["components"]["llm"] = False
+        
+        health_status["components"]["context_manager"] = not self.context_manager.is_degraded_mode()
+        health_status["components"]["knowledge_base"] = self.component_health.get("knowledge_base", True)
+        health_status["components"]["self_modification"] = self.component_health.get("self_modification", True)
+        
+        # Determine overall health
+        if all(health_status["components"].values()):
+            health_status["overall"] = "healthy"
+        elif any(health_status["components"].values()):
+            health_status["overall"] = "degraded"
+        else:
+            health_status["overall"] = "unhealthy"
+        
+        return health_status
 
 
 
