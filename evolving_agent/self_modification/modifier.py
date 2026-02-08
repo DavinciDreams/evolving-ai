@@ -474,26 +474,566 @@ class CodeModifier:
     async def _create_efficiency_improvement_proposal(
         self, weakness: str
     ) -> Optional[ModificationProposal]:
-        """Create proposal for efficiency improvement."""
-        # This would be implemented based on specific efficiency issues
-        # For now, return None as this is a complex area requiring specific analysis
-        return None
+        """Create proposal for efficiency improvement.
+        
+        Analyzes the weakness string to identify performance issues and generates
+        proposals for optimizations such as caching, algorithm improvements, or
+        reducing computational complexity.
+        
+        Args:
+            weakness: Description of the efficiency weakness
+            
+        Returns:
+            ModificationProposal if a valid improvement is identified, None otherwise.
+        """
+        try:
+            logger.info(f"Creating efficiency improvement proposal for: {weakness}")
+            
+            # Determine the type of efficiency issue
+            weakness_lower = weakness.lower()
+            
+            # Map weakness keywords to improvement strategies
+            efficiency_strategies = {
+                "cache": "Add caching to reduce redundant computations",
+                "slow": "Optimize algorithm performance",
+                "latency": "Reduce latency through async optimization",
+                "memory": "Optimize memory usage",
+                "redundant": "Remove redundant operations",
+                "loop": "Optimize loop efficiency",
+                "query": "Optimize database or API queries",
+                "computation": "Optimize computational efficiency",
+                "performance": "General performance optimization",
+            }
+            
+            # Find matching strategy
+            improvement_type = None
+            for keyword, strategy in efficiency_strategies.items():
+                if keyword in weakness_lower:
+                    improvement_type = strategy
+                    break
+            
+            if not improvement_type:
+                improvement_type = "General performance optimization"
+            
+            # Create a suggestion dictionary similar to knowledge suggestions
+            suggestion = {
+                "type": "code_improvement",
+                "message": f"Efficiency improvement: {weakness}",
+                "content": improvement_type,
+                "category": "best_practices",
+                "tags": ["optimization", "efficiency"],
+                "priority": 0.8,
+            }
+            
+            # Find target file using the helper method
+            file_path = await self._find_target_file_for_suggestion(suggestion)
+            if not file_path:
+                logger.debug("Could not find target file for efficiency improvement")
+                return None
+            
+            # Load the original code
+            project_root = Path(__file__).parent.parent
+            full_path = project_root / file_path
+            
+            if not full_path.exists():
+                logger.debug(f"Target file does not exist: {full_path}")
+                return None
+            
+            with open(full_path, "r", encoding="utf-8") as f:
+                original_code = f.read()
+            
+            # Generate optimized code using LLM
+            optimization_prompt = f"""
+            Optimize the following Python code for better efficiency.
+            
+            Issue: {weakness}
+            Improvement focus: {improvement_type}
+            
+            Guidelines:
+            1. Reduce computational complexity where possible
+            2. Add caching for frequently accessed data
+            3. Optimize loops and iterations
+            4. Remove redundant operations
+            5. Improve async/await usage for better concurrency
+            6. Minimize I/O operations
+            7. Use efficient data structures
+            8. Maintain all existing functionality
+            9. Keep the same function signatures and imports
+            10. Ensure the code remains syntactically correct
+            
+            Original code:
+            ```python
+            {original_code}
+            ```
+            
+            Return ONLY the optimized Python code, no explanations.
+            """
+            
+            modified_code = await llm_manager.generate_response(
+                prompt=optimization_prompt, temperature=0.2, max_tokens=3000
+            )
+            
+            # Clean up the response
+            if modified_code and modified_code.startswith("```python"):
+                modified_code = modified_code.split("```python")[1]
+            if modified_code and modified_code.startswith("```"):
+                modified_code = modified_code.split("```")[1]
+            if modified_code and modified_code.endswith("```"):
+                modified_code = modified_code.rsplit("```", 1)[0]
+            
+            if not modified_code or not modified_code.strip():
+                logger.debug("LLM did not generate any code changes")
+                return None
+            
+            modified_code = modified_code.strip()
+            
+            # Check if any actual changes were made
+            if modified_code == original_code:
+                logger.debug("No changes generated by optimization")
+                return None
+            
+            # Create the proposal
+            return ModificationProposal(
+                file_path=str(full_path),
+                original_code=original_code,
+                modified_code=modified_code,
+                modification_type="efficiency_improvement",
+                rationale=f"Optimize efficiency: {weakness}",
+                priority=0.8,
+                estimated_impact=-0.3,  # Negative = improvement
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to create efficiency improvement proposal: {e}")
+            return None
 
     async def _create_accuracy_improvement_proposal(
         self, weakness: str
     ) -> Optional[ModificationProposal]:
-        """Create proposal for accuracy improvement."""
-        # This would be implemented based on specific accuracy issues
-        # For now, return None as this is a complex area requiring specific analysis
-        return None
+        """Create proposal for accuracy improvement.
+        
+        Analyzes the weakness string to identify accuracy issues and generates
+        proposals for improvements such as better error handling, more precise
+        calculations, improved validation, or enhanced logic correctness.
+        
+        Args:
+            weakness: Description of the accuracy weakness
+            
+        Returns:
+            ModificationProposal if a valid improvement is identified, None otherwise.
+        """
+        try:
+            logger.info(f"Creating accuracy improvement proposal for: {weakness}")
+            
+            # Determine the type of accuracy issue
+            weakness_lower = weakness.lower()
+            
+            # Map weakness keywords to improvement strategies
+            accuracy_strategies = {
+                "error": "Improve error handling and edge case coverage",
+                "validation": "Add input validation and data integrity checks",
+                "precision": "Improve calculation precision",
+                "logic": "Fix logic errors or improve decision making",
+                "incorrect": "Correct incorrect behavior or outputs",
+                "edge": "Handle edge cases better",
+                "null": "Add null/None handling",
+                "type": "Add type checking and conversion",
+                "format": "Improve data format handling",
+                "boundary": "Handle boundary conditions properly",
+                "inaccurate": "Improve accuracy of calculations or predictions",
+            }
+            
+            # Find matching strategy
+            improvement_type = None
+            for keyword, strategy in accuracy_strategies.items():
+                if keyword in weakness_lower:
+                    improvement_type = strategy
+                    break
+            
+            if not improvement_type:
+                improvement_type = "General accuracy improvement"
+            
+            # Create a suggestion dictionary similar to knowledge suggestions
+            suggestion = {
+                "type": "code_improvement",
+                "message": f"Accuracy improvement: {weakness}",
+                "content": improvement_type,
+                "category": "best_practices",
+                "tags": ["validation", "accuracy"],
+                "priority": 0.9,  # High priority for accuracy issues
+            }
+            
+            # Find target file using the helper method
+            file_path = await self._find_target_file_for_suggestion(suggestion)
+            if not file_path:
+                logger.debug("Could not find target file for accuracy improvement")
+                return None
+            
+            # Load the original code
+            project_root = Path(__file__).parent.parent
+            full_path = project_root / file_path
+            
+            if not full_path.exists():
+                logger.debug(f"Target file does not exist: {full_path}")
+                return None
+            
+            with open(full_path, "r", encoding="utf-8") as f:
+                original_code = f.read()
+            
+            # Generate improved code using LLM
+            accuracy_prompt = f"""
+            Improve the following Python code for better accuracy.
+            
+            Issue: {weakness}
+            Improvement focus: {improvement_type}
+            
+            Guidelines:
+            1. Add comprehensive input validation
+            2. Handle edge cases and boundary conditions
+            3. Improve error handling with specific exception types
+            4. Add null/None checks where appropriate
+            5. Ensure data type consistency
+            6. Add logging for debugging and monitoring
+            7. Improve calculation precision if applicable
+            8. Fix any logic errors
+            9. Maintain all existing functionality
+            10. Keep the same function signatures and imports
+            11. Ensure the code remains syntactically correct
+            
+            Original code:
+            ```python
+            {original_code}
+            ```
+            
+            Return ONLY the improved Python code, no explanations.
+            """
+            
+            modified_code = await llm_manager.generate_response(
+                prompt=accuracy_prompt, temperature=0.2, max_tokens=3000
+            )
+            
+            # Clean up the response
+            if modified_code and modified_code.startswith("```python"):
+                modified_code = modified_code.split("```python")[1]
+            if modified_code and modified_code.startswith("```"):
+                modified_code = modified_code.split("```")[1]
+            if modified_code and modified_code.endswith("```"):
+                modified_code = modified_code.rsplit("```", 1)[0]
+            
+            if not modified_code or not modified_code.strip():
+                logger.debug("LLM did not generate any code changes")
+                return None
+            
+            modified_code = modified_code.strip()
+            
+            # Check if any actual changes were made
+            if modified_code == original_code:
+                logger.debug("No changes generated by accuracy improvement")
+                return None
+            
+            # Create the proposal
+            return ModificationProposal(
+                file_path=str(full_path),
+                original_code=original_code,
+                modified_code=modified_code,
+                modification_type="accuracy_improvement",
+                rationale=f"Improve accuracy: {weakness}",
+                priority=0.9,  # High priority for accuracy
+                estimated_impact=0.2,  # Positive impact for accuracy
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to create accuracy improvement proposal: {e}")
+            return None
 
     async def _create_proposal_from_knowledge(
         self, suggestion: Dict[str, Any]
     ) -> Optional[ModificationProposal]:
-        """Create proposal from knowledge base suggestion."""
-        # Most knowledge suggestions don't directly translate to code modifications
-        # This would be implemented for specific types of knowledge that can be codified
-        return None
+        """Create proposal from knowledge base suggestion.
+        
+        Analyzes the suggestion dictionary to determine if it can be converted
+        to a code modification. For suggestions that can be codified (e.g., adding
+        docstrings, type hints, error handling), uses the LLM to generate code changes.
+        
+        Args:
+            suggestion: Dictionary containing suggestion details with keys:
+                - type: The type of suggestion (e.g., 'code_improvement', 'best_practice')
+                - message: Description of the suggestion
+                - content: (optional) The actual knowledge content
+                - category: (optional) Knowledge category (e.g., 'best_practices')
+                - tags: (optional) List of tags (e.g., ['docstring', 'type_hint'])
+                - file_path: (optional) Specific file to modify
+                - priority: Suggestion priority
+        
+        Returns:
+            ModificationProposal if the suggestion can be codified, None otherwise.
+        """
+        try:
+            suggestion_type = suggestion.get("type", "")
+            
+            # Skip non-codifiable suggestion types
+            non_codifiable_types = {"category_balance", "confidence_improvement", "pending_review"}
+            if suggestion_type in non_codifiable_types:
+                logger.debug(f"Skipping non-codifiable suggestion type: {suggestion_type}")
+                return None
+            
+            # Check if this is a codifiable knowledge entry
+            category = suggestion.get("category", "")
+            tags = suggestion.get("tags", [])
+            content = suggestion.get("content", suggestion.get("message", ""))
+            
+            # Determine if this knowledge can be applied to code
+            codifiable_tags = {
+                "docstring", "type_hint", "error_handling", "logging",
+                "validation", "async", "optimization", "refactoring"
+            }
+            is_codifiable = (
+                suggestion_type in {"code_improvement", "best_practice"} or
+                any(tag in codifiable_tags for tag in tags) or
+                category == "best_practices"
+            )
+            
+            if not is_codifiable:
+                logger.debug(f"Suggestion is not codifiable: {suggestion_type}")
+                return None
+            
+            # Determine target file
+            file_path = suggestion.get("file_path")
+            if not file_path:
+                # Try to find a relevant file based on the suggestion
+                file_path = await self._find_target_file_for_suggestion(suggestion)
+                if not file_path:
+                    logger.debug("Could not determine target file for suggestion")
+                    return None
+            
+            # Load the original code
+            project_root = Path(__file__).parent.parent
+            full_path = project_root / file_path
+            
+            if not full_path.exists():
+                logger.debug(f"Target file does not exist: {full_path}")
+                return None
+            
+            with open(full_path, "r", encoding="utf-8") as f:
+                original_code = f.read()
+            
+            # Generate modified code using LLM
+            modified_code = await self._apply_knowledge_to_code(
+                original_code, suggestion
+            )
+            
+            if not modified_code or modified_code == original_code:
+                logger.debug("LLM did not generate any code changes")
+                return None
+            
+            # Determine modification type based on suggestion
+            modification_type = self._determine_modification_type(suggestion)
+            
+            # Create the proposal
+            priority = suggestion.get("priority", 0.5)
+            rationale = suggestion.get("message", content)
+            
+            return ModificationProposal(
+                file_path=str(full_path),
+                original_code=original_code,
+                modified_code=modified_code,
+                modification_type=modification_type,
+                rationale=rationale,
+                priority=priority,
+                estimated_impact=-0.1,  # Small improvement expected
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to create proposal from knowledge: {e}")
+            return None
+    
+    async def _find_target_file_for_suggestion(
+        self, suggestion: Dict[str, Any]
+    ) -> Optional[str]:
+        """Find a target file for applying a knowledge suggestion.
+        
+        Args:
+            suggestion: The suggestion dictionary
+            
+        Returns:
+            Relative file path or None if no suitable file found.
+        """
+        try:
+            project_root = Path(__file__).parent.parent
+            
+            # Priority files for different improvement types
+            category_file_map = {
+                "error_handling": [
+                    "evolving_agent/core/agent.py",
+                    "evolving_agent/core/memory.py",
+                    "evolving_agent/utils/llm_interface.py",
+                ],
+                "docstring": [
+                    "evolving_agent/core/agent.py",
+                    "evolving_agent/core/context_manager.py",
+                ],
+                "type_hint": [
+                    "evolving_agent/core/memory.py",
+                    "evolving_agent/utils/config.py",
+                ],
+                "logging": [
+                    "evolving_agent/core/agent.py",
+                    "evolving_agent/self_modification/modifier.py",
+                ],
+            }
+            
+            tags = suggestion.get("tags", [])
+            category = suggestion.get("category", "")
+            
+            # Check tags for file mapping
+            for tag in tags:
+                if tag in category_file_map:
+                    for file_path in category_file_map[tag]:
+                        if (project_root / file_path).exists():
+                            return file_path
+            
+            # Check category for file mapping
+            if category in category_file_map:
+                for file_path in category_file_map[category]:
+                    if (project_root / file_path).exists():
+                        return file_path
+            
+            # Default to core agent file
+            default_file = "evolving_agent/core/agent.py"
+            if (project_root / default_file).exists():
+                return default_file
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to find target file: {e}")
+            return None
+    
+    async def _apply_knowledge_to_code(
+        self, original_code: str, suggestion: Dict[str, Any]
+    ) -> str:
+        """Apply knowledge suggestion to code using LLM.
+        
+        Args:
+            original_code: The original code to modify
+            suggestion: The knowledge suggestion
+            
+        Returns:
+            Modified code or original code if modification fails.
+        """
+        try:
+            content = suggestion.get("content", suggestion.get("message", ""))
+            tags = suggestion.get("tags", [])
+            category = suggestion.get("category", "")
+            
+            # Build prompt based on suggestion type
+            improvement_type = self._determine_improvement_type(tags, category)
+            
+            prompt = f"""
+            Apply the following knowledge improvement to the Python code:
+            
+            Knowledge: {content}
+            Improvement type: {improvement_type}
+            
+            Guidelines:
+            1. Apply the knowledge to improve the code quality
+            2. Maintain all existing functionality
+            3. Keep the same function signatures and imports
+            4. Make minimal, focused changes
+            5. Ensure the code remains syntactically correct
+            
+            Original code:
+            ```python
+            {original_code}
+            ```
+            
+            Return ONLY the improved Python code, no explanations.
+            """
+            
+            modified_code = await llm_manager.generate_response(
+                prompt=prompt, temperature=0.2, max_tokens=3000
+            )
+            
+            # Clean up the response
+            if modified_code.startswith("```python"):
+                modified_code = modified_code.split("```python")[1]
+            if modified_code.startswith("```"):
+                modified_code = modified_code.split("```")[1]
+            if modified_code.endswith("```"):
+                modified_code = modified_code.rsplit("```", 1)[0]
+            
+            return modified_code.strip()
+            
+        except Exception as e:
+            logger.error(f"Failed to apply knowledge to code: {e}")
+            return original_code
+    
+    def _determine_improvement_type(self, tags: List[str], category: str) -> str:
+        """Determine the type of improvement based on tags and category.
+        
+        Args:
+            tags: List of tags from the suggestion
+            category: Category of the suggestion
+            
+        Returns:
+            String describing the improvement type.
+        """
+        tag_to_type = {
+            "docstring": "Add comprehensive docstrings",
+            "type_hint": "Add type hints",
+            "error_handling": "Improve error handling",
+            "logging": "Add appropriate logging",
+            "validation": "Add input validation",
+            "async": "Improve async/await usage",
+            "optimization": "Optimize for performance",
+            "refactoring": "Refactor for better structure",
+        }
+        
+        for tag in tags:
+            if tag in tag_to_type:
+                return tag_to_type[tag]
+        
+        category_to_type = {
+            "best_practices": "Apply best practices",
+            "code_quality": "Improve code quality",
+        }
+        
+        if category in category_to_type:
+            return category_to_type[category]
+        
+        return "General code improvement"
+    
+    def _determine_modification_type(self, suggestion: Dict[str, Any]) -> str:
+        """Determine the modification type for the proposal.
+        
+        Args:
+            suggestion: The suggestion dictionary
+            
+        Returns:
+            Modification type string.
+        """
+        tags = suggestion.get("tags", [])
+        category = suggestion.get("category", "")
+        
+        tag_to_mod_type = {
+            "docstring": "documentation",
+            "type_hint": "type_annotation",
+            "error_handling": "error_handling",
+            "logging": "logging",
+            "validation": "validation",
+            "async": "async_improvement",
+            "optimization": "performance_improvement",
+            "refactoring": "refactoring",
+        }
+        
+        for tag in tags:
+            if tag in tag_to_mod_type:
+                return tag_to_mod_type[tag]
+        
+        if category == "best_practices":
+            return "best_practice"
+        
+        return "knowledge_based_improvement"
 
     async def _validate_proposal(self, proposal: ModificationProposal):
         """Validate a modification proposal."""
@@ -804,7 +1344,7 @@ Improved code:
 
             response = await llm_manager.generate_response(
                 prompt,
-                model_preference=["anthropic", "openrouter", "openai"],
+                provider=None,  # Let LLM manager choose default provider with fallback logic
                 max_tokens=4000,
                 temperature=0.3,  # Lower temperature for code generation
             )

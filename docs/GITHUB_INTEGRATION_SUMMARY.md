@@ -30,7 +30,7 @@
 | `/github/pull-requests` | GET | List open pull requests |
 | `/github/commits` | GET | Get recent commits |
 | `/github/improvement-history` | GET | AI improvement history |
-| `/github/improve` | POST | Create code improvements |
+| `/self-improve` | POST | Run self-improvement loop |
 | `/github/demo-pr` | POST | Create demo pull request |
 
 ### Enhanced Self-Modification System
@@ -112,8 +112,8 @@ curl http://localhost:8000/github/status
 # Get repository info
 curl http://localhost:8000/github/repository
 
-# Create code improvements (dry run)
-curl -X POST http://localhost:8000/github/improve \
+# Run self-improvement loop (dry run)
+curl -X POST http://localhost:8000/self-improve \
   -H "Content-Type: application/json" \
   -d '{"create_pr": false}'
 ```

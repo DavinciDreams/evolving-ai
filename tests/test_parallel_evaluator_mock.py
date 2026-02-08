@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+"""
+Test script for the parallel evaluator implementation with mocked LLM calls.
+"""
+
+import asyncio
+import sys
+import os
+import time
+from unittest.mock import AsyncMock, patch
+
+# Add the project root to the path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from evolving_agent.core.evaluator import OutputEvaluator, EvaluationCriteria
+
+
+async def test_parallel_evaluation_with_mock():
+    """Test that the parallel evaluation works correctly with mocked LLM calls."""
+    print("Testing parallel evaluation implementation with mocked LLM...")
+    
+    # Create evaluator instance
+    evaluator = OutputEvaluator()
+    
+    # Test data
+    query = "Write a Python function that calculates the factorial of a number."
+    output = """
+    def factorial(n):
+        if n < 0:
+            raise ValueError("Factorial is not defined for negative numbers")
+        if n == 0 or n == 1:
+            return 1
+        return n * factorial(n - 1)
+    """
+    
+    context = {
+        "language": "python",
+        "task_type": "coding",
+        "difficulty": "beginner"
+    }
+    
+    # Test criteria
+    criteria = [c.value for c in EvaluationCriteria]
+    
+    print(f"Evaluating with criteria: {criteria}")
+    
+    # Mock the LLM response
+    mock_response = """
+    {
+        "score": 0.85,
+        "reasoning": "The function is well-implemented and handles edge cases properly.",
+        "specific_issues": [],
+        "strengths": ["Proper error handling", "Recursive implementation", "Clear code structure"],
+        "suggestions": ["Add docstring for better documentation"]
+    }
+    """
+    
+    # Mock the llm_manager.generate_response method
+    with patch('evolving_agent.core.evaluator.llm_manager.generate_response', new_callable=AsyncMock) as mock_generate:
+        mock_generate.return_value = mock_response
+        
+        # Run evaluation
+        start_time = time.time()
+        result = await evaluator.evaluate_output(
+            query=query,
+            output=output,
+            context=context,
+            expected_criteria=criteria
+        )
+        end_time = time.time()
+    
+    # Print results
+    print(f"\nEvaluation completed in {end_time - start_time:.2f} seconds")
+    print(f"Overall score: {result.overall_score:.2f}")
+    print(f"Confidence: {result.confidence:.2f}")
+    
+    print("\nCriteria scores:")
+    for criterion, score in result.criteria_scores.items():
+        print(f"  {criterion}: {score:.2f}")
+    
+    print("\nStrengths:")
+    for strength in result.strengths:
+        print(f"  - {strength}")
+    
+    print("\nWeaknesses:")
+    for weakness in result.weaknesses:
+        print(f"  - {weakness}")
+    
+    print("\nImprovement suggestions:")
+    for suggestion in result.improvement_suggestions:
+        print(f"  - {suggestion}")
+    
+    # Check metadata for parallel execution info
+    metadata = result.metadata
+    print(f"\nMetadata:")
+    print(f"  Parallel execution: {metadata.get('parallel_execution', False)}")
+    print(f"  Evaluation time: {metadata.get('evaluation_time_seconds', 0):.2f} seconds")
+    print(f"  Failed criteria: {metadata.get('failed_criteria', [])}")
+    
+    # Verify all criteria were evaluated
+    expected_criteria = set(criteria)
+    evaluated_criteria = set(result.criteria_scores.keys())
+    
+    if expected_criteria == evaluated_criteria:
+        print("\n✅ All criteria were evaluated successfully")
+    else:
+        missing = expected_criteria - evaluated_criteria
+        print(f"\n❌ Missing criteria evaluation: {missing}")
+        return False
+    
+    # Check scores are in valid range
+    valid_scores = all(0.0 <= score <= 1.0 for score in result.criteria_scores.values())
+    if valid_scores:
+        print("✅ All scores are in valid range [0.0, 1.0]")
+    else:
+        print("❌ Some scores are outside valid range")
+        return False
+    
+    # Check overall score is in valid range
+    if 0.0 <= result.overall_score <= 1.0:
+        print("✅ Overall score is in valid range [0.0, 1.0]")
+    else:
+        print("❌ Overall score is outside valid range")
+        return False
+    
+    # Verify that LLM was called for each criterion
+    if mock_generate.call_count == len(criteria):
+        print(f"✅ LLM was called {mock_generate.call_count} times (once per criterion)")
+    else:
+        print(f"❌ Expected {len(criteria)} LLM calls, got {mock_generate.call_count}")
+        return False
+    
+    print("\n✅ Parallel evaluation test completed successfully!")
+    return True
+
+
+async def test_sequential_vs_parallel_performance():
+    """Test to demonstrate the performance improvement of parallel evaluation."""
+    print("\nTesting performance difference between sequential and parallel evaluation...")
+    
+    # Create evaluator instance
+    evaluator = OutputEvaluator()
+    
+    # Test data
+    query = "Test query for performance comparison"
+    output = "Test output for performance comparison"
+    
+    criteria = [c.value for c in EvaluationCriteria]
+    
+    # Mock the LLM response with a small delay to simulate network latency
+    async def mock_generate_with_delay(*args, **kwargs):
+        await asyncio.sleep(0.1)  # Simulate 100ms network delay
+        return """
+        {
+            "score": 0.75,
+            "reasoning": "Test evaluation",
+            "specific_issues": [],
+            "strengths": ["Test strength"],
+            "suggestions": ["Test suggestion"]
+        }
+        """
+    
+    with patch('evolving_agent.core.evaluator.llm_manager.generate_response', side_effect=mock_generate_with_delay):
+        # Test parallel evaluation (current implementation)
+        start_time = time.time()
+        result_parallel = await evaluator.evaluate_output(
+            query=query,
+            output=output,
+            expected_criteria=criteria
+        )
+        parallel_time = time.time() - start_time
+        
+        # Calculate expected sequential time (7 criteria * 0.1s each = 0.7s)
+        expected_sequential_time = len(criteria) * 0.1
+        
+        print(f"\nPerformance Results:")
+        print(f"  Parallel evaluation time: {parallel_time:.2f} seconds")
+        print(f"  Expected sequential time: {expected_sequential_time:.2f} seconds")
+        print(f"  Performance improvement: {expected_sequential_time / parallel_time:.1f}x faster")
+        
+        # Verify parallel is indeed faster
+        if parallel_time < expected_sequential_time:
+            print("✅ Parallel evaluation is faster than expected sequential execution")
+        else:
+            print("❌ Parallel evaluation is not faster than expected sequential execution")
+            return False
+    
+    print("✅ Performance test completed successfully!")
+    return True
+
+
+async def main():
+    """Run all tests."""
+    print("Starting parallel evaluator tests with mocked LLM...")
+    
+    # Test basic parallel evaluation
+    test1_passed = await test_parallel_evaluation_with_mock()
+    
+    # Test performance improvement
+    test2_passed = await test_sequential_vs_parallel_performance()
+    
+    # Overall result
+    if test1_passed and test2_passed:
+        print("\n🎉 All tests passed! Parallel evaluator is working correctly.")
+        return 0
+    else:
+        print("\n❌ Some tests failed. Please check the implementation.")
+        return 1
+
+
+if __name__ == "__main__":
+    exit_code = asyncio.run(main())
+    sys.exit(exit_code)

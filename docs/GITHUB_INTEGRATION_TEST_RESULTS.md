@@ -109,7 +109,7 @@ The Self-Improving AI Agent can now:
 - GET `/github/pull-requests` - Open pull requests
 - GET `/github/commits` - Recent commit history
 - GET `/github/improvement-history` - AI improvement tracking
-- POST `/github/improve` - Create code improvements
+- POST `/self-improve` - Run self-improvement loop
 - POST `/github/demo-pr` - Create demonstration PR
 
 ## 🎯 Next Steps for Full Autonomy

@@ -38,6 +38,7 @@ const DocsPage = () => {
       endpoints: [
         { method: 'POST', path: '/analyze', description: 'Trigger code analysis' },
         { method: 'GET', path: '/analysis-history', description: 'Get analysis history' },
+        { method: 'POST', path: '/self-improve', description: 'Run full self-improvement loop (analyze → modify → validate → PR)' },
       ],
     },
     {
@@ -45,7 +46,6 @@ const DocsPage = () => {
       endpoints: [
         { method: 'GET', path: '/github/status', description: 'Get GitHub integration status' },
         { method: 'GET', path: '/github/repository', description: 'Get repository information' },
-        { method: 'POST', path: '/github/improve', description: 'Create code improvements with PR' },
         { method: 'POST', path: '/github/demo-pr', description: 'Create demo pull request' },
         { method: 'GET', path: '/github/pull-requests', description: 'Get open pull requests' },
         { method: 'GET', path: '/github/commits', description: 'Get recent commits' },

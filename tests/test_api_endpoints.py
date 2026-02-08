@@ -185,13 +185,13 @@ async def test_api_endpoints():
             ("GET", "/github/improvement-history", None, "Get improvement history"),
             (
                 "POST",
-                "/github/improve",
+                "/self-improve",
                 {
                     "create_pr": False,
                     "evaluation_insights": ["Test insight"],
                     "knowledge_suggestions": ["Test suggestion"],
                 },
-                "Create code improvements (dry run)",
+                "Run self-improvement loop (dry run)",
             ),
         ]
 
@@ -227,7 +227,7 @@ async def test_api_endpoints():
         print("  • GET  /github/pull-requests - Open pull requests")
         print("  • GET  /github/commits - Recent commits")
         print("  • GET  /github/improvement-history - Improvement history")
-        print("  • POST /github/improve - Create code improvements (dry run)")
+        print("  • POST /self-improve - Run self-improvement loop (dry run)")
         print("\n📖 Interactive documentation:")
         print(f"  • Swagger UI: {base_url}/docs")
         print(f"  • ReDoc: {base_url}/redoc")

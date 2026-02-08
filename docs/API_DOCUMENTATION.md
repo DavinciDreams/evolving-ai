@@ -175,8 +175,8 @@ Get detailed information about the connected GitHub repository.
 }
 ```
 
-### POST /github/improve
-Analyze the codebase and create improvements, optionally as a pull request.
+### POST /self-improve
+Run the full self-improvement loop: analyze → modify → validate → PR.
 
 **Request Model**: `ImprovementRequest`
 ```json

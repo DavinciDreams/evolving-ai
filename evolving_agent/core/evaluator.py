@@ -2,6 +2,7 @@
 Output evaluation system for self-improvement.
 """
 
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -70,7 +71,7 @@ class OutputEvaluator:
         custom_weights: Optional[Dict[str, float]] = None,
     ) -> EvaluationResult:
         """
-        Evaluate an output against multiple criteria.
+        Evaluate an output against multiple criteria in parallel.
 
         Args:
             query: The original query/task
@@ -83,41 +84,77 @@ class OutputEvaluator:
             EvaluationResult with scores and suggestions
         """
         try:
-            logger.info("Evaluating output...")
+            logger.info("Starting parallel evaluation of output...")
+            start_time = datetime.now()
 
             # Use custom weights if provided
             weights = custom_weights or self.criteria_weights
             criteria_to_evaluate = expected_criteria or list(weights.keys())
+            
+            logger.info(f"Evaluating {len(criteria_to_evaluate)} criteria in parallel: {criteria_to_evaluate}")
 
-            # Evaluate each criterion
+            # Create parallel evaluation tasks for all criteria
+            evaluation_tasks = [
+                self._evaluate_criterion_with_error_handling(query, output, criterion, context)
+                for criterion in criteria_to_evaluate
+            ]
+
+            # Execute all criterion evaluations in parallel
+            logger.info("Executing criterion evaluations in parallel...")
+            criterion_results = await asyncio.gather(*evaluation_tasks, return_exceptions=True)
+            
+            # Process results and handle any exceptions
             criteria_scores = {}
             all_feedback = {}
+            failed_criteria = []
+            
+            for i, result in enumerate(criterion_results):
+                criterion = criteria_to_evaluate[i]
+                
+                if isinstance(result, Exception):
+                    logger.error(f"Failed to evaluate criterion {criterion}: {result}")
+                    criteria_scores[criterion] = 0.5  # Default score for failed evaluation
+                    all_feedback[criterion] = {"error": str(result), "reasoning": f"Evaluation failed: {str(result)}"}
+                    failed_criteria.append(criterion)
+                else:
+                    score, feedback = result
+                    criteria_scores[criterion] = score
+                    all_feedback[criterion] = feedback
+            
+            if failed_criteria:
+                logger.warning(f"Failed to evaluate {len(failed_criteria)} criteria: {failed_criteria}")
 
-            for criterion in criteria_to_evaluate:
-                score, feedback = await self._evaluate_criterion(
-                    query, output, criterion, context
-                )
-                criteria_scores[criterion] = score
-                all_feedback[criterion] = feedback
-
-            # Calculate overall score
-            overall_score = sum(
-                criteria_scores.get(criterion, 0) * weights.get(criterion, 0)
-                for criterion in criteria_scores
-            ) / sum(weights.get(criterion, 0) for criterion in criteria_scores)
-
-            # Extract strengths and weaknesses
-            strengths, weaknesses = self._extract_strengths_weaknesses(
-                criteria_scores, all_feedback
+            # Run post-processing operations in parallel where possible
+            logger.info("Running post-processing operations...")
+            post_processing_start = datetime.now()
+            
+            # Create parallel post-processing tasks
+            overall_score_task = asyncio.create_task(
+                asyncio.to_thread(self._calculate_overall_score, criteria_scores, weights)
             )
-
-            # Generate improvement suggestions
+            
+            strengths_weaknesses_task = asyncio.create_task(
+                asyncio.to_thread(self._extract_strengths_weaknesses, criteria_scores, all_feedback)
+            )
+            
+            confidence_task = asyncio.create_task(
+                asyncio.to_thread(self._calculate_confidence, criteria_scores)
+            )
+            
+            # Wait for parallel post-processing to complete
+            overall_score, (strengths, weaknesses), confidence = await asyncio.gather(
+                overall_score_task,
+                strengths_weaknesses_task,
+                confidence_task
+            )
+            
+            # Generate improvement suggestions (this needs to be async as it calls LLM)
             improvement_suggestions = await self._generate_improvement_suggestions(
                 query, output, criteria_scores, all_feedback
             )
-
-            # Calculate confidence based on consistency of scores
-            confidence = self._calculate_confidence(criteria_scores)
+            
+            post_processing_time = (datetime.now() - post_processing_start).total_seconds()
+            logger.info(f"Post-processing completed in {post_processing_time:.2f} seconds")
 
             evaluation_result = EvaluationResult(
                 overall_score=overall_score,
@@ -126,7 +163,7 @@ class OutputEvaluator:
                 weaknesses=weaknesses,
                 improvement_suggestions=improvement_suggestions,
                 feedback=(
-                    " ".join(all_feedback)
+                    " ".join(str(feedback) for feedback in all_feedback.values())
                     if all_feedback
                     else "No specific feedback provided."
                 ),
@@ -136,17 +173,38 @@ class OutputEvaluator:
                     "criteria_evaluated": criteria_to_evaluate,
                     "weights_used": weights,
                     "context_available": context is not None,
+                    "evaluation_time_seconds": (datetime.now() - start_time).total_seconds(),
+                    "parallel_execution": True,
+                    "failed_criteria": failed_criteria,
                 },
             )
 
             # Store evaluation history
             self.evaluation_history.append((query, output, evaluation_result))
 
-            logger.info(f"Evaluation completed. Overall score: {overall_score:.2f}")
+            total_time = (datetime.now() - start_time).total_seconds()
+            logger.info(f"Parallel evaluation completed in {total_time:.2f} seconds. Overall score: {overall_score:.2f}")
             return evaluation_result
 
         except Exception as e:
             logger.error(f"Failed to evaluate output: {e}")
+            raise
+
+    async def _evaluate_criterion_with_error_handling(
+        self,
+        query: str,
+        output: str,
+        criterion: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[float, Dict[str, Any]]:
+        """
+        Wrapper for _evaluate_criterion with enhanced error handling for parallel execution.
+        """
+        try:
+            return await self._evaluate_criterion(query, output, criterion, context)
+        except Exception as e:
+            logger.error(f"Error in _evaluate_criterion_with_error_handling for {criterion}: {e}")
+            # Re-raise to be caught by the gather error handling
             raise
 
     async def _evaluate_criterion(
@@ -362,6 +420,18 @@ class OutputEvaluator:
         except Exception as e:
             logger.error(f"Failed to generate improvement suggestions: {e}")
             return ["Review and refine the output for better quality"]
+
+    def _calculate_overall_score(
+        self, criteria_scores: Dict[str, float], weights: Dict[str, float]
+    ) -> float:
+        """
+        Calculate overall score from criteria scores and weights.
+        Extracted to separate method for parallel execution.
+        """
+        return sum(
+            criteria_scores.get(criterion, 0) * weights.get(criterion, 0)
+            for criterion in criteria_scores
+        ) / sum(weights.get(criterion, 0) for criterion in criteria_scores)
 
     def _calculate_confidence(self, criteria_scores: Dict[str, float]) -> float:
         """Calculate confidence based on consistency of scores."""

@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..utils.logging import setup_logger
+from .logging import setup_logger
 
 logger = setup_logger(__name__)
 

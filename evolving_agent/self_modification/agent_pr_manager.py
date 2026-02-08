@@ -13,10 +13,10 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
-from ..self_modification.code_analyzer import CodeAnalyzer
-from ..self_modification.modifier import CodeModifier
-from ..self_modification.validator import CodeValidator
-from .github_integration import GitHubIntegration
+from .code_analyzer import CodeAnalyzer
+from .modifier import CodeModifier
+from .validator import CodeValidator
+from ..integrations.github_integration import GitHubIntegration
 
 
 class AgentPRManager:

@@ -22,6 +22,7 @@ from evolving_agent.utils.config import config
 from evolving_agent.utils.github_enhanced_modifier import GitHubEnabledSelfModifier
 from evolving_agent.utils.logging import setup_logger
 from evolving_agent.utils.error_recovery import error_recovery_manager
+from evolving_agent.utils.llm_interface import llm_manager
 
 logger = setup_logger(__name__)
 
@@ -112,41 +113,6 @@ async def lifespan(app: FastAPI):
         
         logger.info("Graceful shutdown completed")
 
-
-# Error recovery middleware
-@app.middleware("http")
-async def error_recovery_middleware(request: Request, call_next):
-    """Middleware for error recovery and graceful degradation."""
-    try:
-        response = await call_next(request)
-        return response
-    except HTTPException as e:
-        # Let HTTP exceptions propagate normally
-        raise e
-    except Exception as e:
-        logger.error(f"Unhandled error in request {request.url}: {e}")
-        
-        # Check if we should return a degraded response
-        if error_recovery_manager.is_degraded_mode():
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "error": "Service temporarily unavailable",
-                    "message": "The system is operating in degraded mode. Please try again later.",
-                    "degraded_mode": True,
-                    "timestamp": datetime.now().isoformat()
-                }
-            )
-        
-        # Return generic error response
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": "Internal server error",
-                "message": "An unexpected error occurred. Please try again.",
-                "timestamp": datetime.now().isoformat()
-            }
-        )
 
 # Pydantic models for API requests and responses
 class QueryRequest(BaseModel):
@@ -377,6 +343,49 @@ class RepositoryInfo(BaseModel):
     open_issues: int = Field(..., description="Number of open issues")
 
 
+class CreateIssueRequest(BaseModel):
+    """Request model for creating a GitHub issue."""
+
+    title: str = Field(
+        ...,
+        description="Issue title",
+        min_length=1,
+        max_length=255,
+    )
+    description: str = Field(
+        ...,
+        description="Issue description/body",
+        min_length=1,
+        max_length=65536,
+    )
+    labels: Optional[List[str]] = Field(
+        None,
+        description="Optional list of labels to add to the issue",
+    )
+    assignees: Optional[List[str]] = Field(
+        None,
+        description="Optional list of assignees (note: requires GitHub permissions)",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "title": "Add new feature for Discord integration",
+                "description": "Users should be able to request features from Discord...",
+                "labels": ["enhancement", "discord"],
+                "assignees": ["username"],
+            }
+        }
+    }
+
+
+class CreateIssueResponse(BaseModel):
+    """Response model for creating a GitHub issue."""
+
+    issue_number: int = Field(..., description="GitHub issue number")
+    issue_url: str = Field(..., description="GitHub issue URL")
+
+
 # FastAPI app initialization
 app = FastAPI(
     title="Self-Improving AI Agent API",
@@ -423,6 +432,42 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Error recovery middleware
+@app.middleware("http")
+async def error_recovery_middleware(request: Request, call_next):
+    """Middleware for error recovery and graceful degradation."""
+    try:
+        response = await call_next(request)
+        return response
+    except HTTPException as e:
+        # Let HTTP exceptions propagate normally
+        raise e
+    except Exception as e:
+        logger.error(f"Unhandled error in request {request.url}: {e}")
+        
+        # Check if we should return a degraded response
+        if error_recovery_manager.is_degraded_mode():
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "Service temporarily unavailable",
+                    "message": "The system is operating in degraded mode. Please try again later.",
+                    "degraded_mode": True,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+        
+        # Return generic error response
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Internal server error",
+                "message": "An unexpected error occurred. Please try again.",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
 
 
 def get_agent() -> SelfImprovingAgent:
@@ -815,12 +860,81 @@ async def get_repository_info():
         )
 
 
-@app.post("/github/improve", response_model=ImprovementResponse, tags=["GitHub"])
+@app.post("/github/issue", response_model=CreateIssueResponse, tags=["GitHub"])
+async def create_github_issue(request: CreateIssueRequest):
+    """
+    Create a new GitHub issue.
+
+    This endpoint allows creating GitHub issues programmatically, useful for
+    integrating with Discord feature requests or other external systems.
+
+    The issue will be created in the configured GitHub repository with the
+    provided title, description, and optional labels.
+
+    Note: Assignees requires proper GitHub permissions and the users must
+    have write access to the repository.
+    """
+    try:
+        if not github_modifier or not github_modifier.github_integration.repository:
+            raise HTTPException(
+                status_code=503,
+                detail="GitHub integration not available or repository not connected"
+            )
+
+        logger.info(f"Creating GitHub issue: {request.title}")
+
+        # Create the issue using the GitHub integration
+        issue_result = await github_modifier.github_integration.create_issue(
+            title=request.title,
+            body=request.description,
+            labels=request.labels
+        )
+
+        # Check for errors in the result
+        if "error" in issue_result:
+            logger.error(f"Failed to create issue: {issue_result['error']}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create issue: {issue_result['error']}"
+            )
+
+        # Handle assignees if provided
+        if request.assignees:
+            try:
+                issue_number = issue_result.get("issue_number")
+                if issue_number:
+                    repository = github_modifier.github_integration.repository
+                    issue = repository.get_issue(issue_number)
+                    # Add assignees to the issue
+                    issue.add_to_assignees(*request.assignees)
+                    logger.info(f"Added assignees {request.assignees} to issue #{issue_number}")
+            except Exception as e:
+                logger.warning(f"Failed to add assignees to issue: {e}")
+                # Don't fail the request if assignees fail, just log a warning
+
+        logger.info(f"Successfully created issue #{issue_result['issue_number']}")
+
+        return CreateIssueResponse(
+            issue_number=issue_result["issue_number"],
+            issue_url=issue_result["url"]
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating GitHub issue: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating GitHub issue: {str(e)}"
+        )
+
+
+@app.post("/self-improve", response_model=ImprovementResponse, tags=["Self-Improvement"])
 async def create_code_improvements(
     request: ImprovementRequest, background_tasks: BackgroundTasks
 ):
     """
-    Analyze codebase and create improvements, optionally as a pull request.
+    Run the full self-improvement loop: analyze → modify → validate → PR.
 
     This endpoint will:
     1. Analyze the current codebase for improvement opportunities

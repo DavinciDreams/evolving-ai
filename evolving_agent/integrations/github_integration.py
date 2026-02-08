@@ -18,7 +18,7 @@ from github.PullRequest import PullRequest
 
 from evolving_agent.utils.logging import setup_logger
 from evolving_agent.utils.config import config
-from .error_recovery import (
+from ..utils.error_recovery import (
     error_recovery_manager,
     CircuitBreakerConfig,
     RetryConfig,
@@ -646,6 +646,53 @@ class GitHubIntegration:
             
         except Exception as e:
             logger.error(f"Error creating pull request: {e}")
+            return {"error": str(e)}
+    
+    async def create_issue(
+        self,
+        title: str,
+        body: str,
+        labels: List[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Create an issue in the repository.
+        
+        Args:
+            title: Issue title
+            body: Issue description
+            labels: List of label names to add
+            
+        Returns:
+            Dictionary with issue information
+        """
+        try:
+            if not self.repository:
+                return {"error": "No repository available"}
+            
+            # Create the issue
+            issue = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.repository.create_issue(
+                    title=title,
+                    body=body,
+                    labels=labels or []
+                )
+            )
+            
+            logger.info(f"Created issue #{issue.number}: {title}")
+            
+            return {
+                "issue_number": issue.number,
+                "title": issue.title,
+                "body": issue.body,
+                "url": issue.html_url,
+                "state": issue.state,
+                "created_at": issue.created_at.isoformat(),
+                "labels": [label.name for label in issue.labels] if issue.labels else []
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating issue: {e}")
             return {"error": str(e)}
     
     async def get_open_pull_requests(self) -> List[Dict[str, Any]]:
