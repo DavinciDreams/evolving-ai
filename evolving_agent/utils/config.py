@@ -206,6 +206,11 @@ class Config:
         """Get Discord status on high quality interaction setting."""
         return os.getenv("DISCORD_STATUS_ON_HIGH_QUALITY", "false").lower() == "true"
 
+    @property
+    def api_server_url(self) -> str:
+        """Get API server URL for internal calls."""
+        return os.getenv("API_SERVER_URL", "http://localhost:8000")
+
     # Web Search Integration Configuration
     @property
     def web_search_enabled(self) -> bool:
@@ -271,6 +276,7 @@ class Config:
             "discord_status_on_improvement": self.discord_status_on_improvement,
             "discord_status_on_knowledge_update": self.discord_status_on_knowledge_update,
             "discord_status_on_high_quality": self.discord_status_on_high_quality,
+            "api_server_url": self.api_server_url,
             "web_search_enabled": self.web_search_enabled,
             "web_search_default_provider": self.web_search_default_provider,
             "web_search_max_results": self.web_search_max_results,

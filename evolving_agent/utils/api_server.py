@@ -860,74 +860,6 @@ async def get_repository_info():
         )
 
 
-@app.post("/github/issue", response_model=CreateIssueResponse, tags=["GitHub"])
-async def create_github_issue(request: CreateIssueRequest):
-    """
-    Create a new GitHub issue.
-
-    This endpoint allows creating GitHub issues programmatically, useful for
-    integrating with Discord feature requests or other external systems.
-
-    The issue will be created in the configured GitHub repository with the
-    provided title, description, and optional labels.
-
-    Note: Assignees requires proper GitHub permissions and the users must
-    have write access to the repository.
-    """
-    try:
-        if not github_modifier or not github_modifier.github_integration.repository:
-            raise HTTPException(
-                status_code=503,
-                detail="GitHub integration not available or repository not connected"
-            )
-
-        logger.info(f"Creating GitHub issue: {request.title}")
-
-        # Create the issue using the GitHub integration
-        issue_result = await github_modifier.github_integration.create_issue(
-            title=request.title,
-            body=request.description,
-            labels=request.labels
-        )
-
-        # Check for errors in the result
-        if "error" in issue_result:
-            logger.error(f"Failed to create issue: {issue_result['error']}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to create issue: {issue_result['error']}"
-            )
-
-        # Handle assignees if provided
-        if request.assignees:
-            try:
-                issue_number = issue_result.get("issue_number")
-                if issue_number:
-                    repository = github_modifier.github_integration.repository
-                    issue = repository.get_issue(issue_number)
-                    # Add assignees to the issue
-                    issue.add_to_assignees(*request.assignees)
-                    logger.info(f"Added assignees {request.assignees} to issue #{issue_number}")
-            except Exception as e:
-                logger.warning(f"Failed to add assignees to issue: {e}")
-                # Don't fail the request if assignees fail, just log a warning
-
-        logger.info(f"Successfully created issue #{issue_result['issue_number']}")
-
-        return CreateIssueResponse(
-            issue_number=issue_result["issue_number"],
-            issue_url=issue_result["url"]
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating GitHub issue: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error creating GitHub issue: {str(e)}"
-        )
-
 
 @app.post("/self-improve", response_model=ImprovementResponse, tags=["Self-Improvement"])
 async def create_code_improvements(
@@ -1092,6 +1024,75 @@ async def get_improvement_history():
         logger.error(f"Error getting improvement history: {e}")
         raise HTTPException(
             status_code=500, detail=f"Error getting improvement history: {str(e)}"
+        )
+
+
+@app.post("/github/issue", response_model=CreateIssueResponse, tags=["GitHub"])
+async def create_github_issue(request: CreateIssueRequest):
+    """
+    Create a new GitHub issue.
+
+    This endpoint allows creating GitHub issues programmatically, useful for
+    integrating with Discord feature requests or other external systems.
+
+    The issue will be created in the configured GitHub repository with the
+    provided title, description, and optional labels.
+
+    Note: Assignees requires proper GitHub permissions and the users must
+    have write access to the repository.
+    """
+    try:
+        if not github_modifier or not github_modifier.github_integration.repository:
+            raise HTTPException(
+                status_code=503,
+                detail="GitHub integration not available or repository not connected"
+            )
+
+        logger.info(f"Creating GitHub issue: {request.title}")
+
+        # Create the issue using the GitHub integration
+        issue_result = await github_modifier.github_integration.create_issue(
+            title=request.title,
+            body=request.description,
+            labels=request.labels
+        )
+
+        # Check for errors in the result
+        if "error" in issue_result:
+            logger.error(f"Failed to create issue: {issue_result['error']}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create issue: {issue_result['error']}"
+            )
+
+        # Handle assignees if provided
+        if request.assignees:
+            try:
+                issue_number = issue_result.get("issue_number")
+                if issue_number:
+                    repository = github_modifier.github_integration.repository
+                    issue = repository.get_issue(issue_number)
+                    # Add assignees to the issue
+                    issue.add_to_assignees(*request.assignees)
+                    logger.info(f"Added assignees {request.assignees} to issue #{issue_number}")
+            except Exception as e:
+                logger.warning(f"Failed to add assignees to issue: {e}")
+                # Don't fail the request if assignees fail, just log a warning
+
+        logger.info(f"Successfully created issue #{issue_result['issue_number']}")
+
+        return CreateIssueResponse(
+            issue_number=issue_result["issue_number"],
+            issue_url=issue_result["url"]
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating GitHub issue: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating GitHub issue: {str(e)}"
         )
 
 

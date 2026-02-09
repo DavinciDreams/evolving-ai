@@ -2,6 +2,7 @@
 
 import asyncio
 import discord
+import httpx
 from typing import Optional, Dict, Any, List, Callable
 from loguru import logger
 from datetime import datetime
@@ -9,6 +10,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .discord_formatter import DiscordFormatter
 from .discord_rate_limiter import RateLimiter
+from ..utils.llm_interface import llm_manager
 
 
 class DiscordIntegration:
@@ -67,6 +69,9 @@ class DiscordIntegration:
         self.use_embeds = config.discord_embed_responses
         self.show_typing = config.discord_typing_indicator
         self.status_updates_enabled = config.discord_status_updates_enabled
+
+        # API server configuration for GitHub integration
+        self.api_server_url = getattr(config, 'api_server_url', 'http://localhost:8000')
 
         # State
         self.initialized = False
@@ -224,6 +229,11 @@ class DiscordIntegration:
             query = query.replace(f"<@!{self.client.user.id}>", "").strip()
 
         if not query:
+            return
+
+        # Check for feature request commands
+        if query.startswith('!feature ') or query.startswith('!request '):
+            await self.handle_feature_request(message)
             return
 
         logger.info(
@@ -425,6 +435,304 @@ class DiscordIntegration:
                 pass
 
         return NoopContext()
+
+    async def _convert_feature_to_technical_spec(
+        self,
+        feature_request: str,
+        user_name: str
+    ) -> Dict[str, str]:
+        """Convert a feature request into a technical specification using LLM.
+
+        Args:
+            feature_request: The raw feature request from the user
+            user_name: Name of the user who submitted the request
+
+        Returns:
+            Dictionary with 'title' and 'description' for the GitHub issue
+        """
+        system_prompt = """You are a technical product manager and software architect.
+Your task is to convert user feature requests into well-structured technical specifications
+for GitHub issues.
+
+The output should include:
+1. A clear, concise title (max 100 characters)
+2. A detailed technical description that includes:
+   - Problem statement
+   - Proposed solution
+   - Technical requirements
+   - Acceptance criteria
+   - Potential implementation approach
+
+Format your response as JSON with keys 'title' and 'description'."""
+
+        user_prompt = f"""Convert the following feature request into a technical specification:
+
+User: {user_name}
+Feature Request: {feature_request}
+
+Respond with a JSON object containing 'title' and 'description' keys."""
+
+        try:
+            response = await llm_manager.generate_response(
+                prompt=user_prompt,
+                system_prompt=system_prompt,
+                temperature=0.3,
+                max_tokens=2000
+            )
+
+            # Try to parse JSON response
+            import json
+            try:
+                # Clean up the response in case it contains markdown
+                response = response.strip()
+                if response.startswith('```json'):
+                    response = response[7:]
+                if response.startswith('```'):
+                    response = response[3:]
+                if response.endswith('```'):
+                    response = response[:-3]
+                response = response.strip()
+
+                spec = json.loads(response)
+                
+                # Ensure required keys exist
+                if 'title' not in spec or 'description' not in spec:
+                    raise ValueError("Missing required keys in LLM response")
+
+                # Add metadata to description
+                spec['description'] = f"""## Feature Request
+
+**Submitted by:** {user_name}
+**Original Request:**
+```
+{feature_request}
+```
+
+---
+
+{spec['description']}
+"""
+
+                return spec
+
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse LLM response as JSON, using fallback")
+                # Fallback: create a simple spec
+                title = f"Feature: {feature_request[:50]}..."
+                description = f"""## Feature Request
+
+**Submitted by:** {user_name}
+**Original Request:**
+```
+{feature_request}
+```
+
+---
+
+### Technical Specification
+
+{response}
+
+### Implementation Notes
+
+This feature request was submitted via Discord and needs to be reviewed by the development team.
+"""
+                return {'title': title, 'description': description}
+
+        except Exception as e:
+            logger.error(f"Error converting feature to technical spec: {e}")
+            # Fallback to simple format
+            title = f"Feature Request from {user_name}"
+            description = f"""## Feature Request
+
+**Submitted by:** {user_name}
+**Original Request:**
+```
+{feature_request}
+```
+
+---
+
+### Technical Specification
+
+This feature request was submitted via Discord. The AI system encountered an error while
+generating a detailed technical specification. Please review the original request and
+create a proper technical specification.
+
+### Implementation Notes
+
+This feature request needs to be reviewed by the development team.
+"""
+            return {'title': title, 'description': description}
+
+    async def _create_github_issue(
+        self,
+        title: str,
+        description: str,
+        labels: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Create a GitHub issue via the API server.
+
+        Args:
+            title: Issue title
+            description: Issue description
+            labels: Optional list of labels
+
+        Returns:
+            Dictionary with issue details or error information
+        """
+        url = f"{self.api_server_url}/github/issue"
+        
+        payload = {
+            "title": title,
+            "description": description,
+            "labels": labels or ["enhancement", "discord-request"]
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                return response.json()
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error creating GitHub issue: {e.response.status_code} - {e.response.text}")
+            return {
+                "error": f"HTTP error {e.response.status_code}",
+                "details": e.response.text
+            }
+        except httpx.RequestError as e:
+            logger.error(f"Request error creating GitHub issue: {e}")
+            return {
+                "error": "Failed to connect to API server",
+                "details": str(e)
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error creating GitHub issue: {e}")
+            return {
+                "error": "Unexpected error",
+                "details": str(e)
+            }
+
+    async def handle_feature_request(self, message: discord.Message):
+        """Handle a feature request command from Discord.
+
+        Args:
+            message: Discord message object
+        """
+        user_id = message.author.id
+        user_name = message.author.name
+
+        # Extract the feature request (remove command prefix)
+        query = message.content
+        if query.startswith('!feature '):
+            feature_request = query[9:].strip()
+        elif query.startswith('!request '):
+            feature_request = query[9:].strip()
+        else:
+            await message.channel.send(
+                embed=self.formatter.format_error_message(
+                    "Invalid command. Use `!feature <your request>` or `!request <your request>`"
+                )
+            )
+            return
+
+        if not feature_request:
+            await message.channel.send(
+                embed=self.formatter.format_error_message(
+                    "Please provide a feature request. Usage: `!feature <your request>`"
+                )
+            )
+            return
+
+        logger.info(
+            f"Processing feature request from {user_name}: {feature_request[:100]}..."
+        )
+
+        # Check rate limit
+        if self.rate_limiter.is_user_rate_limited(user_id):
+            cooldown = self.rate_limiter.get_remaining_cooldown(user_id)
+            logger.warning(f"User {user_id} is rate limited")
+
+            rate_limit_embed = self.formatter.format_rate_limit_message(cooldown)
+            await message.channel.send(embed=rate_limit_embed)
+            return
+
+        # Record request
+        self.rate_limiter.add_request(user_id)
+
+        # Show typing indicator if enabled
+        async with message.channel.typing() if self.show_typing else self._noop_context():
+            try:
+                # Send initial processing message
+                processing_embed = discord.Embed(
+                    title="🔄 Processing Feature Request",
+                    description="Converting your request to a technical specification and creating a GitHub issue...",
+                    color=0xFFA500,  # Orange
+                    timestamp=datetime.utcnow()
+                )
+                await message.channel.send(embed=processing_embed)
+
+                # Step 1: Convert to technical spec
+                spec = await self._convert_feature_to_technical_spec(
+                    feature_request,
+                    user_name
+                )
+
+                # Step 2: Create GitHub issue
+                result = await self._create_github_issue(
+                    title=spec['title'],
+                    description=spec['description'],
+                    labels=["enhancement", "discord-request"]
+                )
+
+                # Step 3: Send response
+                if 'error' in result:
+                    error_embed = discord.Embed(
+                        title="❌ Failed to Create GitHub Issue",
+                        description=f"An error occurred while creating the GitHub issue:\n```\n{result.get('details', 'Unknown error')}\n```\n\nYour feature request has been logged but not submitted to GitHub.",
+                        color=0xFF0000,  # Red
+                        timestamp=datetime.utcnow()
+                    )
+                    await message.channel.send(embed=error_embed)
+                else:
+                    success_embed = discord.Embed(
+                        title="✅ Feature Request Submitted",
+                        description=f"Your feature request has been converted to a technical specification and submitted to GitHub!",
+                        color=0x00FF00,  # Green
+                        timestamp=datetime.utcnow()
+                    )
+                    success_embed.add_field(
+                        name="Issue Number",
+                        value=f"#{result.get('issue_number', 'N/A')}",
+                        inline=True
+                    )
+                    success_embed.add_field(
+                        name="Issue URL",
+                        value=result.get('issue_url', 'N/A'),
+                        inline=False
+                    )
+                    success_embed.add_field(
+                        name="Title",
+                        value=spec['title'][:100] + ('...' if len(spec['title']) > 100 else ''),
+                        inline=False
+                    )
+                    success_embed.set_footer(
+                        text=f"Requested by {user_name}"
+                    )
+                    await message.channel.send(embed=success_embed)
+
+                logger.info(
+                    f"Feature request from {user_name} processed. "
+                    f"Issue: #{result.get('issue_number', 'N/A')}"
+                )
+
+            except Exception as e:
+                logger.error(f"Error processing feature request: {e}", exc_info=True)
+                error_embed = self.formatter.format_error_message(
+                    f"An error occurred while processing your feature request: {str(e)}"
+                )
+                await message.channel.send(embed=error_embed)
 
     def get_stats(self) -> Dict[str, Any]:
         """Get Discord integration statistics.
