@@ -50,14 +50,20 @@ export const MessageBubble = ({ message, isUser }) => {
           )}
         </div>
 
-        {/* Evaluation scores for AI responses */}
-        {!isUser && evaluation && (
+        {/* Evaluation score for AI responses */}
+        {!isUser && evaluation != null && (
           <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap gap-2">
-            {Object.entries(evaluation).map(([criterion, score]) => (
-              <Badge key={criterion} variant="info" className="text-xs">
-                {criterion}: {(score * 100).toFixed(0)}%
+            {typeof evaluation === 'object' ? (
+              Object.entries(evaluation).map(([criterion, score]) => (
+                <Badge key={criterion} variant="info" className="text-xs">
+                  {criterion}: {(score * 100).toFixed(0)}%
+                </Badge>
+              ))
+            ) : (
+              <Badge variant="info" className="text-xs">
+                Score: {(Number(evaluation) * 100).toFixed(0)}%
               </Badge>
-            ))}
+            )}
           </div>
         )}
 

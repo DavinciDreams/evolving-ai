@@ -57,7 +57,13 @@ class SelfImprovingAgent:
         
         # Web search integration
         self.web_search = None  # Will be initialized if enabled
-        
+
+        # GitHub-enhanced self-modifier (set externally by api_server)
+        self.github_modifier = None
+
+        # Last evaluation result (for API consumers)
+        self.last_evaluation_score: Optional[float] = None
+
         # State tracking
         self.initialized = False
         self.session_id = None
@@ -156,6 +162,19 @@ class SelfImprovingAgent:
             # Register health checks
             self._register_health_checks()
 
+            # Restore agent state from previous session
+            try:
+                saved_state = await self.data_manager._load_agent_state()
+                if saved_state:
+                    self.interaction_count = saved_state.get("interaction_count", 0)
+                    self.improvement_cycle_count = saved_state.get("improvement_cycle_count", 0)
+                    self.logger.info(
+                        f"Restored agent state: {self.interaction_count} interactions, "
+                        f"{self.improvement_cycle_count} improvement cycles"
+                    )
+            except Exception as e:
+                self.logger.warning(f"Failed to restore agent state: {e}")
+
             # Create session
             self.session_id = (
                 f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -163,18 +182,9 @@ class SelfImprovingAgent:
 
             # Store initialization memory
             try:
-                if hasattr(self, "_store_session_start") and callable(getattr(self, "_store_session_start", None)):
-                    await self._store_session_start()
-                else:
-                    if hasattr(self, "logger"):
-                        self.logger.warning("Session start storage method '_store_session_start' is not implemented.")
-                    else:
-                        print("Session start storage method '_store_session_start' is not implemented.")
+                await self._store_session_start()
             except Exception as e:
-                if hasattr(self, "logger"):
-                    self.logger.error(f"Failed to store session start: {e}")
-                else:
-                    print(f"Failed to store session start: {e}")
+                self.logger.error(f"Failed to store session start: {e}")
 
             self.initialized = True
             self.logger.info("Agent initialization completed successfully")
@@ -367,7 +377,10 @@ class SelfImprovingAgent:
                 self.logger.error(f"Status callback error for {event_type}: {e}")
 
     async def run(
-        self, query: str, context_hints: Optional[List[str]] = None
+        self,
+        query: str,
+        context_hints: Optional[List[str]] = None,
+        conversation_id: Optional[str] = None,
     ) -> str:
 
         """
@@ -376,6 +389,7 @@ class SelfImprovingAgent:
         Args:
             query: The user query or task
             context_hints: Optional hints for context retrieval
+            conversation_id: Optional conversation identifier for tracking multi-turn conversations
 
         Returns:
             The agent's response
@@ -389,13 +403,47 @@ class SelfImprovingAgent:
             self.logger.info(f"Processing query: {query[:100]}...")
             self.interaction_count += 1
 
+            # Check if the user is requesting self-improvement
+            if config.enable_self_modification and self._is_self_edit_request(query):
+                response = await self._handle_self_edit_request(query)
+                self.last_evaluation_score = None  # no evaluation for self-edit
+                # Still store the interaction for learning
+                try:
+                    await self.data_manager.save_interaction(
+                        query=query,
+                        response=response,
+                        evaluation_score=None,
+                        context_used={},
+                        metadata={
+                            "interaction_count": self.interaction_count,
+                            "session_id": self.session_id,
+                            "self_edit_triggered": True,
+                        },
+                        conversation_id=conversation_id,
+                    )
+                except Exception as e:
+                    self.logger.error(f"Failed to store self-edit interaction: {e}")
+                return response
+
             # Step 1: Retrieve relevant context
             context = await self.context_manager.get_relevant_context(
                 query=query, context_types=context_hints
             )
 
+            # Step 1b: Retrieve conversation history for multi-turn context
+            conversation_history = []
+            if conversation_id:
+                try:
+                    conversation_history = await self.data_manager.get_conversation_history(
+                        conversation_id, limit=10
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Failed to retrieve conversation history: {e}")
+
             # Step 2: Generate initial response
-            initial_response = await self._generate_response(query, context)
+            initial_response = await self._generate_response(
+                query, context, conversation_history=conversation_history
+            )
 
             # Step 3: Evaluate the response (if enabled)
             if config.enable_evaluation:
@@ -434,6 +482,7 @@ class SelfImprovingAgent:
                     "session_id": self.session_id,
                     "improvement_applied": final_response != initial_response,
                 },
+                conversation_id=conversation_id,
             )
 
             # Save detailed evaluation
@@ -478,6 +527,19 @@ class SelfImprovingAgent:
             ):  # Every 10 interactions
                 await self._consider_self_modification()
 
+            self.last_evaluation_score = evaluation.overall_score
+
+            # Save agent state periodically (every 5 interactions)
+            if self.interaction_count % 5 == 0:
+                try:
+                    await self.data_manager.save_agent_state({
+                        "interaction_count": self.interaction_count,
+                        "improvement_cycle_count": self.improvement_cycle_count,
+                        "component_health": {k: v for k, v in self.component_health.items()},
+                    })
+                except Exception as e:
+                    self.logger.warning(f"Failed to save agent state: {e}")
+
             self.logger.info(
                 f"Query processed successfully. "
                 f"Evaluation score: {evaluation.overall_score:.2f}"
@@ -494,14 +556,70 @@ class SelfImprovingAgent:
                 self.logger.error(f"'SelfImprovingAgent' object has no attribute '_store_error'")
             raise
 
+    _SELF_EDIT_KEYWORDS = [
+        "improve yourself", "self-edit", "self edit", "self-improve",
+        "modify your own code", "upgrade yourself", "refactor yourself",
+        "optimize yourself", "self-modification", "self modification",
+        "run self improvement", "trigger self improvement",
+        "please improve yourself", "please self-edit",
+    ]
+
+    def _is_self_edit_request(self, query: str) -> bool:
+        """Detect if the user is asking the agent to self-edit."""
+        import re
+        q = query.lower()
+        return any(re.search(r'\b' + re.escape(kw) + r'\b', q) for kw in self._SELF_EDIT_KEYWORDS)
+
+    async def _handle_self_edit_request(self, query: str) -> str:
+        """Handle a user request to self-edit by triggering the self-improvement pipeline."""
+        if not self.github_modifier:
+            return (
+                "Self-improvement is not available right now. "
+                "The GitHub integration is not configured. "
+                "Please ensure GITHUB_TOKEN and GITHUB_REPO are set."
+            )
+
+        self.logger.info("User requested self-improvement via chat — triggering pipeline")
+        result = await self.github_modifier.trigger_self_improvement()
+
+        status = result.get("status", "unknown")
+        if status == "already_running":
+            return "A self-improvement cycle is already running. Please wait for it to complete."
+
+        if status == "error":
+            return f"Self-improvement encountered an error: {result.get('message', 'Unknown error')}"
+
+        # Build a user-friendly summary
+        parts = ["I've completed a self-improvement analysis of my codebase."]
+        parts.append(f"- **Improvements generated**: {result.get('improvements_generated', 0)}")
+        parts.append(f"- **Improvements validated**: {result.get('improvements_validated', 0)}")
+        parts.append(f"- **Improvement potential**: {result.get('improvement_potential', 0):.2f}")
+
+        if result.get("pr_created"):
+            pr_url = result.get("pr_url", "")
+            pr_num = result.get("pr_number", "")
+            parts.append(f"\nI've created **Pull Request #{pr_num}** with the validated code changes.")
+            if pr_url:
+                parts.append(f"You can review it here: {pr_url}")
+        elif result.get("issue_created"):
+            parts.append(f"\nI've created **Issue #{result.get('issue_number')}** with improvement suggestions.")
+        else:
+            parts.append("\nNo significant code changes were identified this cycle.")
+
+        return "\n".join(parts)
+
     async def _generate_response(
-        self, query: str, context: Dict[str, Any]
+        self, query: str, context: Dict[str, Any],
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
 
-        """Generate initial response using context."""
+        """Generate initial response using context and conversation history."""
         try:
             # Prepare context information
             context_text = self._format_context_for_prompt(context)
+
+            # Format conversation history for the prompt
+            history_text = self._format_conversation_history(conversation_history)
 
             # Create system prompt
             web_search_info = ""
@@ -514,22 +632,36 @@ class SelfImprovingAgent:
                     "However, the search will need to be triggered separately - you cannot directly invoke it."
                 )
 
+            self_mod_info = ""
+            if config.enable_self_modification and self.github_modifier:
+                self_mod_info = (
+                    "\n\nYou have active self-modification capabilities. "
+                    "When users ask you to improve yourself, edit your code, or self-modify, "
+                    "the system will automatically trigger your self-improvement pipeline which "
+                    "analyzes your codebase, generates improvements, validates them, and creates "
+                    "a GitHub Pull Request with the changes."
+                )
+
             system_prompt = (
                 "You are a self-improving AI with the ability to analyze and modify your own code.\n"
                 "You have access to long-term memory and a knowledge base, enabling you to learn from past interactions and improve over time.\n"
                 f"Current session: {self.session_id}\n"
                 f"Interaction count: {self.interaction_count}\n"
-                f"{web_search_info}\n"
+                f"{web_search_info}"
+                f"{self_mod_info}\n"
                 "Use the provided context to give a comprehensive, accurate, and helpful response.\n"
                 "Be specific, actionable, and consider lessons learned from previous interactions."
             )
 
             # Create user prompt
-            user_prompt = (
+            user_prompt = ""
+            if history_text:
+                user_prompt += f"Conversation History:\n{history_text}\n\n"
+            user_prompt += (
                 f"Query: {query}\n\n"
                 f"Relevant Context:\n{context_text}\n\n"
                 "Please provide a detailed response that addresses the query while "
-                "incorporating relevant insights from the context."
+                "incorporating relevant insights from the context and conversation history."
             )
 
             # Generate response with fallback
@@ -611,6 +743,27 @@ class SelfImprovingAgent:
             self.logger.error(f"Failed to format context: {e}")
             return "Context formatting error"
 
+    def _format_conversation_history(
+        self, history: Optional[List[Dict[str, Any]]]
+    ) -> str:
+        """Format conversation history for inclusion in prompts."""
+        if not history:
+            return ""
+        try:
+            parts = []
+            for entry in history[-10:]:  # Last 10 turns max
+                q = entry.get("query", "")
+                r = entry.get("response", "")
+                if q:
+                    parts.append(f"User: {q}")
+                if r:
+                    # Truncate long responses to keep prompt manageable
+                    r_truncated = r[:500] + "..." if len(r) > 500 else r
+                    parts.append(f"Assistant: {r_truncated}")
+            return "\n".join(parts)
+        except Exception as e:
+            self.logger.error(f"Failed to format conversation history: {e}")
+            return ""
 
     async def _store_interaction(
         self,
@@ -729,8 +882,8 @@ class SelfImprovingAgent:
 
             # If significant improvement opportunities exist, consider modifications
             if (
-                code_analysis.get("improvement_potential", 0) > 0.7
-                and evaluation_insights.get("recent_average_score", 1.0) < 0.7
+                code_analysis.get("improvement_potential", 0) > 0.3
+                or evaluation_insights.get("recent_average_score", 1.0) < 0.75
             ):
 
                 self.logger.info("Significant improvement potential detected")
@@ -829,34 +982,60 @@ Memory Types:
     ) -> str:
         """Improve response based on evaluation feedback."""
         try:
-            # If the response is already good, return it
-            if evaluation.overall_score >= 0.8:
-                self.logger.info("Response quality is high, no improvement needed")
+            # If the response is already decent, return it
+            if evaluation.overall_score >= 0.6:
+                self.logger.info(f"Response quality is acceptable ({evaluation.overall_score:.2f}), no improvement needed")
                 return initial_response
 
-            # If there are specific improvement suggestions, apply them
-            if getattr(evaluation, "improvement_suggestions", None):
-                self.logger.info("Applying improvement suggestions")
-                improvement_prompt = (
-                    f"Original Query: {query}\n\n"
-                    f"Initial Response: {initial_response}\n\n"
-                    "Evaluation Feedback:\n"
-                    f"- Overall Score: {getattr(evaluation, 'overall_score', 0):.2f}\n"
-                    f"- Weaknesses: {'; '.join(getattr(evaluation, 'weaknesses', []))}\n"
-                    f"- Improvement Suggestions: {'; '.join(getattr(evaluation, 'improvement_suggestions', []))}\n"
-                    "Please provide an improved version of the response that addresses the feedback.\n"
-                    "Focus on fixing the identified weaknesses and implementing the suggestions."
+            # Check if evaluation data is reliable (most criteria should have parsed successfully)
+            failed_criteria = evaluation.metadata.get("failed_criteria", [])
+            criteria_evaluated = evaluation.metadata.get("criteria_evaluated", [])
+            if criteria_evaluated and len(failed_criteria) > len(criteria_evaluated) / 2:
+                self.logger.warning(
+                    f"Skipping improvement: {len(failed_criteria)}/{len(criteria_evaluated)} "
+                    f"evaluations failed — data unreliable"
                 )
+                return initial_response
 
-                improved_response = await llm_manager.generate_response(
-                    prompt=improvement_prompt,
-                    temperature=getattr(config, "temperature", 0.7) * 0.8,
-                    max_tokens=getattr(config, "max_tokens", 2048),
-                )
+            # Only improve if there are specific, actionable improvement suggestions
+            suggestions = getattr(evaluation, "improvement_suggestions", [])
+            weaknesses = getattr(evaluation, "weaknesses", [])
+            if not suggestions and not weaknesses:
+                self.logger.info("No specific improvement suggestions, keeping original response")
+                return initial_response
 
-                return improved_response.strip()
+            self.logger.info("Applying improvement suggestions")
 
-            return initial_response
+            system_prompt = (
+                "You are a self-improving AI assistant. "
+                "You are revising your own response to improve its quality. "
+                "Keep the same tone and style. Do NOT add meta-commentary about the revision process. "
+                "Do NOT output evaluation scores, compliance metrics, or internal analysis. "
+                "Simply output the improved response text, nothing else."
+            )
+
+            improvement_prompt = (
+                f"Original Query: {query}\n\n"
+                f"Initial Response: {initial_response}\n\n"
+                "Evaluation Feedback:\n"
+                f"- Weaknesses: {'; '.join(weaknesses)}\n"
+                f"- Improvement Suggestions: {'; '.join(suggestions)}\n\n"
+                "Provide an improved version of the response that addresses the feedback. "
+                "Output ONLY the improved response — no preamble, no explanation."
+            )
+
+            improved_response = await llm_manager.generate_response(
+                prompt=improvement_prompt,
+                system_prompt=system_prompt,
+                temperature=getattr(config, "temperature", 0.7) * 0.8,
+                max_tokens=getattr(config, "max_tokens", 2048),
+            )
+
+            if not improved_response or not improved_response.strip():
+                self.logger.warning("Improvement returned empty response, keeping original")
+                return initial_response
+
+            return improved_response.strip()
 
         except Exception as e:
             self.logger.error(f"Failed to improve response: {e}")

@@ -20,7 +20,7 @@ async def test_server_startup():
 
         # Test imports
         print("1. Testing imports...")
-        from api_server import app, get_agent
+        from evolving_agent.utils.api_server import app, get_agent
         from evolving_agent.core.agent import SelfImprovingAgent
 
         print("✅ All imports successful")

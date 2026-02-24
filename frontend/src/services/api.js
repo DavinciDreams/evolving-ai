@@ -7,7 +7,6 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000
 const requestQueue = [];
 let isProcessingQueue = false;
 let isOnline = true;
-let retryCount = 0;
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_BASE = 1000; // 1 second
 
@@ -38,7 +37,7 @@ api.interceptors.request.use(
     
     // Check if we're in offline mode
     if (!isOnline) {
-      // Queue the request
+      // Queue the request and keep the Promise pending until the queue is processed
       return new Promise((resolve, reject) => {
         requestQueue.push({
           config,
@@ -47,7 +46,6 @@ api.interceptors.request.use(
           timestamp: Date.now()
         });
         toast('Request queued - offline mode', { icon: '📡' });
-        reject(new Error('Offline mode - request queued'));
       });
     }
     
@@ -61,8 +59,7 @@ api.interceptors.request.use(
 // Response interceptor with enhanced error handling
 api.interceptors.response.use(
   (response) => {
-    // Reset retry count on success
-    retryCount = 0;
+    // Reset online state on success
     isOnline = true;
     
     // Process any queued requests
@@ -78,13 +75,12 @@ api.interceptors.response.use(
     
     // Handle different error types
     if (error.code === 'ECONNABORTED') {
-      // Request timeout
-      handleRetry(config, 'Request timeout');
-      return Promise.reject(error);
+      // Request timeout - retry with backoff
+      return handleRetry(config, 'Request timeout');
     }
-    
-    if (!error.response && !error.request) {
-      // Network error - server is down
+
+    if (!error.response && error.request) {
+      // Request was made but no response received - network error
       isOnline = false;
       toast.error('Network error - server may be unavailable', { icon: '🔌' });
       return Promise.reject(error);
@@ -119,8 +115,7 @@ api.interceptors.response.use(
     
     if (status >= 500 && status < 600) {
       // Server error - retry with exponential backoff
-      handleRetry(config, 'Server error');
-      return Promise.reject(error);
+      return handleRetry(config, 'Server error');
     }
     
     // For other errors, show user-friendly message
@@ -150,13 +145,13 @@ async function handleRetry(config, errorType) {
       icon: '❌',
       duration: 5000
     });
-    return Promise.reject(error);
+    return Promise.reject(new Error(errorType));
   }
-  
+
   // Calculate delay with exponential backoff and jitter
   const delay = RETRY_DELAY_BASE * Math.pow(2, retryAttempt - 1) + Math.random() * 500;
-  
-  toast.info(`Retrying... (${retryAttempt}/${MAX_RETRY_ATTEMPTS})`, {
+
+  toast(`Retrying... (${retryAttempt}/${MAX_RETRY_ATTEMPTS})`, {
     icon: '🔄',
     duration: 2000
   });
@@ -178,7 +173,7 @@ async function processRequestQueue() {
   }
   
   isProcessingQueue = true;
-  toast.info(`Processing ${requestQueue.length} queued requests...`, { icon: '📤' });
+  toast(`Processing ${requestQueue.length} queued requests...`, { icon: '📤' });
   
   const failedRequests = [];
   
@@ -198,7 +193,7 @@ async function processRequestQueue() {
   
   // Notify about results
   if (failedRequests.length > 0) {
-    toast.warning(`${failedRequests.length} requests failed after retry`, { icon: '⚠️' });
+    toast.error(`${failedRequests.length} requests failed after retry`, { icon: '⚠️' });
   }
 }
 
@@ -324,7 +319,7 @@ export const retryQueuedRequests = () => {
   if (requestQueue.length > 0) {
     processRequestQueue();
   } else {
-    toast.info('No queued requests to retry', { icon: 'ℹ️' });
+    toast('No queued requests to retry', { icon: 'ℹ️' });
   }
 };
 

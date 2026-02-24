@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from evolving_agent.self_modification.code_analyzer import CodeAnalyzer
 from evolving_agent.self_modification.validator import CodeValidator
 from evolving_agent.integrations.github_integration import GitHubIntegration
+from evolving_agent.utils.config import config
 from evolving_agent.utils.llm_interface import llm_manager
 from evolving_agent.utils.logging import setup_logger
 
@@ -51,6 +52,85 @@ class GitHubEnabledSelfModifier:
         # State tracking
         self.improvement_history: List[Dict[str, Any]] = []
         self.auto_pr_enabled = True
+        self._is_running = False
+        self._improvement_lock = asyncio.Lock()
+
+    @staticmethod
+    def _extract_code_from_llm_response(response: str) -> str:
+        """Extract Python code from an LLM response that may contain markdown and explanations."""
+        import re
+
+        if not response:
+            return response
+
+        # Try ```python ... ``` blocks first
+        code_blocks = re.findall(r'```python\s*\n(.*?)```', response, re.DOTALL)
+        if code_blocks:
+            return max(code_blocks, key=len).strip()
+
+        # Try generic ``` ... ``` blocks
+        code_blocks = re.findall(r'```\s*\n(.*?)```', response, re.DOTALL)
+        if code_blocks:
+            return max(code_blocks, key=len).strip()
+
+        # Strip leading/trailing markdown fences
+        cleaned = response
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("```", 1)[1]
+            if cleaned.startswith("python"):
+                cleaned = cleaned[len("python"):]
+        if cleaned.endswith("```"):
+            cleaned = cleaned.rsplit("```", 1)[0]
+        cleaned = cleaned.strip()
+
+        # If the response starts with prose (no Python syntax), try to find
+        # where actual code begins by looking for common Python starts
+        if cleaned and not any(
+            cleaned.startswith(kw)
+            for kw in ("import ", "from ", "def ", "class ", "async ", "#", '"""', "'''", "@")
+        ):
+            for marker in ("import ", "from ", "def ", "class ", "async def "):
+                idx = cleaned.find("\n" + marker)
+                if idx != -1:
+                    cleaned = cleaned[idx + 1:]
+                    break
+
+        return cleaned
+
+    async def trigger_self_improvement(self) -> Dict[str, Any]:
+        """
+        Trigger self-improvement from chat context. Returns a summary dict
+        suitable for embedding in a chat response.
+        """
+        if self._is_running:
+            return {"status": "already_running", "message": "A self-improvement cycle is already in progress."}
+
+        async with self._improvement_lock:
+            if self._is_running:
+                return {"status": "already_running", "message": "A self-improvement cycle is already in progress."}
+            self._is_running = True
+
+        try:
+            result = await self.analyze_and_improve_codebase(create_pr=True)
+            summary = result.get("summary", {})
+            github_result = result.get("github_result", {})
+
+            return {
+                "status": "completed",
+                "improvements_generated": summary.get("improvements_generated", 0),
+                "improvements_validated": summary.get("improvements_validated", 0),
+                "pr_created": summary.get("pr_created", False),
+                "issue_created": summary.get("issue_created", False),
+                "pr_url": github_result.get("url"),
+                "pr_number": github_result.get("number"),
+                "issue_number": github_result.get("issue_number"),
+                "improvement_potential": summary.get("improvement_potential", 0),
+            }
+        except Exception as e:
+            logger.error(f"Chat-triggered self-improvement failed: {e}")
+            return {"status": "error", "message": str(e)}
+        finally:
+            self._is_running = False
 
     async def initialize(self) -> bool:
         """
@@ -127,7 +207,7 @@ class GitHubEnabledSelfModifier:
                             validated_improvements, analysis_result
                         )
                         if "error" not in github_result:
-                            logger.info(f"Created improvement PR #{github_result['pr_number']}")
+                            logger.info(f"Created improvement PR #{github_result['number']}")
                         else:
                             logger.error(f"Failed to create PR: {github_result['error']}")
                     else:
@@ -157,7 +237,7 @@ class GitHubEnabledSelfModifier:
             self.improvement_history.append(improvement_record)
 
             # Determine what was created for the response
-            pr_created = "pr_number" in github_result
+            pr_created = "number" in github_result
             issue_created = "issue_number" in github_result
             
             return {
@@ -302,74 +382,6 @@ class GitHubEnabledSelfModifier:
             logger.error(f"Error generating function improvement: {e}")
             return None
     
-    def _refactor_function(self, tree: ast.AST, function_name: str, complexity: int) -> Optional[str]:
-        """
-        Refactor a high-complexity function by breaking it into smaller functions.
-        
-        Args:
-            tree: AST of the file
-            function_name: Name of the function to refactor
-            complexity: Current complexity score
-            
-        Returns:
-            Refactored code or None if refactoring fails
-        """
-        try:
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == function_name:
-                    # Extract function components
-                    func_start = node.lineno
-                    func_end = self._get_function_end_line(tree, node)
-                    
-                    # Generate refactored version
-                    refactored_name = f"{function_name}_refactored"
-                    helper_name = f"{function_name}_helper"
-                    
-                    # Create helper function for complex logic
-                    helper_code = f"""
-    def {helper_name}(self, *args, **kwargs):
-        \"\"\"Helper function extracted from {function_name} to reduce complexity.\"\"\\"\"
-        # Extracted complex logic here
-        return self._process_{function_name}_logic(*args, **kwargs)
-"""
-                    
-                    # Create refactored main function
-                    refactored_code = f"""
-    def {refactored_name}(self, *args, **kwargs):
-        \"\"\"Refactored version of {function_name} with reduced complexity.\"\"\\"\"
-        # Pre-processing
-        preprocessed_args = self._preprocess_{function_name}_args(*args, **kwargs)
-        
-        # Main logic delegated to helper
-        result = {helper_name}(self, *preprocessed_args)
-        
-        # Post-processing
-        return self._postprocess_{function_name}_result(result)
-"""
-                    
-                    return refactored_code
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error refactoring function {function_name}: {e}")
-            return None
-    
-    def _get_function_end_line(self, tree: ast.AST, func_node: ast.FunctionDef) -> int:
-        """Find the end line of a function in the AST."""
-        try:
-            # Simple heuristic: find the next node at the same or lower indentation level
-            func_lines = [node.lineno for node in ast.walk(tree)
-                         if hasattr(node, 'lineno') and node.lineno > func_node.lineno]
-            
-            if func_lines:
-                return min(func_lines) - 1
-            else:
-                return func_node.lineno + 10  # Fallback estimate
-                
-        except Exception:
-            return func_node.lineno + 10
-
     async def _create_simple_refactor(
         self, function_name: str, complexity: float, content: str
     ) -> str:
@@ -417,15 +429,17 @@ Focus on:
                 max_tokens=4000
             )
 
-            # Clean up the response - remove markdown code blocks if present
-            if refactored_code.startswith("```python"):
-                refactored_code = refactored_code.split("```python")[1]
-            if refactored_code.startswith("```"):
-                refactored_code = refactored_code.split("```")[1]
-            if refactored_code.endswith("```"):
-                refactored_code = refactored_code.rsplit("```", 1)[0]
+            if refactored_code:
+                refactored_code = self._extract_code_from_llm_response(refactored_code)
+                # Verify the extracted code is valid Python
+                if refactored_code:
+                    try:
+                        ast.parse(refactored_code)
+                    except SyntaxError:
+                        logger.warning(f"LLM returned non-parseable code for {function_name}, discarding")
+                        return content
 
-            return refactored_code.strip()
+            return refactored_code.strip() if refactored_code else content
 
         except Exception as e:
             logger.error(f"Failed to create simple refactor for {function_name}: {e}")
@@ -654,21 +668,16 @@ Improvement Guidelines:
                 max_tokens=4000
             )
 
-            # Clean up the response - remove markdown code blocks if present
             if refactored_code:
-                if refactored_code.startswith("```python"):
-                    refactored_code = refactored_code.split("```python")[1]
-                if refactored_code.startswith("```"):
-                    refactored_code = refactored_code.split("```")[1]
-                if refactored_code.endswith("```"):
-                    refactored_code = refactored_code.rsplit("```", 1)[0]
-                
-                refactored_code = refactored_code.strip()
-                
-                # Validate that we got meaningful code
+                refactored_code = self._extract_code_from_llm_response(refactored_code)
                 if refactored_code and len(refactored_code) > 50:
+                    try:
+                        ast.parse(refactored_code)
+                    except SyntaxError:
+                        logger.warning("LLM returned non-parseable code for opportunity refactor, discarding")
+                        return None
                     return refactored_code
-            
+
             return None
 
         except Exception as e:
@@ -926,7 +935,7 @@ This pull request was automatically created by the self-improving AI agent to en
                 title=pr_title,
                 body=pr_body,
                 head_branch=branch_name,
-                base_branch="main",
+                base_branch=config.github_branch,
             )
 
             if "error" in pr_result:
@@ -937,19 +946,19 @@ This pull request was automatically created by the self-improving AI agent to en
                 "timestamp": datetime.now().isoformat(),
                 "type": "documentation_improvement",
                 "branch": branch_name,
-                "pr_number": pr_result.get("pr_number"),
-                "pr_url": pr_result.get("pr_url"),
+                "pr_number": pr_result.get("number"),
+                "pr_url": pr_result.get("url"),
                 "files_updated": ["README.md"],
             }
 
             self.improvement_history.append(improvement_record)
 
-            logger.info(f"Successfully created demo PR #{pr_result.get('pr_number')}")
+            logger.info(f"Successfully created demo PR #{pr_result.get('number')}")
 
             return {
                 "success": True,
-                "pr_number": pr_result.get("pr_number"),
-                "pr_url": pr_result.get("pr_url"),
+                "pr_number": pr_result.get("number"),
+                "pr_url": pr_result.get("url"),
                 "branch_name": branch_name,
                 "files_updated": ["README.md"],
             }
@@ -958,7 +967,7 @@ This pull request was automatically created by the self-improving AI agent to en
             logger.error(f"Error creating demo PR: {e}")
             return {"error": str(e)}
 
-    def _generate_improved_readme(self, current_content: str) -> str:
+    def _generate_improved_readme(self, _current_content: str) -> str:
         """Generate an improved README with better structure and content."""
 
         improved_readme = """# 🤖 Self-Improving AI Agent
@@ -1156,7 +1165,11 @@ This project is licensed under the MIT License - see the LICENSE file for detail
                 if improvement.get("has_code_changes") and improvement.get("refactored_code"):
                     file_path = improvement.get("file_path")
                     refactored_code = improvement.get("refactored_code")
-                    
+
+                    if not file_path:
+                        logger.warning("Skipping improvement with no file_path")
+                        continue
+
                     # Update the file with refactored code
                     update_result = await self.github_integration.update_file(
                         file_path=file_path,
@@ -1287,17 +1300,17 @@ This pull request was automatically created by the self-improving AI agent based
                 title=pr_title,
                 body=pr_body,
                 head_branch=branch_name,
-                base_branch="main",
+                base_branch=config.github_branch,
             )
-            
+
             if "error" in pr_result:
                 return {"error": f"Failed to create PR: {pr_result['error']}"}
-            
-            logger.info(f"Successfully created improvement PR #{pr_result.get('pr_number')}")
-            
+
+            logger.info(f"Successfully created improvement PR #{pr_result.get('number')}")
+
             return {
-                "pr_number": pr_result.get("pr_number"),
-                "pr_url": pr_result.get("pr_url"),
+                "number": pr_result.get("number"),
+                "url": pr_result.get("url"),
                 "branch_name": branch_name,
                 "improvements_count": len(improvements),
             }
@@ -1325,34 +1338,55 @@ This pull request was automatically created by the self-improving AI agent based
             # Generate issue title and body
             issue_title = "🤖 AI Agent: Code Improvement Suggestions"
             
-            improvements_summary = self._generate_improvements_summary(improvements, analysis_result)
-            
+            # Build improvement details (avoid nested f-string format specs for Python 3.11)
+            improvement_details = []
+            for i, imp in enumerate(improvements):
+                priority = imp.get('priority', 0)
+                file_target = imp.get('file_path', 'N/A') if imp.get('file_path') else 'Multiple files'
+                improvement_details.append(
+                    f"### {i+1}. {imp.get('description', 'N/A')}\n"
+                    f"- **Priority**: {priority:.2f}\n"
+                    f"- **Category**: {imp.get('category', 'general')}\n"
+                    f"- **Suggested Action**: {imp.get('suggested_action', 'N/A')}\n"
+                    f"- **Target File**: {file_target}\n"
+                )
+
+            opportunities_list = chr(10).join(
+                [f"- {opp.get('description', str(opp)) if isinstance(opp, dict) else str(opp)}"
+                 for opp in analysis_result.get('improvement_opportunities', [])]
+            )
+
+            complexity_funcs = analysis_result.get('codebase_analysis', {}).get(
+                'complexity_metrics', {}
+            ).get('high_complexity_functions', [])[:5]
+            complexity_list = chr(10).join(
+                [f"- **{func.get('function', 'N/A')}** in `{func.get('module', 'N/A')}` (complexity: {func.get('complexity', 'N/A')})"
+                 for func in complexity_funcs]
+            )
+
+            imp_potential = analysis_result.get('improvement_potential', 0)
+            analysis_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
             issue_body = f"""## 🤖 Automated Code Improvement Suggestions
 
 This issue was automatically created by the self-improving AI agent based on codebase analysis.
 
 ### 📊 Analysis Results
-- **Improvement Potential**: {analysis_result.get('improvement_potential', 0):.2f}
+- **Improvement Potential**: {imp_potential:.2f}
 - **Total Improvements Identified**: {len(improvements)}
-- **Analysis Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+- **Analysis Date**: {analysis_date}
 
 ### 🎯 High-Level Opportunities
-{chr(10).join([f"- {opp}" for opp in analysis_result.get('improvement_opportunities', [])])}
+{opportunities_list}
 
 ### 📋 Detailed Improvement Suggestions
 
-{chr(10).join([f"### {i+1}. {imp.get('description', 'N/A')}" + f"""
-- **Priority**: {imp.get('priority', 0):.2f}
-- **Category**: {imp.get('category', 'general')}
-- **Suggested Action**: {imp.get('suggested_action', 'N/A')}
-- **Target File**: {imp.get('file_path', 'N/A') if imp.get('file_path') else 'Multiple files'}
-""" for i, imp in enumerate(improvements)])}
+{chr(10).join(improvement_details)}
 
 ### 🔍 High Complexity Functions Identified
 The following functions have high complexity and may benefit from refactoring:
 
-{chr(10).join([f"- **{func.get('function', 'N/A')}** in `{func.get('module', 'N/A')}` (complexity: {func.get('complexity', 'N/A')})"
-for func in analysis_result.get('codebase_analysis', {}).get('complexity_metrics', {}).get('high_complexity_functions', [])[:5]])}
+{complexity_list}
 
 ### 🛡️ Safety Information
 - All suggestions have been validated for safety
@@ -1383,7 +1417,7 @@ for func in analysis_result.get('codebase_analysis', {}).get('complexity_metrics
             
             return {
                 "issue_number": issue_result.get("issue_number"),
-                "issue_url": issue_result.get("issue_url"),
+                "issue_url": issue_result.get("url"),
                 "improvements_count": len(improvements),
             }
             

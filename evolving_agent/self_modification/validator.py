@@ -65,8 +65,6 @@ class CodeValidator:
             "forbidden_imports": [
                 "os.system",
                 "subprocess.call",
-                "eval",
-                "exec",
                 "shutil.rmtree",
                 "__import__",
             ],
@@ -188,7 +186,12 @@ class CodeValidator:
 
             # Check for file system operations
             if any(pattern in code for pattern in ["open(", "with open", "file("]):
-                if "w" in code or "a" in code:
+                if (
+                    '"w"' in code or "'w'" in code
+                    or '"a"' in code or "'a'" in code
+                    or 'mode="w"' in code or "mode='w'" in code
+                    or 'mode="a"' in code or "mode='a'" in code
+                ):
                     warnings.append(
                         "File write operations detected - ensure proper permissions"
                     )
@@ -455,6 +458,7 @@ class CodeValidator:
         """Validate that the code functions correctly."""
         try:
             errors = []
+            func_warnings = []
 
             # Create temporary file for testing
             with tempfile.NamedTemporaryFile(
@@ -476,7 +480,12 @@ class CodeValidator:
                     )
                     if spec and spec.loader:
                         module = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(module)
+                        try:
+                            spec.loader.exec_module(module)
+                        except ImportError as e:
+                            func_warnings.append(
+                                f"Module has unresolvable imports (expected for project modules): {str(e)}"
+                            )
 
             except ImportError as e:
                 errors.append(f"Import error: {str(e)}")

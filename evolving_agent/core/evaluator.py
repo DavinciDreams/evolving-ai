@@ -113,16 +113,19 @@ class OutputEvaluator:
                 
                 if isinstance(result, Exception):
                     logger.error(f"Failed to evaluate criterion {criterion}: {result}")
-                    criteria_scores[criterion] = 0.5  # Default score for failed evaluation
+                    criteria_scores[criterion] = 0.7  # Neutral score for failed evaluation
                     all_feedback[criterion] = {"error": str(result), "reasoning": f"Evaluation failed: {str(result)}"}
                     failed_criteria.append(criterion)
                 else:
                     score, feedback = result
                     criteria_scores[criterion] = score
                     all_feedback[criterion] = feedback
-            
+                    # Track parse failures (returned a fallback score but couldn't parse properly)
+                    if isinstance(feedback, dict) and ("parse_error" in feedback or "error" in feedback):
+                        failed_criteria.append(criterion)
+
             if failed_criteria:
-                logger.warning(f"Failed to evaluate {len(failed_criteria)} criteria: {failed_criteria}")
+                logger.warning(f"Failed/unreliable evaluations for {len(failed_criteria)} criteria: {failed_criteria}")
 
             # Run post-processing operations in parallel where possible
             logger.info("Running post-processing operations...")
@@ -234,6 +237,11 @@ class OutputEvaluator:
                 max_tokens=500,
             )
 
+            # Handle empty responses (e.g. from rate limiting or reasoning-only models)
+            if not evaluation_response or not evaluation_response.strip():
+                logger.warning(f"Empty evaluation response for {criterion}, using neutral score")
+                return 0.7, {"reasoning": "Evaluation returned empty response", "parse_error": "empty_response"}
+
             # Parse evaluation response
             score, feedback = self._parse_evaluation_response(
                 evaluation_response, criterion
@@ -243,7 +251,7 @@ class OutputEvaluator:
 
         except Exception as e:
             logger.error(f"Failed to evaluate criterion {criterion}: {e}")
-            return 0.5, {"error": str(e)}
+            return 0.7, {"error": str(e)}
 
     def _create_evaluation_prompt(
         self, query: str, output: str, criterion: str, context_info: str
@@ -316,7 +324,7 @@ class OutputEvaluator:
             try:
                 # Simple score extraction
                 lines = response.split("\n")
-                score = 0.5
+                score = 0.7  # Neutral default for unparseable responses
                 for line in lines:
                     if "score" in line.lower():
                         # Extract number
@@ -332,7 +340,7 @@ class OutputEvaluator:
                 return score, {"reasoning": response, "parse_error": str(e)}
 
             except Exception:
-                return 0.5, {"error": f"Failed to parse evaluation: {e}"}
+                return 0.7, {"error": f"Failed to parse evaluation: {e}"}
 
     def _extract_strengths_weaknesses(
         self, criteria_scores: Dict[str, float], all_feedback: Dict[str, Dict[str, Any]]

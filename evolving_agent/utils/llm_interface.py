@@ -394,7 +394,11 @@ class ZAIInterface(LLMInterface):
                 )
                 response.raise_for_status()
                 data = response.json()
-                return data["choices"][0]["message"]["content"]
+                message = data["choices"][0]["message"]
+                # GLM-4.7 may return reasoning in reasoning_content with empty content
+                content = message.get("content") or ""
+                reasoning = message.get("reasoning_content") or ""
+                return content if content else reasoning
         except Exception as e:
             logger.error(f"Z AI API error: {e}")
             raise
@@ -484,7 +488,10 @@ class LLMManager:
             )
 
         # Initialize Anthropic
-        if config.anthropic_api_key:
+        if (
+            config.anthropic_api_key
+            and config.anthropic_api_key != "your_anthropic_api_key_here"
+        ):
             model = (
                 config.default_model
                 if config.default_llm_provider == "anthropic"
@@ -495,7 +502,10 @@ class LLMManager:
             )
 
         # Initialize OpenRouter
-        if config.openrouter_api_key:
+        if (
+            config.openrouter_api_key
+            and config.openrouter_api_key != "your_openrouter_api_key_here"
+        ):
             model = (
                 config.default_model
                 if config.default_llm_provider == "openrouter"
@@ -665,7 +675,23 @@ class LLMManager:
                     **kwargs
                 )
         
-        # Use intelligent provider selection
+        # Use default provider directly if available, avoiding expensive health checks
+        if self.default_provider and self.default_provider in self.interfaces:
+            try:
+                return await self._generate_with_recovery(
+                    self.default_provider,
+                    request_id,
+                    prompt,
+                    system_prompt,
+                    temperature,
+                    max_tokens,
+                    timeout,
+                    **kwargs
+                )
+            except Exception as e:
+                logger.warning(f"Default provider {self.default_provider} failed: {e}, trying alternatives")
+
+        # Fall back to intelligent provider selection
         use_provider = await self.get_best_provider()
         if not use_provider:
             raise RuntimeError("No LLM providers are currently available")
@@ -852,6 +878,10 @@ class LLMManager:
 
         if preferred_provider and preferred_provider in available:
             return preferred_provider
+
+        # Respect the configured default provider if available
+        if self.default_provider and self.default_provider in available:
+            return self.default_provider
 
         # Score providers based on multiple factors
         provider_scores = []

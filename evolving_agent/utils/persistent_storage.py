@@ -85,6 +85,7 @@ class PersistentDataManager:
                 CREATE TABLE IF NOT EXISTS interactions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id TEXT NOT NULL,
+                    conversation_id TEXT,
                     timestamp DATETIME NOT NULL,
                     query TEXT NOT NULL,
                     response TEXT NOT NULL,
@@ -130,6 +131,16 @@ class PersistentDataManager:
             """
             )
 
+            # Migration: Add conversation_id column if it doesn't exist
+            cursor.execute("PRAGMA table_info(interactions)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if 'conversation_id' not in columns:
+                logger.info("Adding conversation_id column to interactions table")
+                cursor.execute(
+                    "ALTER TABLE interactions ADD COLUMN conversation_id TEXT"
+                )
+                conn.commit()
+
             conn.commit()
             conn.close()
 
@@ -158,6 +169,7 @@ class PersistentDataManager:
         evaluation_score: Optional[float] = None,
         context_used: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        conversation_id: Optional[str] = None,
     ) -> int:
         """Save an interaction to the database."""
         try:
@@ -166,12 +178,13 @@ class PersistentDataManager:
 
             cursor.execute(
                 """
-                INSERT INTO interactions 
-                (session_id, timestamp, query, response, evaluation_score, context_used, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO interactions
+                (session_id, conversation_id, timestamp, query, response, evaluation_score, context_used, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     self.session_id,
+                    conversation_id,
                     datetime.now().isoformat(),
                     query,
                     response,
@@ -188,7 +201,7 @@ class PersistentDataManager:
             # Update session stats
             await self._update_session_stats("total_interactions", 1)
 
-            logger.info(f"Saved interaction {interaction_id}")
+            logger.info(f"Saved interaction {interaction_id}" + (f" (conversation: {conversation_id})" if conversation_id else ""))
             return interaction_id
 
         except Exception as e:
@@ -292,8 +305,8 @@ class PersistentDataManager:
 
             cursor.execute(
                 """
-                SELECT * FROM interactions 
-                ORDER BY timestamp DESC 
+                SELECT * FROM interactions
+                ORDER BY timestamp DESC
                 LIMIT ?
             """,
                 (limit,),
@@ -307,6 +320,38 @@ class PersistentDataManager:
 
         except Exception as e:
             logger.error(f"Failed to get recent interactions: {e}")
+            return []
+
+    async def get_conversation_history(
+        self, conversation_id: str, limit: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Get all interactions for a specific conversation."""
+        try:
+            conn = sqlite3.connect(self.interactions_db)
+            cursor = conn.cursor()
+
+            query = """
+                SELECT * FROM interactions
+                WHERE conversation_id = ?
+                ORDER BY timestamp ASC
+            """
+            params = [conversation_id]
+
+            if limit:
+                query += " LIMIT ?"
+                params.append(limit)
+
+            cursor.execute(query, params)
+
+            columns = [desc[0] for desc in cursor.description]
+            interactions = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+            conn.close()
+            logger.info(f"Retrieved {len(interactions)} interactions for conversation {conversation_id}")
+            return interactions
+
+        except Exception as e:
+            logger.error(f"Failed to get conversation history: {e}")
             return []
 
     async def get_session_statistics(self) -> Dict[str, Any]:

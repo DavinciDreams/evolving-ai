@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from evolving_agent.core.agent import SelfImprovingAgent
 from evolving_agent.integrations.discord_integration import DiscordIntegration
 from evolving_agent.utils.config import config
-from evolving_agent.utils.github_enhanced_modifier import GitHubEnabledSelfModifier
+from evolving_agent.self_modification.github_enhanced_modifier import GitHubEnabledSelfModifier
 from evolving_agent.utils.logging import setup_logger
 from evolving_agent.utils.error_recovery import error_recovery_manager
 from evolving_agent.utils.llm_interface import llm_manager
@@ -52,10 +52,12 @@ async def lifespan(app: FastAPI):
 
         if github_token and github_repo:
             logger.info("Initializing GitHub integration...")
+            local_repo_path = os.getenv("GITHUB_LOCAL_REPO_PATH", ".")
             github_modifier = GitHubEnabledSelfModifier(
-                github_token=github_token, repo_name=github_repo, local_repo_path="."
+                github_token=github_token, repo_name=github_repo, local_repo_path=local_repo_path
             )
             await github_modifier.initialize()
+            agent.github_modifier = github_modifier
             logger.info("GitHub integration initialized successfully")
         else:
             logger.warning(
@@ -126,6 +128,9 @@ class QueryRequest(BaseModel):
     )
     context_hints: Optional[List[str]] = Field(
         None, description="Optional context hints to guide the response"
+    )
+    conversation_id: Optional[str] = Field(
+        None, description="Optional conversation ID for tracking multi-turn conversations"
     )
 
     model_config = {
@@ -548,18 +553,19 @@ async def chat_with_agent(
         logger.info(f"Processing query {query_id}: {request.query[:100]}...")
 
         # Process the query
-        response = await current_agent.run(request.query, request.context_hints)
-
-        # Note: The agent's run method returns just the response string
-        # Additional metrics would need to be retrieved separately
+        response = await current_agent.run(
+            request.query,
+            context_hints=request.context_hints,
+            conversation_id=request.conversation_id,
+        )
 
         return QueryResponse(
             response=response,
             query_id=query_id,
             timestamp=timestamp,
-            evaluation_score=None,  # Would need to be retrieved from evaluator
-            memory_stored=True,  # Assuming successful storage
-            knowledge_updated=True,  # Assuming knowledge was processed
+            evaluation_score=current_agent.last_evaluation_score,
+            memory_stored=True,
+            knowledge_updated=True,
         )
 
     except Exception as e:
@@ -652,21 +658,17 @@ async def get_memories(
 
         if search:
             # Search for relevant memories
+            # search_memories returns List[Tuple[MemoryEntry, float]]
             search_results = await current_agent.memory.search_memories(
-                search, top_k=limit + offset
+                query=search, n_results=limit + offset, similarity_threshold=0.0
             )
-            for result in search_results:
-                metadata = result.get("metadata", {})
-                # Get timestamp from metadata or use current time as fallback
-                timestamp_str = metadata.get("timestamp")
-                timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now()
-
+            for entry, similarity in search_results:
                 memories.append(
                     MemoryItem(
-                        id=result.get("id", "unknown"),
-                        content=result.get("content", ""),
-                        timestamp=timestamp,
-                        metadata=metadata,
+                        id=entry.id,
+                        content=entry.content,
+                        timestamp=entry.timestamp,
+                        metadata={**entry.metadata, "memory_type": entry.memory_type, "similarity": similarity},
                     )
                 )
         else:
@@ -893,14 +895,14 @@ async def create_code_improvements(
             raise HTTPException(status_code=500, detail=result["error"])
 
         summary = result.get("summary", {})
-        pr_result = result.get("pr_result", {})
+        github_result = result.get("github_result", {})
 
         return ImprovementResponse(
             improvements_generated=summary.get("improvements_generated", 0),
             improvements_validated=summary.get("improvements_validated", 0),
             pr_created=summary.get("pr_created", False),
-            pr_number=pr_result.get("pr_number"),
-            pr_url=pr_result.get("pr_url"),
+            pr_number=github_result.get("number"),
+            pr_url=github_result.get("url"),
             improvement_potential=summary.get("improvement_potential", 0),
         )
 
@@ -1229,11 +1231,11 @@ async def get_web_search_status(
 
 
 # Health check endpoints with recovery status
-@app.get("/health", tags=["System"])
-async def health_check():
+@app.get("/health/detailed", tags=["System"])
+async def health_check_detailed():
     """
     Comprehensive health check endpoint with recovery status.
-    
+
     Returns overall system health and component status.
     """
     try:
@@ -1427,5 +1429,5 @@ if __name__ == "__main__":
     
     # Run the server
     uvicorn.run(
-        "api_server:app", host="0.0.0.0", port=8000, reload=True, log_level="info"
+        "evolving_agent.utils.api_server:app", host="0.0.0.0", port=8000, reload=True, log_level="info"
     )

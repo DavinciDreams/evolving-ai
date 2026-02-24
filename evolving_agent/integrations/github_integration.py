@@ -477,7 +477,8 @@ class GitHubIntegration:
         commit_message: str,
         branch: str,
         author_name: str = "Self-Improving AI Agent",
-        author_email: str = "agent@example.com"
+        author_email: str = "agent@example.com",
+        retry_on_conflict: bool = True
     ) -> Dict[str, Any]:
         """
         Update a file in the repository.

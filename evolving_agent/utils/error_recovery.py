@@ -38,7 +38,7 @@ class CircuitBreakerConfig:
     failure_threshold: int = 5
     recovery_timeout: float = 60.0
     success_threshold: int = 3
-    timeout: float = 30.0
+    timeout: float = 120.0
 
 @dataclass
 class ErrorMetrics:

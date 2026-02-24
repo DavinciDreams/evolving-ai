@@ -80,6 +80,11 @@ class Config:
         return os.getenv("EVALUATION_MODEL", "claude-3-5-sonnet-20241022")
 
     @property
+    def evaluation_provider(self) -> str:
+        """Get evaluation LLM provider."""
+        return os.getenv("EVALUATION_PROVIDER", "")
+
+    @property
     def temperature(self) -> float:
         """Get temperature setting."""
         return float(os.getenv("TEMPERATURE", "0.7"))
@@ -207,6 +212,11 @@ class Config:
         return os.getenv("DISCORD_STATUS_ON_HIGH_QUALITY", "false").lower() == "true"
 
     @property
+    def github_branch(self) -> str:
+        """Get GitHub target branch."""
+        return os.getenv("GITHUB_BRANCH", "main")
+
+    @property
     def api_server_url(self) -> str:
         """Get API server URL for internal calls."""
         return os.getenv("API_SERVER_URL", "http://localhost:8000")
@@ -252,6 +262,7 @@ class Config:
             "default_llm_provider": self.default_llm_provider,
             "default_model": self.default_model,
             "evaluation_model": self.evaluation_model,
+            "evaluation_provider": self.evaluation_provider,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "enable_self_modification": self.enable_self_modification,
@@ -276,6 +287,7 @@ class Config:
             "discord_status_on_improvement": self.discord_status_on_improvement,
             "discord_status_on_knowledge_update": self.discord_status_on_knowledge_update,
             "discord_status_on_high_quality": self.discord_status_on_high_quality,
+            "github_branch": self.github_branch,
             "api_server_url": self.api_server_url,
             "web_search_enabled": self.web_search_enabled,
             "web_search_default_provider": self.web_search_default_provider,

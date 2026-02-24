@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import asyncio
 import os
 
-from evolving_agent.utils.github_integration import GitHubIntegration
+from evolving_agent.integrations.github_integration import GitHubIntegration
 from evolving_agent.utils.logging import setup_logger
 
 logger = setup_logger(__name__)

@@ -64,3 +64,24 @@ export const formatNumber = (num) => {
   if (typeof num !== 'number') return '0';
   return num.toLocaleString();
 };
+
+/**
+ * Format a duration in seconds to a human-readable string
+ * @param {number} seconds - Duration in seconds
+ * @returns {string} Formatted duration string (e.g. "45s", "1m 30s", "2h 15m")
+ */
+export const formatDuration = (seconds) => {
+  if (typeof seconds !== 'number' || !isFinite(seconds) || seconds < 0) return '0s';
+  const totalSeconds = Math.floor(seconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  if (minutes > 0) {
+    return secs > 0 ? `${minutes}m ${secs}s` : `${minutes}m`;
+  }
+  return `${secs}s`;
+};

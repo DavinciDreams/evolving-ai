@@ -364,11 +364,14 @@ class ContextManager:
                 if datetime.now() - cache_time < self.cache_ttl:
                     return cached_memories[:max_items]
 
-            # Search memories
+            # Search memories — don't filter by memory_type since stored types
+            # (interaction, evaluation, error, etc.) don't match context query
+            # types (similar_tasks, past_solutions, etc.). Vector similarity
+            # search already finds relevant results across all memory types.
             memories = await self.memory.search_memories(
                 query=context_query.query,
                 n_results=max_items * 2,  # Get more for filtering
-                memory_type=context_query.context_type,
+                memory_type=None,
                 similarity_threshold=similarity_threshold,
             )
 
