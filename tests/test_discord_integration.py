@@ -142,7 +142,7 @@ class TestDiscordFormatter:
 
         assert isinstance(embed, discord.Embed)
         assert embed.title == "❌ Error"
-        assert embed.color == DiscordFormatter.COLOR_ERROR
+        assert embed.color.value == DiscordFormatter.COLOR_ERROR
 
     def test_format_rate_limit_message(self):
         """Test formatting rate limit message."""
@@ -165,7 +165,7 @@ class TestDiscordFormatter:
 
         assert isinstance(embed, discord.Embed)
         assert embed.title == "🔧 Self-Improvement Cycle Complete"
-        assert embed.color == DiscordFormatter.COLOR_SUCCESS
+        assert embed.color.value == DiscordFormatter.COLOR_SUCCESS
 
     def test_format_knowledge_update_status(self):
         """Test formatting knowledge update status."""
@@ -179,7 +179,7 @@ class TestDiscordFormatter:
 
         assert isinstance(embed, discord.Embed)
         assert embed.title == "📚 Knowledge Base Updated"
-        assert embed.color == DiscordFormatter.COLOR_INFO
+        assert embed.color.value == DiscordFormatter.COLOR_INFO
 
     def test_get_quality_emoji(self):
         """Test quality emoji selection."""

@@ -1,27 +1,18 @@
-#!/usr/bin/env python3
 """
-Test script for the parallel evaluator implementation.
+Tests for the consolidated evaluator implementation.
 """
 
-import asyncio
-import sys
-import os
-import time
+from unittest.mock import AsyncMock, patch
 
-# Add the project root to the path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import pytest
 
 from evolving_agent.core.evaluator import OutputEvaluator, EvaluationCriteria
 
 
-async def test_parallel_evaluation():
-    """Test that the parallel evaluation works correctly."""
-    print("Testing parallel evaluation implementation...")
-    
-    # Create evaluator instance
+async def test_consolidated_evaluation():
+    """Test that consolidated evaluation scores all criteria in one LLM call."""
     evaluator = OutputEvaluator()
-    
-    # Test data
+
     query = "Write a Python function that calculates the factorial of a number."
     output = """
     def factorial(n):
@@ -31,151 +22,118 @@ async def test_parallel_evaluation():
             return 1
         return n * factorial(n - 1)
     """
-    
+
     context = {
         "language": "python",
         "task_type": "coding",
-        "difficulty": "beginner"
+        "difficulty": "beginner",
     }
-    
-    # Test criteria
+
     criteria = [c.value for c in EvaluationCriteria]
-    
-    print(f"Evaluating with criteria: {criteria}")
-    
-    # Run evaluation
-    start_time = time.time()
-    result = await evaluator.evaluate_output(
-        query=query,
-        output=output,
-        context=context,
-        expected_criteria=criteria
-    )
-    end_time = time.time()
-    
-    # Print results
-    print(f"\nEvaluation completed in {end_time - start_time:.2f} seconds")
-    print(f"Overall score: {result.overall_score:.2f}")
-    print(f"Confidence: {result.confidence:.2f}")
-    
-    print("\nCriteria scores:")
-    for criterion, score in result.criteria_scores.items():
-        print(f"  {criterion}: {score:.2f}")
-    
-    print("\nStrengths:")
-    for strength in result.strengths:
-        print(f"  - {strength}")
-    
-    print("\nWeaknesses:")
-    for weakness in result.weaknesses:
-        print(f"  - {weakness}")
-    
-    print("\nImprovement suggestions:")
-    for suggestion in result.improvement_suggestions:
-        print(f"  - {suggestion}")
-    
-    # Check metadata for parallel execution info
-    metadata = result.metadata
-    print(f"\nMetadata:")
-    print(f"  Parallel execution: {metadata.get('parallel_execution', False)}")
-    print(f"  Evaluation time: {metadata.get('evaluation_time_seconds', 0):.2f} seconds")
-    print(f"  Failed criteria: {metadata.get('failed_criteria', [])}")
-    
-    # Verify all criteria were evaluated
-    expected_criteria = set(criteria)
-    evaluated_criteria = set(result.criteria_scores.keys())
-    
-    if expected_criteria == evaluated_criteria:
-        print("\n✅ All criteria were evaluated successfully")
-    else:
-        missing = expected_criteria - evaluated_criteria
-        print(f"\n❌ Missing criteria evaluation: {missing}")
-        return False
-    
-    # Check scores are in valid range
-    valid_scores = all(0.0 <= score <= 1.0 for score in result.criteria_scores.values())
-    if valid_scores:
-        print("✅ All scores are in valid range [0.0, 1.0]")
-    else:
-        print("❌ Some scores are outside valid range")
-        return False
-    
-    # Check overall score is in valid range
-    if 0.0 <= result.overall_score <= 1.0:
-        print("✅ Overall score is in valid range [0.0, 1.0]")
-    else:
-        print("❌ Overall score is outside valid range")
-        return False
-    
-    print("\n✅ Parallel evaluation test completed successfully!")
-    return True
 
+    mock_response = '{"scores": {"accuracy": 0.9, "completeness": 0.85, "clarity": 0.88, "relevance": 0.92, "creativity": 0.7, "efficiency": 0.8, "safety": 0.95}, "strengths": ["Proper error handling", "Recursive implementation"], "weaknesses": [], "suggestions": ["Add docstring"]}'
 
-async def test_error_handling():
-    """Test error handling in parallel evaluation."""
-    print("\nTesting error handling...")
-    
-    evaluator = OutputEvaluator()
-    
-    # Test with invalid criteria (should trigger error handling)
-    query = "Simple test query"
-    output = "Simple test output"
-    
-    # Include a mix of valid and invalid criteria
-    mixed_criteria = ["accuracy", "invalid_criterion", "clarity"]
-    
-    try:
+    with patch('evolving_agent.core.evaluator.llm_manager.generate_response', new_callable=AsyncMock) as mock_gen:
+        mock_gen.return_value = mock_response
+
         result = await evaluator.evaluate_output(
             query=query,
             output=output,
-            expected_criteria=mixed_criteria
+            context=context,
+            expected_criteria=criteria,
         )
-        
-        # Check that valid criteria were evaluated
-        valid_criteria = {"accuracy", "clarity"}
-        evaluated_criteria = set(result.criteria_scores.keys())
-        
-        if valid_criteria.issubset(evaluated_criteria):
-            print("✅ Valid criteria were evaluated despite invalid ones")
-        else:
-            print("❌ Valid criteria were not evaluated properly")
-            return False
-        
-        # Check that failed criteria are tracked
-        failed_criteria = result.metadata.get('failed_criteria', [])
-        if 'invalid_criterion' in failed_criteria:
-            print("✅ Invalid criterion properly tracked as failed")
-        else:
-            print("❌ Invalid criterion not tracked as failed")
-            return False
-        
-        print("✅ Error handling test passed!")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Error handling test failed with exception: {e}")
-        return False
+
+        # Should make exactly 1 LLM call (consolidated)
+        assert mock_gen.call_count == 1
+
+    # Verify all criteria were evaluated
+    assert set(result.criteria_scores.keys()) == set(criteria)
+
+    # All scores in valid range
+    for score in result.criteria_scores.values():
+        assert 0.0 <= score <= 1.0
+
+    # Overall score in valid range
+    assert 0.0 <= result.overall_score <= 1.0
+
+    # Metadata should indicate consolidated evaluation
+    assert result.metadata.get("consolidated_evaluation") is True
 
 
-async def main():
-    """Run all tests."""
-    print("Starting parallel evaluator tests...")
-    
-    # Test basic parallel evaluation
-    test1_passed = await test_parallel_evaluation()
-    
-    # Test error handling
-    test2_passed = await test_error_handling()
-    
-    # Overall result
-    if test1_passed and test2_passed:
-        print("\n🎉 All tests passed! Parallel evaluator is working correctly.")
-        return 0
-    else:
-        print("\n❌ Some tests failed. Please check the implementation.")
-        return 1
+async def test_evaluation_with_invalid_criteria():
+    """Test that evaluation handles a mix of valid/invalid criteria gracefully."""
+    evaluator = OutputEvaluator()
+
+    query = "Simple test query"
+    output = "Simple test output"
+    mixed_criteria = ["accuracy", "invalid_criterion", "clarity"]
+
+    # The consolidated call will ask the LLM to score all criteria including the invalid one.
+    # The LLM might return a score for it, or not. Either way, fallback defaults to 0.7.
+    mock_response = '{"scores": {"accuracy": 0.8, "clarity": 0.75, "invalid_criterion": 0.6}, "strengths": ["OK"], "weaknesses": [], "suggestions": []}'
+
+    with patch('evolving_agent.core.evaluator.llm_manager.generate_response', new_callable=AsyncMock) as mock_gen:
+        mock_gen.return_value = mock_response
+
+        result = await evaluator.evaluate_output(
+            query=query,
+            output=output,
+            expected_criteria=mixed_criteria,
+        )
+
+    # All requested criteria should have scores
+    assert "accuracy" in result.criteria_scores
+    assert "clarity" in result.criteria_scores
+    assert "invalid_criterion" in result.criteria_scores
+
+    # Scores in valid range
+    for score in result.criteria_scores.values():
+        assert 0.0 <= score <= 1.0
 
 
-if __name__ == "__main__":
-    exit_code = asyncio.run(main())
-    sys.exit(exit_code)
+async def test_evaluation_llm_failure_fallback():
+    """Test that evaluation falls back to defaults when LLM fails entirely."""
+    evaluator = OutputEvaluator()
+
+    criteria = [c.value for c in EvaluationCriteria]
+
+    with patch('evolving_agent.core.evaluator.llm_manager.generate_response', new_callable=AsyncMock) as mock_gen:
+        mock_gen.side_effect = Exception("LLM unavailable")
+
+        result = await evaluator.evaluate_output(
+            query="Test",
+            output="Test output",
+            expected_criteria=criteria,
+        )
+
+    # Should get default scores (0.7 for all criteria)
+    assert set(result.criteria_scores.keys()) == set(criteria)
+    for score in result.criteria_scores.values():
+        assert score == pytest.approx(0.7, abs=0.01)
+
+    # All criteria should be marked as failed
+    assert len(result.metadata.get("failed_criteria", [])) == len(criteria)
+
+
+async def test_evaluation_malformed_json_fallback():
+    """Test fallback parsing when LLM returns non-JSON."""
+    evaluator = OutputEvaluator()
+
+    criteria = ["accuracy", "clarity"]
+
+    mock_response = 'Here are my scores:\n"accuracy": 0.85\n"clarity": 0.9\nOverall good response.'
+
+    with patch('evolving_agent.core.evaluator.llm_manager.generate_response', new_callable=AsyncMock) as mock_gen:
+        mock_gen.return_value = mock_response
+
+        result = await evaluator.evaluate_output(
+            query="Test",
+            output="Test output",
+            expected_criteria=criteria,
+        )
+
+    # Fallback parser should extract scores via regex
+    assert "accuracy" in result.criteria_scores
+    assert "clarity" in result.criteria_scores
+    assert 0.0 <= result.criteria_scores["accuracy"] <= 1.0
+    assert 0.0 <= result.criteria_scores["clarity"] <= 1.0

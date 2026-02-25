@@ -1,83 +1,168 @@
 """
-Test script for web search integration.
-
-This script demonstrates the web search capabilities of the agent.
+Tests for web search integration.
 """
 
-import asyncio
-import os
-import sys
+from unittest.mock import AsyncMock, patch, MagicMock
 
-from dotenv import load_dotenv
+import pytest
 
 from evolving_agent.integrations.web_search import WebSearchIntegration
-from evolving_agent.utils.logging import setup_logger
-
-# Load environment variables
-load_dotenv()
-
-logger = setup_logger(__name__)
 
 
-async def test_web_search():
-    """Test web search integration."""
-    try:
-        logger.info("Initializing web search integration...")
+async def test_web_search_initialization():
+    """Test web search initialization."""
+    ws = WebSearchIntegration(
+        tavily_api_key="test-key",
+        default_provider="duckduckgo",
+        max_results=3,
+    )
 
-        # Initialize web search
-        web_search = WebSearchIntegration(
-            tavily_api_key=os.getenv("TAVILY_API_KEY"),
-            serpapi_key=os.getenv("SERPAPI_KEY"),
-            default_provider=os.getenv("WEB_SEARCH_DEFAULT_PROVIDER", "duckduckgo"),
-            max_results=int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5")),
-        )
+    await ws.initialize()
 
-        await web_search.initialize()
-        logger.info("Web search initialized successfully")
-
-        # Test queries
-        test_queries = [
-            "Latest developments in AI 2025",
-            "Python best practices",
-            "Self-improving AI systems",
-        ]
-
-        for query in test_queries:
-            logger.info(f"\n{'='*80}")
-            logger.info(f"Testing query: {query}")
-            logger.info(f"{'='*80}\n")
-
-            # Search the web
-            results = await web_search.search_and_summarize(query, max_results=3)
-
-            # Display results
-            print(f"\nQuery: {results.get('query')}")
-            print(f"Provider: {results.get('provider')}")
-            print(f"Timestamp: {results.get('timestamp')}")
-            print(f"\nSources ({len(results.get('sources', []))}):")
-
-            for i, source in enumerate(results.get("sources", []), 1):
-                print(f"\n{i}. {source.get('title', 'No title')}")
-                print(f"   URL: {source.get('url', 'No URL')}")
-                print(f"   Snippet: {source.get('snippet', 'No snippet')[:200]}...")
-
-            print("\n" + "="*80 + "\n")
-
-        # Clean up
-        await web_search.close()
-        logger.info("Web search test completed successfully")
-
-    except Exception as e:
-        logger.error(f"Web search test failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+    assert ws.tavily_api_key == "test-key"
+    assert ws.default_provider == "duckduckgo"
+    assert ws.max_results == 3
 
 
-if __name__ == "__main__":
-    print("Web Search Integration Test")
-    print("="*80)
-    print("\nThis script tests the web search capabilities of the agent.")
-    print("It will perform several test searches using the configured provider.\n")
+async def test_web_search_cache():
+    """Test that search results are cached."""
+    ws = WebSearchIntegration(default_provider="duckduckgo", max_results=3)
 
-    asyncio.run(test_web_search())
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json.return_value = {
+        "AbstractText": "Python is a programming language",
+        "Heading": "Python",
+        "AbstractURL": "https://python.org",
+        "RelatedTopics": [],
+    }
+
+    with patch.object(ws.http_client, 'get', new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_response
+
+        # First call - should hit the API
+        result1 = await ws.search("Python programming", include_content=False)
+        assert mock_get.call_count >= 1
+
+        first_count = mock_get.call_count
+
+        # Second call - should return cached results
+        result2 = await ws.search("Python programming", include_content=False)
+        assert mock_get.call_count == first_count  # No additional API calls
+
+    assert result1["query"] == "Python programming"
+    assert result2["query"] == "Python programming"
+
+    await ws.close()
+
+
+async def test_web_search_tavily():
+    """Test Tavily search provider."""
+    ws = WebSearchIntegration(
+        tavily_api_key="test-key",
+        default_provider="tavily",
+        max_results=3,
+    )
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json.return_value = {
+        "results": [
+            {
+                "title": "Test Result",
+                "url": "https://example.com",
+                "content": "Test content about AI",
+                "score": 0.95,
+            }
+        ],
+        "answer": "AI is a broad field.",
+    }
+
+    with patch.object(ws.http_client, 'post', new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+
+        result = await ws.search("AI developments", include_content=False)
+
+    assert result["provider"] == "tavily"
+    assert len(result["results"]) == 1
+    assert result["results"][0]["title"] == "Test Result"
+    assert result["results"][0]["source"] == "tavily"
+
+    await ws.close()
+
+
+async def test_web_search_fallback():
+    """Test that search falls back to DuckDuckGo when primary provider fails."""
+    ws = WebSearchIntegration(
+        tavily_api_key="bad-key",
+        default_provider="tavily",
+        max_results=3,
+    )
+
+    # Tavily fails
+    mock_tavily_response = MagicMock()
+    mock_tavily_response.raise_for_status.side_effect = Exception("401 Unauthorized")
+
+    # DuckDuckGo succeeds
+    mock_ddg_response = MagicMock()
+    mock_ddg_response.status_code = 200
+    mock_ddg_response.raise_for_status = MagicMock()
+    mock_ddg_response.json.return_value = {
+        "AbstractText": "Fallback result",
+        "Heading": "Fallback",
+        "AbstractURL": "https://example.com",
+        "RelatedTopics": [],
+    }
+
+    with patch.object(ws.http_client, 'post', new_callable=AsyncMock) as mock_post, \
+         patch.object(ws.http_client, 'get', new_callable=AsyncMock) as mock_get:
+        mock_post.return_value = mock_tavily_response
+        mock_get.return_value = mock_ddg_response
+
+        result = await ws.search("test query", include_content=False)
+
+    assert result["provider"] == "duckduckgo"
+    assert len(result["results"]) > 0
+
+    await ws.close()
+
+
+async def test_search_and_summarize():
+    """Test search_and_summarize method."""
+    ws = WebSearchIntegration(default_provider="duckduckgo", max_results=3)
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json.return_value = {
+        "AbstractText": "Python best practices include writing clean code.",
+        "Heading": "Python Best Practices",
+        "AbstractURL": "https://python.org/practices",
+        "RelatedTopics": [
+            {"Text": "Use type hints for better code quality", "FirstURL": "https://example.com/1"},
+            {"Text": "Write unit tests for all functions", "FirstURL": "https://example.com/2"},
+        ],
+    }
+
+    with patch.object(ws.http_client, 'get', new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_response
+
+        result = await ws.search_and_summarize("Python best practices", max_results=3)
+
+    assert result["query"] == "Python best practices"
+    assert len(result["sources"]) > 0
+
+    await ws.close()
+
+
+async def test_clear_cache():
+    """Test cache clearing."""
+    ws = WebSearchIntegration()
+    ws._cache = {"key1": {"timestamp": 0, "results": {}}}
+
+    ws.clear_cache()
+    assert len(ws._cache) == 0
+
+    await ws.close()

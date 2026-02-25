@@ -1,58 +1,54 @@
-#!/usr/bin/env python3
 """
 Test the LLM fallback system.
 """
 
-import os
-import sys
+from unittest.mock import AsyncMock, patch
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-import asyncio
-import os
-import sys
-
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-import pytest
-
-from evolving_agent.utils.config import config
-from evolving_agent.utils.llm_interface import llm_manager
+from evolving_agent.utils.llm_interface import LLMManager
 
 
-@pytest.mark.asyncio
-async def test_fallback_system():
-    """Test the intelligent fallback system."""
-    print("=== Testing LLM Fallback System ===")
+async def test_fallback_system_initialization():
+    """Test that the fallback system initializes with available providers."""
+    manager = LLMManager()
+    manager._ensure_initialized()
 
-    # Force config refresh
-    # config._load_config()  # Not needed
-    llm_manager.refresh_interfaces()
-
-    print(f"Current default provider: {config.default_llm_provider}")
-    print(f"Available interfaces: {list(llm_manager.interfaces.keys())}")
-
-    # Check provider availability
-    print("\n🔍 Checking provider availability...")
-    available_providers = await llm_manager.get_available_providers()
-    print(f"Available providers: {available_providers}")
-
-    # Test fallback response generation
-    print("\n🤖 Testing response generation with fallback...")
-    test_message = "What is 2+2? Please respond with just the number."
-
-    response, error = await llm_manager.generate_response_with_fallback(
-        message=test_message, preferred_provider=config.default_llm_provider
-    )
-
-    if response:
-        print(f"✅ Success! Response: {response}")
-    else:
-        print(f"❌ Failed: {error}")
-
-    # Show provider status
-    print("\n📊 Provider Status Details:")
-    llm_manager._log_provider_status()
+    assert isinstance(manager.interfaces, dict)
+    assert manager.default_provider is not None
 
 
-if __name__ == "__main__":
-    asyncio.run(test_fallback_system())
+async def test_get_available_providers():
+    """Test checking provider availability."""
+    manager = LLMManager()
+
+    # Mock all providers as available
+    for name, interface in manager.interfaces.items():
+        interface.generate_response = AsyncMock(return_value="OK")
+
+    available = await manager.get_available_providers()
+    assert isinstance(available, list)
+
+
+async def test_fallback_on_provider_failure():
+    """Test that the manager tries alternative providers when default fails."""
+    manager = LLMManager()
+
+    if len(manager.interfaces) < 2:
+        import pytest
+        pytest.skip("Need at least 2 providers to test fallback")
+
+    providers = list(manager.interfaces.keys())
+    primary = providers[0]
+    secondary = providers[1]
+
+    # Mock primary to fail, secondary to succeed
+    with patch.object(
+        manager.interfaces[primary], 'generate_response',
+        new_callable=AsyncMock, side_effect=Exception("Primary failed")
+    ), patch.object(
+        manager.interfaces[secondary], 'generate_response',
+        new_callable=AsyncMock, return_value="Fallback response"
+    ):
+        response = await manager.generate_response(
+            prompt="test", provider=primary
+        )
+        assert response == "Fallback response"
