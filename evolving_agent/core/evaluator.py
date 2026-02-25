@@ -147,17 +147,17 @@ class OutputEvaluator:
             criteria_list = ", ".join(criteria)
             scores_template = ", ".join(f'"{c}": 0.0' for c in criteria)
 
-            prompt = (
-                f"Evaluate this response on a 0.0-1.0 scale for each criterion.\n\n"
-                f"QUERY: {query}\n\n"
-                f"RESPONSE: {output[:2000]}\n\n"
-                f"Score each: {criteria_list}\n\n"
-                f"Reply with ONLY this JSON, no other text:\n"
-                f'{{"scores": {{{scores_template}}}, '
-                f'"strengths": ["strength1"], '
-                f'"weaknesses": ["weakness1"], '
-                f'"suggestions": ["suggestion1"]}}'
-            )
+            prompt = f"""\
+Evaluate this response on a 0.0-1.0 scale for each criterion.
+
+QUERY: {query}
+
+RESPONSE: {output[:2000]}
+
+Score each: {criteria_list}
+
+Reply with ONLY this JSON, no other text:
+{{"scores": {{{scores_template}}}, "strengths": ["strength1"], "weaknesses": ["weakness1"], "suggestions": ["suggestion1"]}}"""
 
             response = await llm_manager.generate_response(
                 prompt=prompt,

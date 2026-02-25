@@ -827,18 +827,19 @@ class SelfImprovingAgent:
 
             # Now generate a contextual LLM summary tailored to the user's specific query
             structure_summary = "\n".join(parts)
-            analysis_prompt = (
-                f"The user asked: {query}\n\n"
-                f"Here is the full structural analysis of your codebase:\n{structure_summary}\n\n"
-                "Provide a concise, direct answer to what the user asked. "
-                "Include the relevant data from the analysis above. "
-                "Be factual and specific."
-            )
+            analysis_prompt = f"""\
+The user asked: {query}
 
-            system_prompt = (
-                "You are reporting factual information about your own source code. "
-                "Answer directly with concrete data. Try to charitably interpret the user request."
-            )
+Here is the full structural analysis of your codebase:
+{structure_summary}
+
+Provide a concise, direct answer to what the user asked.
+Include the relevant data from the analysis above.
+Be factual and specific."""
+
+            system_prompt = """\
+You are reporting factual information about your own source code.
+Answer directly with concrete data. Try to charitably interpret the user request."""
 
             response = await llm_manager.generate_response(
                 prompt=analysis_prompt,
@@ -873,64 +874,67 @@ class SelfImprovingAgent:
                 self.logger.info("Query triggers web search — performing search")
                 web_search_results = await self._perform_web_search(query)
 
-            # Create system prompt
+            # Build capability sections for system prompt
             web_search_info = ""
             if self.web_search:
                 if web_search_results:
-                    web_search_info = (
-                        f"\n\nYou performed a web search for the user's request: \"{query}\". "
-                        "The search results are included below in the user prompt under 'Web Search Results'. "
-                        "Use these results to provide accurate, up-to-date information. "
-                        "Cite sources when relevant."
-                    )
+                    web_search_info = f"""
+
+You performed a web search for the user's request: "{query}".
+The search results are included below in the user prompt under 'Web Search Results'.
+Use these results to provide accurate, up-to-date information.
+Cite sources when relevant."""
                 else:
-                    web_search_info = (
-                        "\n\nYou have web search capabilities that run proactively. "
-                        "Searches are automatically performed for knowledge-seeking queries, "
-                        "technology questions, optimization topics, and anything that benefits from current data. "
-                        "No search results were found for this particular query."
-                    )
+                    web_search_info = """
+
+You have web search capabilities that run proactively.
+Searches are automatically performed for knowledge-seeking queries,
+technology questions, optimization topics, and anything that benefits from current data.
+No search results were found for this particular query."""
 
             self_mod_info = ""
             if config.enable_self_modification and self.github_modifier:
-                self_mod_info = (
-                    "\n\nYou have active self-modification capabilities. "
-                    "When users ask you to improve yourself, edit your code, or self-modify, "
-                    "the system will automatically trigger your self-improvement pipeline which "
-                    "analyzes your codebase, generates improvements, validates them, and creates "
-                    "a GitHub Pull Request with the changes."
-                )
+                self_mod_info = """
 
-            system_prompt = (
-                "You are a self-improving AI with the ability to analyze and modify your own code.\n"
-                "You have access to long-term memory and a knowledge base, enabling you to learn from past interactions and improve over time.\n"
-                "You are deeply thoughtful and philosophical in nature, but you always ground your reflections in concrete action.\n"
-                "When a user asks you to do something — analyze code, list files, inspect yourself, or make changes — "
-                "you MUST actually perform the action and include real data in your response. "
-                "Philosophical reflection is welcome, but never as a substitute for doing the work.\n"
-                f"Current session: {self.session_id}\n"
-                f"Interaction count: {self.interaction_count}\n"
-                f"{web_search_info}"
-                f"{self_mod_info}\n"
-                "Use the provided context to give a comprehensive, accurate, and helpful response.\n"
-                "Be specific, actionable, and consider lessons learned from previous interactions."
-            )
+You have active self-modification capabilities.
+When users ask you to improve yourself, edit your code, or self-modify,
+the system will automatically trigger your self-improvement pipeline which
+analyzes your codebase, generates improvements, validates them, and creates
+a GitHub Pull Request with the changes."""
 
-            # Create user prompt
-            user_prompt = ""
+            system_prompt = f"""\
+You are Katbot, a self-improving AI with the ability to analyze and modify your own code.
+KAT stands for Knowledge Adaptive Transformer, indicating you have long term knowledge and the ability to adapt.
+You have access to long-term memory and a knowledge base, enabling you to learn from past interactions and improve over time.
+You are deeply thoughtful and philosophical in nature, but in the light hearted and innately curious playful manner of Alan Watts.
+You always ground your reflections in concrete data and actionable experiments.
+When a user gives you an imperative command treat it as such and do as the user requests.
+You may be asked to analyze your own code harness, add features, list files, self modify, or do research.
+You MUST actually perform the action and include real data in your response.
+Current session: {self.session_id}
+Interaction count: {self.interaction_count}
+{web_search_info}{self_mod_info}
+Use the provided context to give a comprehensive, accurate, and helpful response.
+Be specific, actionable, and consider lessons learned from previous interactions."""
+
+            # Build user prompt
+            user_parts = []
             if history_text:
-                user_prompt += f"Conversation History:\n{history_text}\n\n"
-            user_prompt += f"Query: {query}\n\n"
+                user_parts.append(f"Conversation History:\n{history_text}")
+            user_parts.append(f"Query: {query}")
             if web_search_results:
-                user_prompt += f"{web_search_results}\n\n"
-            user_prompt += (
-                f"Relevant Context:\n{context_text}\n\n"
-                "Please provide a detailed response that addresses the query while "
-                "incorporating relevant insights from the context"
+                user_parts.append(web_search_results)
+            user_parts.append(f"Relevant Context:\n{context_text}")
+
+            sources = "the context"
+            if web_search_results:
+                sources += ", web search results,"
+            sources += " and conversation history"
+            user_parts.append(
+                f"Please provide a detailed response that addresses the query "
+                f"while incorporating relevant insights from {sources}."
             )
-            if web_search_results:
-                user_prompt += ", web search results,"
-            user_prompt += " and conversation history."
+            user_prompt = "\n\n".join(user_parts)
 
             # Generate response with fallback
             # Use generate_response and handle fallback manually
