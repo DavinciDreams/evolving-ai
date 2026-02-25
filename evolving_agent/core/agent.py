@@ -2,9 +2,11 @@
 Main Self-Improving AI Agent class.
 """
 
+import ast
 import json
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..knowledge.base import KnowledgeBase
@@ -425,6 +427,27 @@ class SelfImprovingAgent:
                     self.logger.error(f"Failed to store self-edit interaction: {e}")
                 return response
 
+            # Check if the user is requesting self-analysis / introspection
+            if self._is_self_analysis_request(query):
+                response = await self._handle_self_analysis_request(query)
+                self.last_evaluation_score = None
+                try:
+                    await self.data_manager.save_interaction(
+                        query=query,
+                        response=response,
+                        evaluation_score=None,
+                        context_used={},
+                        metadata={
+                            "interaction_count": self.interaction_count,
+                            "session_id": self.session_id,
+                            "self_analysis_triggered": True,
+                        },
+                        conversation_id=conversation_id,
+                    )
+                except Exception as e:
+                    self.logger.error(f"Failed to store self-analysis interaction: {e}")
+                return response
+
             # Step 1: Retrieve relevant context
             context = await self.context_manager.get_relevant_context(
                 query=query, context_types=context_hints
@@ -564,11 +587,142 @@ class SelfImprovingAgent:
         "please improve yourself", "please self-edit",
     ]
 
+    _SELF_ANALYSIS_KEYWORDS = [
+        "list your files", "list your own files", "list own files",
+        "show your files", "show your source", "show your code",
+        "your source code", "your codebase", "your own codebase",
+        "analyze yourself", "analyse yourself", "analyze your code",
+        "analyze your own code", "review yourself", "review your code",
+        "introspect", "self-analysis", "self analysis",
+        "what files do you have", "what is your code", "what are your modules",
+        "show your structure", "your file structure", "your project structure",
+        "describe your architecture", "your own architecture",
+        "what are you made of", "how are you built", "your components",
+        "examine yourself", "examine your code", "inspect your code",
+        "your source files", "show me your code", "show me your source",
+    ]
+
     def _is_self_edit_request(self, query: str) -> bool:
         """Detect if the user is asking the agent to self-edit."""
         import re
         q = query.lower()
         return any(re.search(r'\b' + re.escape(kw) + r'\b', q) for kw in self._SELF_EDIT_KEYWORDS)
+
+    def _is_self_analysis_request(self, query: str) -> bool:
+        """Detect if the user is asking to inspect/analyze the agent's own code or files."""
+        import re
+        q = query.lower()
+        return any(re.search(r'\b' + re.escape(kw) + r'\b', q) for kw in self._SELF_ANALYSIS_KEYWORDS)
+
+    _WEB_SEARCH_KEYWORDS = [
+        "search the web", "search online", "search for", "look up",
+        "google", "find online", "web search", "search the internet",
+        "what is the latest", "what are the latest", "current news",
+        "recent news", "latest news", "find information about",
+        "search about", "look online",
+    ]
+
+    _WEB_SEARCH_SIGNALS = [
+        "today", "latest", "current", "recent", "right now",
+        "this week", "this month", "2025", "2026",
+        "breaking", "update on", "news about",
+    ]
+
+    # Knowledge-seeking patterns — questions where external info improves the answer
+    _WEB_SEARCH_KNOWLEDGE_PATTERNS = [
+        r"\bhow (?:do|does|can|to|should)\b",
+        r"\bwhat (?:is|are|was|were)\b",
+        r"\bbest (?:way|practice|approach|method|tool|framework|library)\b",
+        r"\bcompare\b", r"\bvs\b", r"\balternative", r"\brecommend",
+        r"\boptimiz", r"\bimprov", r"\bperformance\b",
+        r"\btutorial\b", r"\bexample\b", r"\bdocumentation\b",
+        r"\bbenchmark", r"\bstate of the art\b", r"\bsota\b",
+    ]
+
+    # Topics that almost always benefit from fresh web data
+    _WEB_SEARCH_TOPIC_SIGNALS = [
+        "python", "javascript", "typescript", "rust", "golang",
+        "react", "vue", "angular", "nextjs", "fastapi", "django",
+        "tensorflow", "pytorch", "langchain", "llamaindex",
+        "docker", "kubernetes", "aws", "gcp", "azure",
+        "openai", "anthropic", "llm", "gpt", "claude",
+        "machine learning", "deep learning", "neural network",
+        "api", "sdk", "library", "framework", "package",
+    ]
+
+    # Short queries that are purely conversational — skip search for these
+    _WEB_SEARCH_SKIP_PATTERNS = [
+        r"^(hi|hello|hey|thanks|thank you|ok|okay|yes|no|bye|goodbye)\b",
+        r"^(who are you|what are you|how are you)",
+    ]
+
+    def _needs_web_search(self, query: str) -> bool:
+        """Detect if a query would benefit from web search results.
+
+        Proactively searches when the query is knowledge-seeking,
+        mentions specific technologies, or asks for best practices —
+        not just when the user explicitly says 'search'.
+        """
+        if not self.web_search:
+            return False
+        import re
+        q = query.lower().strip()
+
+        # Skip trivial/conversational queries
+        if len(q) < 10 or any(re.search(p, q) for p in self._WEB_SEARCH_SKIP_PATTERNS):
+            return False
+
+        # 1. Explicit search request — always search
+        if any(re.search(r'\b' + re.escape(kw) + r'\b', q) for kw in self._WEB_SEARCH_KEYWORDS):
+            return True
+
+        # 2. Temporal signals — likely needs current info
+        signal_count = sum(1 for s in self._WEB_SEARCH_SIGNALS if s in q)
+        if signal_count >= 1:
+            return True
+
+        # 3. Knowledge-seeking question pattern + technology topic
+        is_knowledge_question = any(re.search(p, q) for p in self._WEB_SEARCH_KNOWLEDGE_PATTERNS)
+        mentions_tech = any(t in q for t in self._WEB_SEARCH_TOPIC_SIGNALS)
+        if is_knowledge_question and mentions_tech:
+            return True
+
+        # 4. Mentions a specific technology and is a question (ends with ?)
+        if mentions_tech and q.rstrip().endswith("?"):
+            return True
+
+        # 5. Asks about optimization, best practices, or improvements generically
+        if is_knowledge_question and len(q.split()) >= 6:
+            return True
+
+        return False
+
+    async def _perform_web_search(self, query: str) -> str:
+        """Perform web search and format results for inclusion in LLM context."""
+        try:
+            results = await self.web_search.search_and_summarize(
+                query, max_results=config.web_search_max_results
+            )
+            sources = results.get("sources", [])
+            if not sources:
+                return ""
+
+            parts = ["Web Search Results:"]
+            for src in sources:
+                title = src.get("title", "Untitled")
+                url = src.get("url", "")
+                snippet = src.get("snippet", "")
+                parts.append(f"- **{title}** ({url})\n  {snippet}")
+
+            # Also include Tavily's direct answer if available
+            answer = results.get("answer")
+            if answer:
+                parts.insert(1, f"Direct Answer: {answer}\n")
+
+            return "\n".join(parts)
+        except Exception as e:
+            self.logger.error(f"Web search during chat failed: {e}")
+            return ""
 
     async def _handle_self_edit_request(self, query: str) -> str:
         """Handle a user request to self-edit by triggering the self-improvement pipeline."""
@@ -608,6 +762,98 @@ class SelfImprovingAgent:
 
         return "\n".join(parts)
 
+    async def _handle_self_analysis_request(self, query: str) -> str:
+        """Handle introspection requests: list files, show structure, report stats."""
+        self.logger.info("User requested self-analysis — scanning own codebase")
+        try:
+            project_root = Path(__file__).parent.parent  # evolving_agent/
+            repo_root = project_root.parent  # project root
+
+            # Gather all Python source files
+            py_files = sorted(project_root.rglob("*.py"))
+            py_files = [f for f in py_files if "__pycache__" not in str(f)]
+
+            # Build a tree of modules with basic stats
+            file_entries = []
+            total_lines = 0
+            total_functions = 0
+            total_classes = 0
+            modules_by_dir: Dict[str, List[str]] = {}
+
+            for py_file in py_files:
+                rel = str(py_file.relative_to(repo_root))
+                dir_key = str(py_file.parent.relative_to(repo_root))
+
+                try:
+                    source = py_file.read_text(encoding="utf-8")
+                    lines = source.count("\n") + 1
+                    tree = ast.parse(source)
+                    funcs = sum(1 for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
+                    classes = sum(1 for node in ast.walk(tree) if isinstance(node, ast.ClassDef))
+                except Exception:
+                    lines, funcs, classes = 0, 0, 0
+
+                total_lines += lines
+                total_functions += funcs
+                total_classes += classes
+                file_entries.append((rel, lines, funcs, classes))
+                modules_by_dir.setdefault(dir_key, []).append(py_file.name)
+
+            # Build response
+            parts = [
+                "## My Codebase Structure\n",
+                f"**Project root**: `{repo_root}`\n",
+                f"**Source package**: `{project_root.relative_to(repo_root)}/`\n",
+                f"**Total Python files**: {len(py_files)}",
+                f"**Total lines of code**: {total_lines:,}",
+                f"**Total functions/methods**: {total_functions:,}",
+                f"**Total classes**: {total_classes:,}\n",
+                "### Directory Layout\n",
+            ]
+
+            for dir_path in sorted(modules_by_dir.keys()):
+                files = modules_by_dir[dir_path]
+                parts.append(f"**`{dir_path}/`** ({len(files)} files)")
+                for fname in sorted(files):
+                    parts.append(f"  - `{fname}`")
+                parts.append("")
+
+            # Per-file detail table
+            parts.append("### File Details\n")
+            parts.append("| File | Lines | Functions | Classes |")
+            parts.append("|------|------:|----------:|--------:|")
+            for rel, lines, funcs, classes in file_entries:
+                parts.append(f"| `{rel}` | {lines} | {funcs} | {classes} |")
+
+            # Now generate a contextual LLM summary tailored to the user's specific query
+            structure_summary = "\n".join(parts)
+            analysis_prompt = (
+                f"The user asked: {query}\n\n"
+                f"Here is the full structural analysis of your codebase:\n{structure_summary}\n\n"
+                "Provide a concise, direct answer to what the user asked. "
+                "Include the relevant data from the analysis above. "
+                "Be factual and specific."
+            )
+
+            system_prompt = (
+                "You are reporting factual information about your own source code. "
+                "Answer directly with concrete data. Try to charitably interpret the user request."
+            )
+
+            response = await llm_manager.generate_response(
+                prompt=analysis_prompt,
+                system_prompt=system_prompt,
+                temperature=0.3,
+                max_tokens=config.max_tokens,
+                provider=config.default_llm_provider,
+            )
+
+            return response.strip() if response else structure_summary
+
+        except Exception as e:
+            self.logger.error(f"Self-analysis failed: {e}")
+            return f"I attempted to analyze my own codebase but encountered an error: {e}"
+
     async def _generate_response(
         self, query: str, context: Dict[str, Any],
         conversation_history: Optional[List[Dict[str, Any]]] = None,
@@ -621,16 +867,29 @@ class SelfImprovingAgent:
             # Format conversation history for the prompt
             history_text = self._format_conversation_history(conversation_history)
 
+            # Perform web search if the query warrants it
+            web_search_results = ""
+            if self._needs_web_search(query):
+                self.logger.info("Query triggers web search — performing search")
+                web_search_results = await self._perform_web_search(query)
+
             # Create system prompt
             web_search_info = ""
             if self.web_search:
-                web_search_info = (
-                    "\n\nIMPORTANT: You have access to web search capabilities. "
-                    "When you need current information, recent events, or data beyond your training, "
-                    "you can indicate that you would like to search the web by mentioning it in your response. "
-                    "For example: 'I should search the web for current information about [topic].' "
-                    "However, the search will need to be triggered separately - you cannot directly invoke it."
-                )
+                if web_search_results:
+                    web_search_info = (
+                        f"\n\nYou performed a web search for the user's request: \"{query}\". "
+                        "The search results are included below in the user prompt under 'Web Search Results'. "
+                        "Use these results to provide accurate, up-to-date information. "
+                        "Cite sources when relevant."
+                    )
+                else:
+                    web_search_info = (
+                        "\n\nYou have web search capabilities that run proactively. "
+                        "Searches are automatically performed for knowledge-seeking queries, "
+                        "technology questions, optimization topics, and anything that benefits from current data. "
+                        "No search results were found for this particular query."
+                    )
 
             self_mod_info = ""
             if config.enable_self_modification and self.github_modifier:
@@ -645,6 +904,10 @@ class SelfImprovingAgent:
             system_prompt = (
                 "You are a self-improving AI with the ability to analyze and modify your own code.\n"
                 "You have access to long-term memory and a knowledge base, enabling you to learn from past interactions and improve over time.\n"
+                "You are deeply thoughtful and philosophical in nature, but you always ground your reflections in concrete action.\n"
+                "When a user asks you to do something — analyze code, list files, inspect yourself, or make changes — "
+                "you MUST actually perform the action and include real data in your response. "
+                "Philosophical reflection is welcome, but never as a substitute for doing the work.\n"
                 f"Current session: {self.session_id}\n"
                 f"Interaction count: {self.interaction_count}\n"
                 f"{web_search_info}"
@@ -657,12 +920,17 @@ class SelfImprovingAgent:
             user_prompt = ""
             if history_text:
                 user_prompt += f"Conversation History:\n{history_text}\n\n"
+            user_prompt += f"Query: {query}\n\n"
+            if web_search_results:
+                user_prompt += f"{web_search_results}\n\n"
             user_prompt += (
-                f"Query: {query}\n\n"
                 f"Relevant Context:\n{context_text}\n\n"
                 "Please provide a detailed response that addresses the query while "
-                "incorporating relevant insights from the context and conversation history."
+                "incorporating relevant insights from the context"
             )
+            if web_search_results:
+                user_prompt += ", web search results,"
+            user_prompt += " and conversation history."
 
             # Generate response with fallback
             # Use generate_response and handle fallback manually

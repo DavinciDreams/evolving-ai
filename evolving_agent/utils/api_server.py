@@ -391,6 +391,116 @@ class CreateIssueResponse(BaseModel):
     issue_url: str = Field(..., description="GitHub issue URL")
 
 
+# --- OpenAI-compatible models ---
+
+
+class ChatCompletionMessage(BaseModel):
+    """A single message in the OpenAI chat completions format."""
+
+    role: str = Field(
+        ...,
+        description="The role of the message author (system, user, assistant)",
+    )
+    content: str = Field(
+        ...,
+        description="The content of the message",
+    )
+    name: Optional[str] = Field(
+        None,
+        description="Optional name of the message author",
+    )
+
+
+class ChatCompletionRequest(BaseModel):
+    """OpenAI-compatible chat completion request."""
+
+    model: str = Field(
+        "evolving-ai",
+        description="Model identifier (informational; the agent uses its configured provider)",
+    )
+    messages: List[ChatCompletionMessage] = Field(
+        ...,
+        description="List of messages in the conversation",
+        min_length=1,
+    )
+    temperature: Optional[float] = Field(
+        None,
+        description="Sampling temperature (0.0-2.0)",
+        ge=0.0,
+        le=2.0,
+    )
+    max_tokens: Optional[int] = Field(
+        None,
+        description="Maximum tokens in the response",
+        ge=1,
+    )
+    stream: Optional[bool] = Field(
+        False,
+        description="Streaming is not supported; must be false or omitted",
+    )
+    n: Optional[int] = Field(
+        1,
+        description="Number of completions (only 1 supported)",
+    )
+    stop: Optional[List[str]] = Field(
+        None,
+        description="Stop sequences (accepted for compatibility)",
+    )
+    user: Optional[str] = Field(
+        None,
+        description="End-user identifier for tracking",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "model": "evolving-ai",
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "What are best practices for code optimization?"},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 2048,
+            }
+        }
+    }
+
+
+class ChatCompletionChoice(BaseModel):
+    """A single completion choice."""
+
+    index: int = Field(0, description="Choice index")
+    message: ChatCompletionMessage = Field(
+        ..., description="The assistant's response message"
+    )
+    finish_reason: str = Field(
+        "stop", description="The reason the model stopped generating"
+    )
+
+
+class ChatCompletionUsage(BaseModel):
+    """Token usage information."""
+
+    prompt_tokens: int = Field(0, description="Tokens in the prompt")
+    completion_tokens: int = Field(0, description="Tokens in the completion")
+    total_tokens: int = Field(0, description="Total tokens used")
+
+
+class ChatCompletionResponse(BaseModel):
+    """OpenAI-compatible chat completion response."""
+
+    id: str = Field(..., description="Unique completion identifier")
+    object: str = Field("chat.completion", description="Object type")
+    created: int = Field(..., description="Unix timestamp of creation")
+    model: str = Field(..., description="Model identifier used")
+    choices: List[ChatCompletionChoice] = Field(
+        ..., description="Completion choices"
+    )
+    usage: ChatCompletionUsage = Field(
+        ..., description="Token usage statistics"
+    )
+
+
 # FastAPI app initialization
 app = FastAPI(
     title="Self-Improving AI Agent API",
@@ -408,6 +518,7 @@ app = FastAPI(
     * **Multi-LLM Support**: OpenAI, Anthropic, and OpenRouter integration
     * **GitHub Integration**: Automated code improvements via pull requests
     * **Discord Integration**: Real-time chat bot interface
+    * **OpenAI Compatible**: Drop-in `/v1/chat/completions` endpoint for standard tooling
 
     ## Getting Started
 
@@ -571,6 +682,144 @@ async def chat_with_agent(
     except Exception as e:
         logger.error(f"Error processing query: {e}")
         raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
+
+
+def _estimate_token_count(text: str) -> int:
+    """Estimate token count for usage reporting."""
+    try:
+        import tiktoken
+
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text))
+    except Exception:
+        return max(1, len(text) // 4)
+
+
+@app.post(
+    "/v1/chat/completions",
+    response_model=ChatCompletionResponse,
+    tags=["OpenAI Compatible"],
+    summary="OpenAI-compatible chat completions",
+)
+async def openai_chat_completions(
+    request: ChatCompletionRequest,
+    background_tasks: BackgroundTasks,
+    current_agent: SelfImprovingAgent = Depends(get_agent),
+):
+    """
+    OpenAI-compatible chat completions endpoint (non-streaming).
+
+    Accepts the standard OpenAI ChatCompletion request format and returns
+    a compatible response. The agent uses its configured LLM provider
+    regardless of the `model` field value.
+    """
+    try:
+        if request.stream:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "message": "Streaming is not supported. Set stream to false or omit it.",
+                        "type": "invalid_request_error",
+                        "param": "stream",
+                        "code": None,
+                    }
+                },
+            )
+
+        # Extract system messages as context hints
+        system_messages = [
+            msg.content for msg in request.messages if msg.role == "system"
+        ]
+        context_hints = system_messages if system_messages else None
+
+        # Extract the last user message as the query
+        user_messages = [msg for msg in request.messages if msg.role == "user"]
+        if not user_messages:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "message": "At least one message with role 'user' is required.",
+                        "type": "invalid_request_error",
+                        "param": "messages",
+                        "code": None,
+                    }
+                },
+            )
+
+        query = user_messages[-1].content
+        completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
+        conversation_id = completion_id
+        created_timestamp = int(datetime.now().timestamp())
+
+        logger.info(f"OpenAI-compat request {completion_id}: {query[:100]}...")
+
+        response_text = await current_agent.run(
+            query,
+            context_hints=context_hints,
+            conversation_id=conversation_id,
+        )
+
+        # Estimate token usage
+        prompt_text = " ".join(msg.content for msg in request.messages)
+        prompt_tokens = _estimate_token_count(prompt_text)
+        completion_tokens = _estimate_token_count(response_text)
+
+        return ChatCompletionResponse(
+            id=completion_id,
+            object="chat.completion",
+            created=created_timestamp,
+            model=request.model,
+            choices=[
+                ChatCompletionChoice(
+                    index=0,
+                    message=ChatCompletionMessage(
+                        role="assistant",
+                        content=response_text,
+                    ),
+                    finish_reason="stop",
+                )
+            ],
+            usage=ChatCompletionUsage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=prompt_tokens + completion_tokens,
+            ),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in OpenAI-compat completions: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": {
+                    "message": str(e),
+                    "type": "internal_error",
+                    "param": None,
+                    "code": None,
+                }
+            },
+        )
+
+
+@app.get("/v1/models", tags=["OpenAI Compatible"], summary="List available models")
+async def list_models():
+    """List available models (OpenAI-compatible)."""
+    model_id = f"{config.default_llm_provider}/{config.default_model}"
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": model_id,
+                "object": "model",
+                "created": 0,
+                "owned_by": "evolving-ai",
+            }
+        ],
+    }
 
 
 @app.post("/analyze", response_model=AnalysisResponse, tags=["Self-Improvement"])

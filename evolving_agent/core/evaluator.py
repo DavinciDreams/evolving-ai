@@ -71,93 +71,36 @@ class OutputEvaluator:
         custom_weights: Optional[Dict[str, float]] = None,
     ) -> EvaluationResult:
         """
-        Evaluate an output against multiple criteria in parallel.
+        Evaluate an output with a single consolidated LLM call.
 
-        Args:
-            query: The original query/task
-            output: The generated output to evaluate
-            context: Context used for generation
-            expected_criteria: Specific criteria to focus on
-            custom_weights: Custom weights for criteria
-
-        Returns:
-            EvaluationResult with scores and suggestions
+        Uses one prompt that scores all criteria at once, instead of
+        7 separate LLM calls. Falls back gracefully if parsing fails.
         """
         try:
-            logger.info("Starting parallel evaluation of output...")
+            logger.info("Starting consolidated evaluation of output...")
             start_time = datetime.now()
 
-            # Use custom weights if provided
             weights = custom_weights or self.criteria_weights
             criteria_to_evaluate = expected_criteria or list(weights.keys())
-            
-            logger.info(f"Evaluating {len(criteria_to_evaluate)} criteria in parallel: {criteria_to_evaluate}")
 
-            # Create parallel evaluation tasks for all criteria
-            evaluation_tasks = [
-                self._evaluate_criterion_with_error_handling(query, output, criterion, context)
-                for criterion in criteria_to_evaluate
-            ]
-
-            # Execute all criterion evaluations in parallel
-            logger.info("Executing criterion evaluations in parallel...")
-            criterion_results = await asyncio.gather(*evaluation_tasks, return_exceptions=True)
-            
-            # Process results and handle any exceptions
-            criteria_scores = {}
-            all_feedback = {}
-            failed_criteria = []
-            
-            for i, result in enumerate(criterion_results):
-                criterion = criteria_to_evaluate[i]
-                
-                if isinstance(result, Exception):
-                    logger.error(f"Failed to evaluate criterion {criterion}: {result}")
-                    criteria_scores[criterion] = 0.7  # Neutral score for failed evaluation
-                    all_feedback[criterion] = {"error": str(result), "reasoning": f"Evaluation failed: {str(result)}"}
-                    failed_criteria.append(criterion)
-                else:
-                    score, feedback = result
-                    criteria_scores[criterion] = score
-                    all_feedback[criterion] = feedback
-                    # Track parse failures (returned a fallback score but couldn't parse properly)
-                    if isinstance(feedback, dict) and ("parse_error" in feedback or "error" in feedback):
-                        failed_criteria.append(criterion)
+            # Single consolidated evaluation call
+            criteria_scores, all_feedback, failed_criteria = await self._evaluate_all_criteria(
+                query, output, criteria_to_evaluate, context
+            )
 
             if failed_criteria:
                 logger.warning(f"Failed/unreliable evaluations for {len(failed_criteria)} criteria: {failed_criteria}")
 
-            # Run post-processing operations in parallel where possible
-            logger.info("Running post-processing operations...")
-            post_processing_start = datetime.now()
-            
-            # Create parallel post-processing tasks
-            overall_score_task = asyncio.create_task(
-                asyncio.to_thread(self._calculate_overall_score, criteria_scores, weights)
-            )
-            
-            strengths_weaknesses_task = asyncio.create_task(
-                asyncio.to_thread(self._extract_strengths_weaknesses, criteria_scores, all_feedback)
-            )
-            
-            confidence_task = asyncio.create_task(
-                asyncio.to_thread(self._calculate_confidence, criteria_scores)
-            )
-            
-            # Wait for parallel post-processing to complete
-            overall_score, (strengths, weaknesses), confidence = await asyncio.gather(
-                overall_score_task,
-                strengths_weaknesses_task,
-                confidence_task
-            )
-            
-            # Generate improvement suggestions (this needs to be async as it calls LLM)
-            improvement_suggestions = await self._generate_improvement_suggestions(
-                query, output, criteria_scores, all_feedback
-            )
-            
-            post_processing_time = (datetime.now() - post_processing_start).total_seconds()
-            logger.info(f"Post-processing completed in {post_processing_time:.2f} seconds")
+            overall_score = self._calculate_overall_score(criteria_scores, weights)
+            strengths, weaknesses = self._extract_strengths_weaknesses(criteria_scores, all_feedback)
+            confidence = self._calculate_confidence(criteria_scores)
+
+            # Extract suggestions from the consolidated response instead of a separate LLM call
+            improvement_suggestions = []
+            for feedback in all_feedback.values():
+                if isinstance(feedback, dict):
+                    improvement_suggestions.extend(feedback.get("suggestions", []))
+            improvement_suggestions = improvement_suggestions[:5]
 
             evaluation_result = EvaluationResult(
                 overall_score=overall_score,
@@ -177,21 +120,135 @@ class OutputEvaluator:
                     "weights_used": weights,
                     "context_available": context is not None,
                     "evaluation_time_seconds": (datetime.now() - start_time).total_seconds(),
-                    "parallel_execution": True,
+                    "consolidated_evaluation": True,
                     "failed_criteria": failed_criteria,
                 },
             )
 
-            # Store evaluation history
             self.evaluation_history.append((query, output, evaluation_result))
 
             total_time = (datetime.now() - start_time).total_seconds()
-            logger.info(f"Parallel evaluation completed in {total_time:.2f} seconds. Overall score: {overall_score:.2f}")
+            logger.info(f"Consolidated evaluation completed in {total_time:.2f} seconds. Overall score: {overall_score:.2f}")
             return evaluation_result
 
         except Exception as e:
             logger.error(f"Failed to evaluate output: {e}")
             raise
+
+    async def _evaluate_all_criteria(
+        self,
+        query: str,
+        output: str,
+        criteria: List[str],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]], List[str]]:
+        """Evaluate all criteria in a single LLM call."""
+        try:
+            criteria_list = ", ".join(criteria)
+            scores_template = ", ".join(f'"{c}": 0.0' for c in criteria)
+
+            prompt = (
+                f"Evaluate this response on a 0.0-1.0 scale for each criterion.\n\n"
+                f"QUERY: {query}\n\n"
+                f"RESPONSE: {output[:2000]}\n\n"
+                f"Score each: {criteria_list}\n\n"
+                f"Reply with ONLY this JSON, no other text:\n"
+                f'{{"scores": {{{scores_template}}}, '
+                f'"strengths": ["strength1"], '
+                f'"weaknesses": ["weakness1"], '
+                f'"suggestions": ["suggestion1"]}}'
+            )
+
+            response = await llm_manager.generate_response(
+                prompt=prompt,
+                provider=config.evaluation_provider or config.default_llm_provider,
+                temperature=0.2,
+                max_tokens=600,
+            )
+
+            if not response or not response.strip():
+                logger.warning("Empty consolidated evaluation response, using defaults")
+                return self._default_evaluation(criteria)
+
+            return self._parse_consolidated_response(response, criteria)
+
+        except Exception as e:
+            logger.error(f"Consolidated evaluation failed: {e}")
+            return self._default_evaluation(criteria)
+
+    def _parse_consolidated_response(
+        self, response: str, criteria: List[str]
+    ) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]], List[str]]:
+        """Parse the consolidated evaluation response."""
+        try:
+            response = response.strip()
+            # Extract JSON from response
+            start = response.find("{")
+            end = response.rfind("}") + 1
+            if start >= 0 and end > start:
+                response = response[start:end]
+
+            data = json.loads(response)
+
+            # Extract scores
+            scores_data = data.get("scores", data)  # Handle both nested and flat formats
+            criteria_scores = {}
+            for c in criteria:
+                score = scores_data.get(c, 0.7)
+                criteria_scores[c] = max(0.0, min(1.0, float(score)))
+
+            # Build feedback dict
+            strengths = data.get("strengths", [])
+            weaknesses = data.get("weaknesses", [])
+            suggestions = data.get("suggestions", [])
+
+            all_feedback = {}
+            for c in criteria:
+                all_feedback[c] = {
+                    "reasoning": f"Score: {criteria_scores[c]:.2f}",
+                    "strengths": strengths if criteria_scores[c] >= 0.8 else [],
+                    "specific_issues": weaknesses if criteria_scores[c] <= 0.4 else [],
+                    "suggestions": suggestions,
+                }
+
+            return criteria_scores, all_feedback, []
+
+        except Exception as e:
+            logger.warning(f"Failed to parse consolidated evaluation: {e}")
+            # Try line-by-line score extraction as fallback
+            return self._fallback_parse(response, criteria)
+
+    def _fallback_parse(
+        self, response: str, criteria: List[str]
+    ) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]], List[str]]:
+        """Fallback parser that extracts scores from non-JSON responses."""
+        import re
+        criteria_scores = {}
+        all_feedback = {}
+        failed = []
+
+        for c in criteria:
+            pattern = rf'"{c}"?\s*[:=]\s*(\d+\.?\d*)'
+            match = re.search(pattern, response, re.IGNORECASE)
+            if match:
+                score = float(match.group(1))
+                if score > 1.0:
+                    score = score / 10.0
+                criteria_scores[c] = max(0.0, min(1.0, score))
+            else:
+                criteria_scores[c] = 0.7
+                failed.append(c)
+            all_feedback[c] = {"reasoning": "Parsed from fallback", "strengths": [], "specific_issues": [], "suggestions": []}
+
+        return criteria_scores, all_feedback, failed
+
+    def _default_evaluation(
+        self, criteria: List[str]
+    ) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]], List[str]]:
+        """Return default neutral evaluation when LLM call fails entirely."""
+        criteria_scores = {c: 0.7 for c in criteria}
+        all_feedback = {c: {"reasoning": "Default score (evaluation unavailable)", "strengths": [], "specific_issues": [], "suggestions": []} for c in criteria}
+        return criteria_scores, all_feedback, list(criteria)
 
     async def _evaluate_criterion_with_error_handling(
         self,

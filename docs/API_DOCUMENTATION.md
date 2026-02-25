@@ -123,6 +123,54 @@ Trigger the agent's code analysis and get improvement recommendations.
 #### `GET /analysis-history` - Analysis History
 Retrieve the history of code analyses performed by the agent.
 
+### OpenAI-Compatible Endpoints
+
+#### `POST /v1/chat/completions` - Chat Completions
+Drop-in replacement for the OpenAI ChatCompletion API. Allows standard OpenAI tooling (SDKs, libraries, UIs) to use the agent as a backend.
+
+**Request Body:**
+```json
+{
+  "model": "evolving-ai",
+  "messages": [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "How can I optimize my Python code?"}
+  ],
+  "temperature": 0.7,
+  "max_tokens": 2048
+}
+```
+
+**Response:**
+```json
+{
+  "id": "chatcmpl-abc123",
+  "object": "chat.completion",
+  "created": 1709000000,
+  "model": "evolving-ai",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Here are several approaches to optimize your Python code..."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 25,
+    "completion_tokens": 150,
+    "total_tokens": 175
+  }
+}
+```
+
+> **Note:** The `model` field is accepted but ignored — the agent always uses its configured LLM provider. Streaming is not currently supported.
+
+#### `GET /v1/models` - List Models
+Returns available models in OpenAI-compatible format.
+
 ### Memory & Knowledge Endpoints
 
 #### `GET /memories` - Retrieve Memories

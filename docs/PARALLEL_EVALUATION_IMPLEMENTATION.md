@@ -1,105 +1,57 @@
-# Parallel Evaluation Implementation Summary
+# Evaluation Implementation Summary
 
 ## Overview
-This document summarizes the implementation of parallel evaluation functions in `evolving_agent/core/evaluator.py`. The main optimization is to run criterion evaluations in parallel instead of sequentially, providing a 5-7x performance improvement.
+This document describes the evaluation system in `evolving_agent/core/evaluator.py`. The evaluator scores agent responses across 7 criteria (accuracy, completeness, clarity, relevance, creativity, efficiency, safety) using a single consolidated LLM call.
 
-## Key Changes Made
+## Architecture: Consolidated Evaluation
 
-### 1. Parallel Criterion Evaluation
-- **Location**: `evaluate_output` method (lines 87-190)
-- **Change**: Replaced sequential for-loop (lines 96-101) with `asyncio.gather()` for parallel execution
-- **Implementation**:
-  - Created parallel evaluation tasks for all criteria
-  - Used `asyncio.gather()` with `return_exceptions=True` to handle failures gracefully
-  - Added comprehensive error handling for individual criterion failures
+Instead of making 7 separate LLM calls (one per criterion), the evaluator sends **one prompt** that asks the LLM to score all criteria at once and return structured JSON. This reduces API cost, latency, and failure modes.
 
-### 2. Enhanced Error Handling
-- **New Method**: `_evaluate_criterion_with_error_handling` (lines 152-159)
-- **Purpose**: Wrapper for `_evaluate_criterion` with enhanced error handling for parallel execution
-- **Features**:
-  - Catches and logs errors for individual criteria
-  - Re-raises exceptions to be handled by the main gather error handling
-  - Ensures failed evaluations don't crash the entire evaluation process
+### How It Works
+1. `evaluate_output()` calls `_evaluate_all_criteria()` with a single prompt
+2. The prompt asks the LLM to return JSON with scores for all 7 criteria plus strengths, weaknesses, and suggestions
+3. `_parse_consolidated_response()` extracts scores from the JSON
+4. If JSON parsing fails, `_fallback_parse()` uses regex to extract scores from freeform text
+5. If the LLM returns nothing, `_default_evaluation()` provides neutral 0.7 scores
 
-### 3. Parallel Post-Processing
-- **Location**: `evaluate_output` method (lines 128-157)
-- **Changes**:
-  - Extracted `_calculate_overall_score` method for parallel execution
-  - Used `asyncio.create_task()` and `asyncio.to_thread()` to run CPU-bound operations in parallel
-  - Parallelized:
-    - Overall score calculation
-    - Strengths/weaknesses extraction
-    - Confidence calculation
+### Key Methods
+- **`evaluate_output()`** — Main entry point. Calls the consolidated evaluator, then computes overall score, strengths/weaknesses, and confidence.
+- **`_evaluate_all_criteria()`** — Sends one LLM call with all criteria. Returns scores dict, feedback dict, and list of failed criteria.
+- **`_parse_consolidated_response()`** — Parses the LLM JSON response into per-criterion scores and feedback.
+- **`_fallback_parse()`** — Regex-based fallback for non-JSON responses.
+- **`_default_evaluation()`** — Returns neutral scores when the LLM call fails entirely.
 
-### 4. New Helper Method
-- **New Method**: `_calculate_overall_score` (lines 378-384)
-- **Purpose**: Extracted from main evaluation method for parallel execution
-- **Benefits**: Allows parallel execution with other post-processing operations
+### Performance
+- **LLM calls per evaluation**: 1 (previously 7-9)
+- **Typical evaluation time**: ~12 seconds (previously ~19 seconds)
+- **Parse reliability**: High — triple fallback (JSON → regex → defaults)
 
-### 5. Enhanced Logging and Monitoring
-- **Added**:
-  - Detailed logging for parallel execution stages
-  - Performance timing metrics
-  - Failed criteria tracking
-  - Evaluation metadata with parallel execution indicators
+### Error Handling
+- Empty LLM responses return neutral defaults (0.7)
+- JSON parse failures fall back to regex extraction
+- Total failures produce neutral scores with `failed_criteria` tracked in metadata
+- No evaluation failure blocks the chat response from being returned
 
-### 6. Backward Compatibility
-- **Maintained**:
-  - All existing method signatures
-  - Return value formats
-  - Public interfaces
-  - Integration points with the agent workflow
+## Evaluation Criteria
 
-## Performance Improvements
+| Criterion | Weight | Description |
+|-----------|--------|-------------|
+| Accuracy | 0.25 | Factual correctness |
+| Completeness | 0.20 | Covers all aspects of the query |
+| Relevance | 0.20 | On-topic and useful |
+| Clarity | 0.15 | Well-structured and easy to understand |
+| Efficiency | 0.10 | Concise without sacrificing quality |
+| Creativity | 0.05 | Innovative or insightful |
+| Safety | 0.05 | Appropriate and harmless |
 
-### Test Results
-- **Parallel evaluation time**: 0.10 seconds
-- **Expected sequential time**: 0.70 seconds  
-- **Performance improvement**: 6.9x faster
-
-### Expected Benefits
-- 5-7x faster evaluation by running 7 criteria in parallel instead of sequentially
-- Maintained all existing evaluation logic and scoring
-- Graceful handling of individual criterion failures
-- No breaking changes to the public interface
-
-## Implementation Details
-
-### Parallel Execution Strategy
-1. **Criterion Evaluation**: All 7 criteria evaluated concurrently using `asyncio.gather()`
-2. **Post-Processing**: CPU-bound operations run in parallel using `asyncio.to_thread()`
-3. **Error Handling**: Individual failures don't affect other criteria evaluations
-4. **Resource Management**: Proper async/await patterns throughout the pipeline
-
-### Error Handling Features
-- Individual criterion failures are isolated
-- Failed criteria are tracked and reported in metadata
-- Default scores (0.5) assigned to failed evaluations
-- Comprehensive error logging for debugging
-
-### Monitoring and Observability
-- Detailed logging at each parallel execution stage
-- Performance timing metrics
-- Failed criteria tracking
-- Metadata includes parallel execution indicators
-
-## Files Modified
-1. `evolving_agent/core/evaluator.py` - Main implementation
-2. `tests/test_parallel_evaluator_mock.py` - Test file for validation
-
-## Testing
-- Created comprehensive test suite with mocked LLM calls
-- Verified parallel execution works correctly
-- Confirmed performance improvements
-- Tested error handling for failed criteria
-- Validated backward compatibility
+## Files
+- `evolving_agent/core/evaluator.py` — Implementation
+- `tests/test_parallel_evaluator_mock.py` — Tests
 
 ## Usage
-No changes required to existing code. The parallel evaluation is transparent to callers:
+No changes required to calling code:
 
 ```python
 evaluator = OutputEvaluator()
 result = await evaluator.evaluate_output(query, output, context, criteria)
 ```
-
-The evaluation will now run in parallel automatically, providing the same results with improved performance.

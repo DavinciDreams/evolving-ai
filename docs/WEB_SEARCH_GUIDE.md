@@ -111,7 +111,28 @@ Check web search configuration and available providers.
 
 ## 💡 Using Web Search in Your Agent
 
-The agent can now search the web programmatically:
+### Proactive Search in Chat
+
+Web search is **automatically triggered** during chat when the agent detects that a query would benefit from current information. No explicit "search for" phrasing is needed.
+
+**Queries that trigger automatic search:**
+- Explicit requests: "search for X", "look up Y", "google Z"
+- Temporal queries: anything mentioning "latest", "current", "recent", "2025", "2026"
+- Knowledge questions about tech: "how to optimize pytorch training?"
+- Technology comparisons: "is langchain better than llamaindex?"
+- Best practice questions: "what is the best approach for caching API responses?"
+- Any question (6+ words) that matches knowledge-seeking patterns
+
+**Queries that skip search:**
+- Conversational: "hi", "thanks", "who are you"
+- Self-analysis: "list your files", "analyze your code" (handled by introspection)
+- Self-edit: "improve yourself" (handled by self-modification pipeline)
+
+When search triggers, results are injected into the LLM context before response generation, so the agent's answer incorporates real-time web data.
+
+### Programmatic Search
+
+The agent can also search the web programmatically:
 
 ```python
 from evolving_agent.core.agent import SelfImprovingAgent
