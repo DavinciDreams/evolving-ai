@@ -5,25 +5,20 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
 ## 🌟 Key Features
 
 ### 🧠 Advanced AI Capabilities
-
 - **Long-term Memory**: Persistent memory system using ChromaDB vector embeddings
 - **Dynamic Context Management**: Intelligent context retrieval and management
 - **Self-Evaluation**: Continuous output evaluation and improvement cycles
 - **Knowledge Base**: Automatic knowledge acquisition and updates
 
 ### 🔄 Self-Improvement Engine
-
 - **Code Analysis**: Automated analysis of its own codebase
 - **Autonomous Modifications**: Safe self-modification with validation
 - **GitHub Integration**: Automatic pull request creation for improvements
 - **Performance Monitoring**: Continuous performance tracking and optimization
 
 ### 🚀 Production Features
-
 - **FastAPI Web Server**: RESTful API with Swagger documentation
-- **Multiple LLM Providers**: Support for OpenAI, Anthropic, OpenRouter, Z AI (GLM-4.7 with coding endpoint), and more
-- **Web Search Integration**: Real-time web search with multiple provider support (DuckDuckGo, Tavily, SerpAPI)
-- **Discord Bot**: Real-time chat integration with Discord
+- **Multiple LLM Providers**: Support for OpenAI, Anthropic, OpenRouter, and more
 - **Robust Error Handling**: Comprehensive error management and recovery
 - **Configurable Environment**: Flexible configuration system
 
@@ -37,268 +32,100 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
 ## 🛠️ Installation
 
 1. **Clone the repository**:
-
    ```bash
    git clone <repository-url>
-   cd evolving ai
+   cd evolving-ai-agent
    ```
 
 2. **Install dependencies**:
-
    ```bash
    pip install -r requirements.txt
    ```
 
 3. **Configure environment**:
-
    ```bash
    cp .env.example .env
    # Edit .env with your API keys and configuration
    ```
 
+4. **Initialize the system**:
+   ```bash
+   python main.py
+   ```
+
 ## 🚀 Usage
 
-### Main Entry Points
-
-- **Run the main agent:**
-
-  ```bash
-  python main.py
-  ```
-
-- **Start the API server:**
-
-  ```bash
-  python -m uvicorn api_server:app --host 127.0.0.1 --port 8000 --reload
-  ```
-
-- **Organize or clean up the project structure:**
-
-  ```bash
-  python organize_project.py
-  ```
-
-- **Generate or summarize Swagger API docs:**
-
-  ```bash
-  python swagger_summary.py
-  ```
-
-- **Run the complete system demo:**
-
-  ```bash
-  python demo_complete_system.py
-  ```
-
-### Self-Improvement System
-
-To enable autonomous self-improvement and code modification, set the following in your `.env` file:
-
-```env
-ENABLE_SELF_MODIFICATION=true
-```
-
-When enabled, the agent will:
-
-- Analyze its own codebase for improvements
-- Propose and validate modifications
-- Optionally create GitHub pull requests for validated changes
-- **Autofix code style using `isort` and `black` before committing improvements**
-
-**Linting Autofix Step:**
-Before each code improvement is committed, the agent automatically runs [`isort`](https://pycqa.github.io/isort/) and [`black`](https://black.readthedocs.io/en/stable/) to ensure code style consistency.
-If autofix fails for a file, that file is skipped and not committed.
-
-**Manual Linting:**
-To manually run the same linting autofix on your codebase:
-
+### Running the Agent
 ```bash
-isort path/to/your/file.py
-black path/to/your/file.py
-# Or recursively for the whole project:
-isort .
-black .
+# Run the main agent
+python main.py
+
+# Start the API server
+python -m uvicorn api_server:app --host 127.0.0.1 --port 8000 --reload
 ```
-
-**Workflow:**
-
-1. Set `ENABLE_SELF_MODIFICATION=true` in `.env`
-2. Run `python main.py` or start the API server
-3. The agent will autonomously analyze, modify, autofix (isort + black), and validate its code according to the self-improvement cycle
-
-See [`docs/SELF_IMPROVEMENT_DEMO.md`](docs/SELF_IMPROVEMENT_DEMO.md) for a detailed walkthrough.
 
 ### API Endpoints
-
 Access the interactive API documentation at: `http://localhost:8000/docs`
 
 Key endpoints:
-
 - `/chat` - Interact with the agent
-- `/web-search` - Search the web for information
 - `/analyze` - Code analysis and suggestions
 - `/memory` - Memory management
 - `/knowledge` - Knowledge base operations
 - `/github/*` - GitHub integration features
-- `/discord/status` - Discord bot status
 
 ### GitHub Integration
-
 ```bash
 # Set up GitHub integration
 export GITHUB_TOKEN="your_github_token"
 export GITHUB_REPO_URL="https://github.com/username/repository"
+
+# The agent can now:
+# - Analyze its own code
+# - Create improvement pull requests
+# - Track development history
 ```
-
-With these set, the agent can:
-
-- Analyze its own code
-- Create improvement pull requests
-- Track development history
-
-### Web Search Integration
-
-The agent can search the web in real-time using multiple providers:
-
-**Available Providers:**
-- **DuckDuckGo** (default, free, no API key required)
-- **Tavily** (AI-optimized search, requires API key from [tavily.com](https://tavily.com))
-- **SerpAPI** (Google search results, requires API key from [serpapi.com](https://serpapi.com))
-
-**Setup:**
-
-```bash
-# Enable web search (DuckDuckGo is always available)
-WEB_SEARCH_ENABLED=true
-WEB_SEARCH_DEFAULT_PROVIDER=duckduckgo
-WEB_SEARCH_MAX_RESULTS=5
-
-# Optional: Add API keys for better search results
-TAVILY_API_KEY=your_tavily_api_key
-SERPAPI_KEY=your_serpapi_key
-```
-
-**Test Web Search:**
-
-```bash
-python test_web_search.py
-```
-
-**API Usage:**
-
-```python
-# Via API endpoint
-POST /web-search
-{
-  "query": "Latest developments in AI",
-  "max_results": 5,
-  "include_content": true
-}
-```
-
-**Features:**
-- Automatic fallback between providers
-- Result caching for improved performance
-- Full page content extraction
-- Search query storage in memory for learning
-
-### Discord Integration
-
-Connect the agent to Discord for real-time chat interactions:
-
-**Setup:**
-
-1. Create a Discord bot at [discord.com/developers](https://discord.com/developers)
-2. Enable "Message Content Intent" in bot settings
-3. Copy bot token and channel IDs
-4. Configure in `.env`:
-
-```bash
-DISCORD_BOT_TOKEN=your_bot_token
-DISCORD_ENABLED=true
-DISCORD_CHANNEL_IDS=channel_id_1,channel_id_2
-DISCORD_STATUS_CHANNEL_ID=status_channel_id
-```
-
-**Features:**
-- Real-time message responses
-- Status updates for improvements
-- Rate limiting and cooldown
-- Rich embed responses
 
 ## 🔧 Configuration
 
 Key configuration options in `.env`:
-
 ```env
 # LLM Configuration
 OPENAI_API_KEY=your_openai_key
 ANTHROPIC_API_KEY=your_anthropic_key
 OPENROUTER_API_KEY=your_openrouter_key
-ZAI_API_KEY=your_zai_key
 
 # GitHub Integration
 GITHUB_TOKEN=your_github_token
 GITHUB_REPO_URL=your_repository_url
 
-# Web Search Integration
-WEB_SEARCH_ENABLED=true
-WEB_SEARCH_DEFAULT_PROVIDER=duckduckgo
-TAVILY_API_KEY=your_tavily_key  # Optional
-SERPAPI_KEY=your_serpapi_key     # Optional
-
-# Discord Integration
-DISCORD_BOT_TOKEN=your_discord_token
-DISCORD_ENABLED=true
-DISCORD_CHANNEL_IDS=your_channel_ids
-
 # Agent Settings
 AGENT_NAME=EvolveAI
 AGENT_ROLE=Senior Software Engineer
-
-# Self-Improvement
-ENABLE_SELF_MODIFICATION=true
 ```
 
 ## 🧪 Testing
 
-Run all tests:
-
 ```bash
+# Run all tests
 python -m pytest
+
+# Test specific components
+python test_complete_system.py
+python test_api_endpoints.py
+
+# Test GitHub integration
+python test_github_integration.py
 ```
 
-Run individual test scripts:
-
-```bash
-python tests/test_complete_system.py
-python tests/test_api_endpoints.py
-python tests/test_github_integration.py
-python tests/test_end_to_end_self_improvement.py
-python tests/test_core_improvements.py
-python tests/test_agent_improvements.py
-python tests/test_fallback_system.py
-# ...and others in the tests/ directory
-```
-
-## 📚 Project Structure
+## 📚 Architecture
 
 ```
 evolving_agent/
-├── core/                # Core agent functionality
-├── knowledge/           # Knowledge management
-├── self_modification/   # Code analysis and modification
-├── utils/               # Utilities and integrations
-├── tests/               # Test suite
-knowledge_base/          # Knowledge base data
-api_server.py            # FastAPI server entry point
-main.py                  # Main agent entry point
-organize_project.py      # Project organization/cleanup
-swagger_summary.py       # Swagger/OpenAPI summary
-demo_complete_system.py  # Demo script
-requirements.txt         # Python dependencies
-.env.example             # Example environment config
-docs/                    # Documentation
+├── core/           # Core agent functionality
+├── knowledge/      # Knowledge management
+├── self_modification/ # Code analysis and modification
+└── utils/          # Utilities and integrations
 ```
 
 ## 🤝 Contributing
