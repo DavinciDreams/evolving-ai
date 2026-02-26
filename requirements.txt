@@ -39,3 +39,6 @@ discord.py>=2.3.0
 beautifulsoup4>=4.12.0
 lxml>=4.9.0
 duckduckgo-search>=3.9.0
+
+# AI SDK for tool calling and streaming
+ai-sdk-python>=0.1.0

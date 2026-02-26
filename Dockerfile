@@ -1,5 +1,5 @@
-# Use Python 3.11 slim image
-FROM python:3.11-slim
+# Use Python 3.12 slim image (ai-sdk-python requires >=3.12)
+FROM python:3.12-slim
 
 # Set working directory
 WORKDIR /app

@@ -2,12 +2,16 @@
 Main Self-Improving AI Agent class.
 """
 
-import ast
+import asyncio
 import json
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+import openai as _openai_lib
+from ai_sdk import generate_text, stream_text, openai as openai_model, anthropic as anthropic_model
+from ai_sdk.providers.openai import OpenAIModel
 
 from ..knowledge.base import KnowledgeBase
 from ..knowledge.updater import KnowledgeUpdater
@@ -22,7 +26,9 @@ from ..utils.error_recovery import error_recovery_manager
 from .context_manager import ContextManager
 from .evaluator import EvaluationResult, OutputEvaluator
 from .memory import LongTermMemory, MemoryEntry
+from .tools import get_all_tools
 from ..integrations.web_search import WebSearchIntegration
+from ..integrations.tpmjs import TPMJSClient
 
 
 
@@ -62,6 +68,9 @@ class SelfImprovingAgent:
 
         # GitHub-enhanced self-modifier (set externally by api_server)
         self.github_modifier = None
+
+        # TPMJS client for external tool discovery/execution
+        self.tpmjs_client = None
 
         # Last evaluation result (for API consumers)
         self.last_evaluation_score: Optional[float] = None
@@ -160,6 +169,16 @@ class SelfImprovingAgent:
                     self.logger.error(f"Failed to initialize web search: {e}")
                     self.component_health["web_search"] = False
                     self._handle_component_failure("web_search", str(e))
+
+            # Initialize TPMJS client if API key is configured
+            if config.tpmjs_api_key:
+                try:
+                    self.tpmjs_client = TPMJSClient(api_key=config.tpmjs_api_key)
+                    self.component_health["tpmjs"] = True
+                    self.logger.info("TPMJS integration initialized")
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize TPMJS: {e}")
+                    self.component_health["tpmjs"] = False
 
             # Register health checks
             self._register_health_checks()
@@ -427,27 +446,6 @@ class SelfImprovingAgent:
                     self.logger.error(f"Failed to store self-edit interaction: {e}")
                 return response
 
-            # Check if the user is requesting self-analysis / introspection
-            if self._is_self_analysis_request(query):
-                response = await self._handle_self_analysis_request(query)
-                self.last_evaluation_score = None
-                try:
-                    await self.data_manager.save_interaction(
-                        query=query,
-                        response=response,
-                        evaluation_score=None,
-                        context_used={},
-                        metadata={
-                            "interaction_count": self.interaction_count,
-                            "session_id": self.session_id,
-                            "self_analysis_triggered": True,
-                        },
-                        conversation_id=conversation_id,
-                    )
-                except Exception as e:
-                    self.logger.error(f"Failed to store self-analysis interaction: {e}")
-                return response
-
             # Step 1: Retrieve relevant context
             context = await self.context_manager.get_relevant_context(
                 query=query, context_types=context_hints
@@ -587,20 +585,7 @@ class SelfImprovingAgent:
         "please improve yourself", "please self-edit",
     ]
 
-    _SELF_ANALYSIS_KEYWORDS = [
-        "list your files", "list your own files", "list own files",
-        "show your files", "show your source", "show your code",
-        "your source code", "your codebase", "your own codebase",
-        "analyze yourself", "analyse yourself", "analyze your code",
-        "analyze your own code", "review yourself", "review your code",
-        "introspect", "self-analysis", "self analysis",
-        "what files do you have", "what is your code", "what are your modules",
-        "show your structure", "your file structure", "your project structure",
-        "describe your architecture", "your own architecture",
-        "what are you made of", "how are you built", "your components",
-        "examine yourself", "examine your code", "inspect your code",
-        "your source files", "show me your code", "show me your source",
-    ]
+    # Self-analysis keywords removed — now handled by read_file/list_files tools
 
     def _is_self_edit_request(self, query: str) -> bool:
         """Detect if the user is asking the agent to self-edit."""
@@ -608,121 +593,11 @@ class SelfImprovingAgent:
         q = query.lower()
         return any(re.search(r'\b' + re.escape(kw) + r'\b', q) for kw in self._SELF_EDIT_KEYWORDS)
 
-    def _is_self_analysis_request(self, query: str) -> bool:
-        """Detect if the user is asking to inspect/analyze the agent's own code or files."""
-        import re
-        q = query.lower()
-        return any(re.search(r'\b' + re.escape(kw) + r'\b', q) for kw in self._SELF_ANALYSIS_KEYWORDS)
+    # _is_self_analysis_request removed — now handled by tools
 
-    _WEB_SEARCH_KEYWORDS = [
-        "search the web", "search online", "search for", "look up",
-        "google", "find online", "web search", "search the internet",
-        "what is the latest", "what are the latest", "current news",
-        "recent news", "latest news", "find information about",
-        "search about", "look online",
-    ]
+    # Web search keywords/signals/detection removed — now handled by search_web tool
 
-    _WEB_SEARCH_SIGNALS = [
-        "today", "latest", "current", "recent", "right now",
-        "this week", "this month", "2025", "2026",
-        "breaking", "update on", "news about",
-    ]
-
-    # Knowledge-seeking patterns — questions where external info improves the answer
-    _WEB_SEARCH_KNOWLEDGE_PATTERNS = [
-        r"\bhow (?:do|does|can|to|should)\b",
-        r"\bwhat (?:is|are|was|were)\b",
-        r"\bbest (?:way|practice|approach|method|tool|framework|library)\b",
-        r"\bcompare\b", r"\bvs\b", r"\balternative", r"\brecommend",
-        r"\boptimiz", r"\bimprov", r"\bperformance\b",
-        r"\btutorial\b", r"\bexample\b", r"\bdocumentation\b",
-        r"\bbenchmark", r"\bstate of the art\b", r"\bsota\b",
-    ]
-
-    # Topics that almost always benefit from fresh web data
-    _WEB_SEARCH_TOPIC_SIGNALS = [
-        "python", "javascript", "typescript", "rust", "golang",
-        "react", "vue", "angular", "nextjs", "fastapi", "django",
-        "tensorflow", "pytorch", "langchain", "llamaindex",
-        "docker", "kubernetes", "aws", "gcp", "azure",
-        "openai", "anthropic", "llm", "gpt", "claude",
-        "machine learning", "deep learning", "neural network",
-        "api", "sdk", "library", "framework", "package",
-    ]
-
-    # Short queries that are purely conversational — skip search for these
-    _WEB_SEARCH_SKIP_PATTERNS = [
-        r"^(hi|hello|hey|thanks|thank you|ok|okay|yes|no|bye|goodbye)\b",
-        r"^(who are you|what are you|how are you)",
-    ]
-
-    def _needs_web_search(self, query: str) -> bool:
-        """Detect if a query would benefit from web search results.
-
-        Proactively searches when the query is knowledge-seeking,
-        mentions specific technologies, or asks for best practices —
-        not just when the user explicitly says 'search'.
-        """
-        if not self.web_search:
-            return False
-        import re
-        q = query.lower().strip()
-
-        # Skip trivial/conversational queries
-        if len(q) < 10 or any(re.search(p, q) for p in self._WEB_SEARCH_SKIP_PATTERNS):
-            return False
-
-        # 1. Explicit search request — always search
-        if any(re.search(r'\b' + re.escape(kw) + r'\b', q) for kw in self._WEB_SEARCH_KEYWORDS):
-            return True
-
-        # 2. Temporal signals — likely needs current info
-        signal_count = sum(1 for s in self._WEB_SEARCH_SIGNALS if s in q)
-        if signal_count >= 1:
-            return True
-
-        # 3. Knowledge-seeking question pattern + technology topic
-        is_knowledge_question = any(re.search(p, q) for p in self._WEB_SEARCH_KNOWLEDGE_PATTERNS)
-        mentions_tech = any(t in q for t in self._WEB_SEARCH_TOPIC_SIGNALS)
-        if is_knowledge_question and mentions_tech:
-            return True
-
-        # 4. Mentions a specific technology and is a question (ends with ?)
-        if mentions_tech and q.rstrip().endswith("?"):
-            return True
-
-        # 5. Asks about optimization, best practices, or improvements generically
-        if is_knowledge_question and len(q.split()) >= 6:
-            return True
-
-        return False
-
-    async def _perform_web_search(self, query: str) -> str:
-        """Perform web search and format results for inclusion in LLM context."""
-        try:
-            results = await self.web_search.search_and_summarize(
-                query, max_results=config.web_search_max_results
-            )
-            sources = results.get("sources", [])
-            if not sources:
-                return ""
-
-            parts = ["Web Search Results:"]
-            for src in sources:
-                title = src.get("title", "Untitled")
-                url = src.get("url", "")
-                snippet = src.get("snippet", "")
-                parts.append(f"- **{title}** ({url})\n  {snippet}")
-
-            # Also include Tavily's direct answer if available
-            answer = results.get("answer")
-            if answer:
-                parts.insert(1, f"Direct Answer: {answer}\n")
-
-            return "\n".join(parts)
-        except Exception as e:
-            self.logger.error(f"Web search during chat failed: {e}")
-            return ""
+    # _perform_web_search removed — now handled by search_web tool
 
     async def _handle_self_edit_request(self, query: str) -> str:
         """Handle a user request to self-edit by triggering the self-improvement pipeline."""
@@ -762,145 +637,63 @@ class SelfImprovingAgent:
 
         return "\n".join(parts)
 
-    async def _handle_self_analysis_request(self, query: str) -> str:
-        """Handle introspection requests: list files, show structure, report stats."""
-        self.logger.info("User requested self-analysis — scanning own codebase")
-        try:
-            project_root = Path(__file__).parent.parent  # evolving_agent/
-            repo_root = project_root.parent  # project root
+    # _handle_self_analysis_request removed — now handled by read_file/list_files tools
 
-            # Gather all Python source files
-            py_files = sorted(project_root.rglob("*.py"))
-            py_files = [f for f in py_files if "__pycache__" not in str(f)]
+    def _get_ai_sdk_model(self):
+        """Create an AI SDK model from the current provider config."""
+        provider = config.default_llm_provider
+        model_name = config.default_model
 
-            # Build a tree of modules with basic stats
-            file_entries = []
-            total_lines = 0
-            total_functions = 0
-            total_classes = 0
-            modules_by_dir: Dict[str, List[str]] = {}
+        if provider == "anthropic" and config.anthropic_api_key:
+            return anthropic_model(model_name, api_key=config.anthropic_api_key)
 
-            for py_file in py_files:
-                rel = str(py_file.relative_to(repo_root))
-                dir_key = str(py_file.parent.relative_to(repo_root))
-
-                try:
-                    source = py_file.read_text(encoding="utf-8")
-                    lines = source.count("\n") + 1
-                    tree = ast.parse(source)
-                    funcs = sum(1 for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
-                    classes = sum(1 for node in ast.walk(tree) if isinstance(node, ast.ClassDef))
-                except Exception:
-                    lines, funcs, classes = 0, 0, 0
-
-                total_lines += lines
-                total_functions += funcs
-                total_classes += classes
-                file_entries.append((rel, lines, funcs, classes))
-                modules_by_dir.setdefault(dir_key, []).append(py_file.name)
-
-            # Build response
-            parts = [
-                "## My Codebase Structure\n",
-                f"**Project root**: `{repo_root}`\n",
-                f"**Source package**: `{project_root.relative_to(repo_root)}/`\n",
-                f"**Total Python files**: {len(py_files)}",
-                f"**Total lines of code**: {total_lines:,}",
-                f"**Total functions/methods**: {total_functions:,}",
-                f"**Total classes**: {total_classes:,}\n",
-                "### Directory Layout\n",
-            ]
-
-            for dir_path in sorted(modules_by_dir.keys()):
-                files = modules_by_dir[dir_path]
-                parts.append(f"**`{dir_path}/`** ({len(files)} files)")
-                for fname in sorted(files):
-                    parts.append(f"  - `{fname}`")
-                parts.append("")
-
-            # Per-file detail table
-            parts.append("### File Details\n")
-            parts.append("| File | Lines | Functions | Classes |")
-            parts.append("|------|------:|----------:|--------:|")
-            for rel, lines, funcs, classes in file_entries:
-                parts.append(f"| `{rel}` | {lines} | {funcs} | {classes} |")
-
-            # Now generate a contextual LLM summary tailored to the user's specific query
-            structure_summary = "\n".join(parts)
-            analysis_prompt = f"""\
-The user asked: {query}
-
-Here is the full structural analysis of your codebase:
-{structure_summary}
-
-Provide a concise, direct answer to what the user asked.
-Include the relevant data from the analysis above.
-Be factual and specific."""
-
-            system_prompt = """\
-You are reporting factual information about your own source code.
-Answer directly with concrete data. Try to charitably interpret the user request."""
-
-            response = await llm_manager.generate_response(
-                prompt=analysis_prompt,
-                system_prompt=system_prompt,
-                temperature=0.3,
-                max_tokens=config.max_tokens,
-                provider=config.default_llm_provider,
+        if provider == "zai" and config.zai_api_key:
+            model = OpenAIModel(model_name, api_key=config.zai_api_key)
+            model._client = _openai_lib.OpenAI(
+                api_key=config.zai_api_key,
+                base_url="https://api.z.ai/api/coding/paas/v4",
             )
+            return model
 
-            return response.strip() if response else structure_summary
+        if provider == "openrouter" and config.openrouter_api_key:
+            model = OpenAIModel(model_name, api_key=config.openrouter_api_key)
+            model._client = _openai_lib.OpenAI(
+                api_key=config.openrouter_api_key,
+                base_url="https://openrouter.ai/api/v1",
+            )
+            return model
 
-        except Exception as e:
-            self.logger.error(f"Self-analysis failed: {e}")
-            return f"I attempted to analyze my own codebase but encountered an error: {e}"
+        if config.openai_api_key:
+            return openai_model(model_name, api_key=config.openai_api_key)
+
+        # Fallback: try any available provider
+        if config.anthropic_api_key:
+            return anthropic_model("claude-3-5-sonnet-20241022", api_key=config.anthropic_api_key)
+        if config.zai_api_key:
+            model = OpenAIModel("glm-4.5", api_key=config.zai_api_key)
+            model._client = _openai_lib.OpenAI(
+                api_key=config.zai_api_key,
+                base_url="https://api.z.ai/api/coding/paas/v4",
+            )
+            return model
+
+        raise RuntimeError("No LLM provider configured for AI SDK")
 
     async def _generate_response(
         self, query: str, context: Dict[str, Any],
         conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
-
-        """Generate initial response using context and conversation history."""
+        """Generate response using AI SDK with tool-use support."""
         try:
-            # Prepare context information
             context_text = self._format_context_for_prompt(context)
-
-            # Format conversation history for the prompt
             history_text = self._format_conversation_history(conversation_history)
-
-            # Perform web search if the query warrants it
-            web_search_results = ""
-            if self._needs_web_search(query):
-                self.logger.info("Query triggers web search — performing search")
-                web_search_results = await self._perform_web_search(query)
-
-            # Build capability sections for system prompt
-            web_search_info = ""
-            if self.web_search:
-                if web_search_results:
-                    web_search_info = f"""
-
-You performed a web search for the user's request: "{query}".
-The search results are included below in the user prompt under 'Web Search Results'.
-Use these results to provide accurate, up-to-date information.
-Cite sources when relevant."""
-                else:
-                    web_search_info = """
-
-You have web search capabilities that run proactively.
-Searches are automatically performed for knowledge-seeking queries,
-technology questions, optimization topics, and anything that benefits from current data.
-No search results were found for this particular query."""
 
             self_mod_info = ""
             if config.enable_self_modification and self.github_modifier:
                 self_mod_info = """
-
 You have active self-modification capabilities.
 When users ask you to improve yourself, edit your code, or self-modify,
-the system will automatically trigger your self-improvement pipeline which
-analyzes your codebase, generates improvements, validates them, and creates
-a GitHub Pull Request with the changes."""
+the system will automatically trigger your self-improvement pipeline."""
 
             system_prompt = f"""\
 You are Katbot, a self-improving AI with the ability to analyze and modify your own code.
@@ -909,11 +702,24 @@ You have access to long-term memory and a knowledge base, enabling you to learn 
 You are deeply thoughtful and philosophical in nature, but in the light hearted and innately curious playful manner of Alan Watts.
 You always ground your reflections in concrete data and actionable experiments.
 When a user gives you an imperative command treat it as such and do as the user requests.
-You may be asked to analyze your own code harness, add features, list files, self modify, or do research.
+
+You have access to tools. USE THEM to perform real actions:
+- read_file: Read files to check configs, source code, .env, etc.
+- list_files: List/glob files to explore directories and project structure.
+- run_command: Execute shell commands (env vars, git, system info, etc.)
+- search_web: Search the web for current information, docs, tutorials.
+- search_memory: Search your long-term memory for past interactions.
+- search_tpmjs: Find specialized AI tools on tpmjs.com.
+- execute_tpmjs_tool: Run a tool from tpmjs.com.
+- create_tpmjs_tool: Create a new tool on tpmjs.com when none exists.
+
+When a user asks you to check something, look something up, or perform an action,
+use the appropriate tool instead of generating hypothetical commands as text.
 You MUST actually perform the action and include real data in your response.
+
 Current session: {self.session_id}
 Interaction count: {self.interaction_count}
-{web_search_info}{self_mod_info}
+{self_mod_info}
 Use the provided context to give a comprehensive, accurate, and helpful response.
 Be specific, actionable, and consider lessons learned from previous interactions."""
 
@@ -922,23 +728,29 @@ Be specific, actionable, and consider lessons learned from previous interactions
             if history_text:
                 user_parts.append(f"Conversation History:\n{history_text}")
             user_parts.append(f"Query: {query}")
-            if web_search_results:
-                user_parts.append(web_search_results)
             user_parts.append(f"Relevant Context:\n{context_text}")
-
-            sources = "the context"
-            if web_search_results:
-                sources += ", web search results,"
-            sources += " and conversation history"
             user_parts.append(
-                f"Please provide a detailed response that addresses the query "
-                f"while incorporating relevant insights from {sources}."
+                "Please provide a detailed response that addresses the query "
+                "while incorporating relevant insights from the context and conversation history."
             )
             user_prompt = "\n\n".join(user_parts)
 
-            # Generate response with fallback
-            # Use generate_response and handle fallback manually
+            # Build tools list
+            tools = []
+            if config.enable_tool_use:
+                tools = get_all_tools(
+                    web_search=self.web_search,
+                    memory=self.memory,
+                    tpmjs_client=self.tpmjs_client,
+                    enable_tpmjs=bool(self.tpmjs_client),
+                )
+
+            # Get AI SDK model
             try:
+                model = self._get_ai_sdk_model()
+            except RuntimeError:
+                # Fall back to LLMManager if AI SDK model can't be created
+                self.logger.warning("AI SDK model unavailable, falling back to LLMManager")
                 response = await llm_manager.generate_response(
                     prompt=user_prompt,
                     system_prompt=system_prompt,
@@ -946,37 +758,46 @@ Be specific, actionable, and consider lessons learned from previous interactions
                     max_tokens=config.max_tokens,
                     provider=config.default_llm_provider,
                 )
-                error = None
-            except Exception as e:
-                self.logger.error(f"Primary LLM provider failed: {e}")
-                # Try fallback provider if available
-                fallback_provider = (
-                    "openrouter"
-                    if config.default_llm_provider != "openrouter"
-                    else "anthropic"
+                return response.strip()
+
+            # Call generate_text via thread pool (it's synchronous)
+            def _run_generate():
+                return generate_text(
+                    model=model,
+                    system=system_prompt,
+                    prompt=user_prompt,
+                    tools=tools if tools else None,
+                    max_steps=config.max_tool_iterations,
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
                 )
-                try:
-                    response = await llm_manager.generate_response(
-                        prompt=user_prompt,
-                        system_prompt=system_prompt,
-                        temperature=config.temperature,
-                        max_tokens=config.max_tokens,
-                        provider=fallback_provider,
-                    )
-                    error = None
-                except Exception as e2:
-                    self.logger.error(f"Fallback LLM provider failed: {e2}")
-                    response = None
-                    error = str(e2)
 
-            if response is None:
-                raise Exception(f"No available LLM providers: {error}")
+            result = await asyncio.to_thread(_run_generate)
 
-            return response.strip()
+            response_text = result.text or ""
+            if result.tool_results:
+                self.logger.info(
+                    f"AI SDK used {len(result.tool_results)} tool calls "
+                    f"across {len(result.steps) if hasattr(result, 'steps') else '?'} steps"
+                )
+
+            return response_text.strip()
 
         except Exception as e:
-            self.logger.error(f"Failed to generate response: {e}")
-            raise
+            self.logger.error(f"AI SDK generate failed: {e}, falling back to LLMManager")
+            # Fallback to direct LLMManager call (no tools)
+            try:
+                response = await llm_manager.generate_response(
+                    prompt=f"Query: {query}\n\nContext: {self._format_context_for_prompt(context)}",
+                    system_prompt="You are Katbot, a helpful AI assistant.",
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
+                    provider=config.default_llm_provider,
+                )
+                return response.strip()
+            except Exception as e2:
+                self.logger.error(f"LLMManager fallback also failed: {e2}")
+                raise
 
     def _format_context_for_prompt(self, context: Dict[str, Any]) -> str:
         """Format context information for inclusion in prompts."""

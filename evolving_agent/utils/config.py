@@ -247,6 +247,23 @@ class Config:
         """Get SerpAPI key."""
         return os.getenv("SERPAPI_KEY", "")
 
+    # Tool Use Configuration
+    @property
+    def enable_tool_use(self) -> bool:
+        """Get tool use enabled setting."""
+        return os.getenv("ENABLE_TOOL_USE", "true").lower() == "true"
+
+    @property
+    def max_tool_iterations(self) -> int:
+        """Get maximum tool-use iterations per request."""
+        return int(os.getenv("MAX_TOOL_ITERATIONS", "15"))
+
+    # TPMJS Integration Configuration
+    @property
+    def tpmjs_api_key(self) -> str:
+        """Get TPMJS API key."""
+        return os.getenv("TPMJS_API_KEY", "")
+
     def get_all_config(self) -> Dict[str, Any]:
         """Get all configuration as a dictionary."""
         return {
@@ -294,6 +311,9 @@ class Config:
             "web_search_max_results": self.web_search_max_results,
             "tavily_api_key": "***" if self.tavily_api_key else "",
             "serpapi_key": "***" if self.serpapi_key else "",
+            "enable_tool_use": self.enable_tool_use,
+            "max_tool_iterations": self.max_tool_iterations,
+            "tpmjs_api_key": "***" if self.tpmjs_api_key else "",
         }
 
     def ensure_directories(self):

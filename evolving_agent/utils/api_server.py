@@ -14,6 +14,7 @@ import uvicorn
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from evolving_agent.core.agent import SelfImprovingAgent
@@ -714,19 +715,6 @@ async def openai_chat_completions(
     regardless of the `model` field value.
     """
     try:
-        if request.stream:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": {
-                        "message": "Streaming is not supported. Set stream to false or omit it.",
-                        "type": "invalid_request_error",
-                        "param": "stream",
-                        "code": None,
-                    }
-                },
-            )
-
         # Extract system messages as context hints
         system_messages = [
             msg.content for msg in request.messages if msg.role == "system"
@@ -754,6 +742,61 @@ async def openai_chat_completions(
         created_timestamp = int(datetime.now().timestamp())
 
         logger.info(f"OpenAI-compat request {completion_id}: {query[:100]}...")
+
+        # Handle streaming
+        if request.stream:
+            import json as _json
+
+            async def openai_stream():
+                try:
+                    response_text = await current_agent.run(
+                        query,
+                        context_hints=context_hints,
+                        conversation_id=conversation_id,
+                    )
+
+                    # Stream the response in chunks
+                    chunk_size = 50
+                    for i in range(0, len(response_text), chunk_size):
+                        chunk = response_text[i:i + chunk_size]
+                        delta = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_timestamp,
+                            "model": request.model,
+                            "choices": [{
+                                "index": 0,
+                                "delta": {"content": chunk},
+                                "finish_reason": None,
+                            }],
+                        }
+                        yield f"data: {_json.dumps(delta)}\n\n"
+
+                    # Final chunk with finish_reason
+                    final = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_timestamp,
+                        "model": request.model,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {},
+                            "finish_reason": "stop",
+                        }],
+                    }
+                    yield f"data: {_json.dumps(final)}\n\n"
+                    yield "data: [DONE]\n\n"
+                except Exception as e:
+                    error_chunk = {
+                        "error": {"message": str(e), "type": "internal_error"}
+                    }
+                    yield f"data: {_json.dumps(error_chunk)}\n\n"
+
+            return StreamingResponse(
+                openai_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+            )
 
         response_text = await current_agent.run(
             query,
@@ -803,6 +846,146 @@ async def openai_chat_completions(
                 }
             },
         )
+
+
+@app.post("/chat/stream", tags=["Interaction"], summary="Chat with streaming + tool visibility")
+async def chat_stream(
+    request: Request,
+    current_agent: SelfImprovingAgent = Depends(get_agent),
+):
+    """
+    Streaming chat endpoint with tool-use visibility via SSE.
+
+    Streams events as Server-Sent Events:
+    - `chunk`: text content from the LLM
+    - `tool_call`: tool invocation (name + arguments)
+    - `tool_result`: tool execution output
+    - `complete`: final response with metadata
+    - `error`: error information
+    """
+    import json as _json
+
+    try:
+        body = await request.json()
+        query = body.get("query", "")
+        context_hints = body.get("context_hints")
+        conversation_id = body.get("conversation_id")
+
+        if not query:
+            raise HTTPException(status_code=400, detail="query is required")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid request body: {e}")
+
+    async def event_stream():
+        try:
+            from ai_sdk import stream_text
+            from evolving_agent.core.tools import get_all_tools
+            import openai as _openai_lib
+            from ai_sdk.providers.openai import OpenAIModel
+
+            # Build context (reusing agent internals)
+            context = await current_agent.context_manager.get_relevant_context(
+                query=query, context_types=context_hints
+            )
+            context_text = current_agent._format_context_for_prompt(context)
+
+            conversation_history = []
+            if conversation_id:
+                try:
+                    conversation_history = await current_agent.data_manager.get_conversation_history(
+                        conversation_id, limit=10
+                    )
+                except Exception:
+                    pass
+
+            history_text = current_agent._format_conversation_history(conversation_history)
+
+            system_prompt = f"""\
+You are Katbot, a self-improving AI with tool access.
+Use your tools (read_file, list_files, run_command, search_web, search_memory, search_tpmjs, execute_tpmjs_tool) to perform real actions.
+Current session: {current_agent.session_id}"""
+
+            user_parts = []
+            if history_text:
+                user_parts.append(f"Conversation History:\n{history_text}")
+            user_parts.append(f"Query: {query}")
+            user_parts.append(f"Relevant Context:\n{context_text}")
+            user_prompt = "\n\n".join(user_parts)
+
+            tools = []
+            if config.enable_tool_use:
+                tools = get_all_tools(
+                    web_search=current_agent.web_search,
+                    memory=current_agent.memory,
+                    tpmjs_client=current_agent.tpmjs_client,
+                    enable_tpmjs=bool(current_agent.tpmjs_client),
+                )
+
+            model = current_agent._get_ai_sdk_model()
+
+            def _run_stream():
+                return stream_text(
+                    model=model,
+                    system=system_prompt,
+                    prompt=user_prompt,
+                    tools=tools if tools else None,
+                    max_steps=config.max_tool_iterations,
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
+                    on_step=lambda step: None,
+                )
+
+            stream_result = await asyncio.to_thread(_run_stream)
+
+            # Stream text chunks
+            full_text = ""
+            async for chunk in stream_result.text_stream:
+                full_text += chunk
+                event_data = _json.dumps({"type": "chunk", "content": chunk})
+                yield f"data: {event_data}\n\n"
+
+            # Send tool call/result info if available
+            if stream_result.tool_results:
+                for tr in stream_result.tool_results:
+                    tc_event = _json.dumps({
+                        "type": "tool_call",
+                        "tool_name": tr.tool_name,
+                        "tool_call_id": tr.tool_call_id,
+                    })
+                    yield f"data: {tc_event}\n\n"
+
+                    tr_event = _json.dumps({
+                        "type": "tool_result",
+                        "tool_name": tr.tool_name,
+                        "result": str(tr.result)[:1000],
+                        "is_error": tr.is_error,
+                    })
+                    yield f"data: {tr_event}\n\n"
+
+            # Final complete event
+            complete_event = _json.dumps({
+                "type": "complete",
+                "text": full_text,
+                "tool_calls_count": len(stream_result.tool_results) if stream_result.tool_results else 0,
+            })
+            yield f"data: {complete_event}\n\n"
+
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
+            error_event = _json.dumps({"type": "error", "message": str(e)})
+            yield f"data: {error_event}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/v1/models", tags=["OpenAI Compatible"], summary="List available models")
