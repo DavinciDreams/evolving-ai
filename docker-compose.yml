@@ -4,8 +4,10 @@ services:
   api:
     build: .
     ports:
-      - "8000:8000"
+      - "${PORT:-8000}:${PORT:-8000}"
     environment:
+      - PORT=${PORT:-8000}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
       # LLM Provider Configuration
       # Default: OpenRouter with Claude Sonnet 3.5
       # Anthropic: use claude-sonnet-4-5-20250929
@@ -81,7 +83,7 @@ services:
       - app-logs:/app/logs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:${PORT:-8000}/health"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -23,12 +23,13 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p /app/data /app/logs
 
-# Expose port
-EXPOSE 8000
+# Default port (overridable via PORT env var in Coolify/hosting)
+ENV PORT=8000
+EXPOSE ${PORT}
 
-# Health check (using curl)
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# Run the application
-CMD ["uvicorn", "evolving_agent.utils.api_server:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the application (reads PORT env var at runtime)
+CMD uvicorn evolving_agent.utils.api_server:app --host 0.0.0.0 --port ${PORT}

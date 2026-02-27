@@ -542,9 +542,11 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+_cors_origins = os.getenv("CORS_ORIGINS", "*")
+_allowed_origins = [o.strip() for o in _cors_origins.split(",")] if _cors_origins != "*" else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure as needed for production
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1860,6 +1862,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, signal_handler)
     
     # Run the server
+    port = int(os.getenv("PORT", "8000"))
     uvicorn.run(
-        "evolving_agent.utils.api_server:app", host="0.0.0.0", port=8000, reload=True, log_level="info"
+        "evolving_agent.utils.api_server:app", host="0.0.0.0", port=port, reload=True, log_level="info"
     )
