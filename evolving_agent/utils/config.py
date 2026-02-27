@@ -80,6 +80,11 @@ class Config:
         return os.getenv("EVALUATION_MODEL", "claude-3-5-sonnet-20241022")
 
     @property
+    def evaluation_provider(self) -> str:
+        """Get evaluation LLM provider."""
+        return os.getenv("EVALUATION_PROVIDER", "")
+
+    @property
     def temperature(self) -> float:
         """Get temperature setting."""
         return float(os.getenv("TEMPERATURE", "0.7"))
@@ -206,6 +211,16 @@ class Config:
         """Get Discord status on high quality interaction setting."""
         return os.getenv("DISCORD_STATUS_ON_HIGH_QUALITY", "false").lower() == "true"
 
+    @property
+    def github_branch(self) -> str:
+        """Get GitHub target branch."""
+        return os.getenv("GITHUB_BRANCH", "main")
+
+    @property
+    def api_server_url(self) -> str:
+        """Get API server URL for internal calls."""
+        return os.getenv("API_SERVER_URL", "http://localhost:8000")
+
     # Web Search Integration Configuration
     @property
     def web_search_enabled(self) -> bool:
@@ -232,6 +247,23 @@ class Config:
         """Get SerpAPI key."""
         return os.getenv("SERPAPI_KEY", "")
 
+    # Tool Use Configuration
+    @property
+    def enable_tool_use(self) -> bool:
+        """Get tool use enabled setting."""
+        return os.getenv("ENABLE_TOOL_USE", "true").lower() == "true"
+
+    @property
+    def max_tool_iterations(self) -> int:
+        """Get maximum tool-use iterations per request."""
+        return int(os.getenv("MAX_TOOL_ITERATIONS", "15"))
+
+    # TPMJS Integration Configuration
+    @property
+    def tpmjs_api_key(self) -> str:
+        """Get TPMJS API key."""
+        return os.getenv("TPMJS_API_KEY", "")
+
     def get_all_config(self) -> Dict[str, Any]:
         """Get all configuration as a dictionary."""
         return {
@@ -247,6 +279,7 @@ class Config:
             "default_llm_provider": self.default_llm_provider,
             "default_model": self.default_model,
             "evaluation_model": self.evaluation_model,
+            "evaluation_provider": self.evaluation_provider,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "enable_self_modification": self.enable_self_modification,
@@ -271,11 +304,16 @@ class Config:
             "discord_status_on_improvement": self.discord_status_on_improvement,
             "discord_status_on_knowledge_update": self.discord_status_on_knowledge_update,
             "discord_status_on_high_quality": self.discord_status_on_high_quality,
+            "github_branch": self.github_branch,
+            "api_server_url": self.api_server_url,
             "web_search_enabled": self.web_search_enabled,
             "web_search_default_provider": self.web_search_default_provider,
             "web_search_max_results": self.web_search_max_results,
             "tavily_api_key": "***" if self.tavily_api_key else "",
             "serpapi_key": "***" if self.serpapi_key else "",
+            "enable_tool_use": self.enable_tool_use,
+            "max_tool_iterations": self.max_tool_iterations,
+            "tpmjs_api_key": "***" if self.tpmjs_api_key else "",
         }
 
     def ensure_directories(self):

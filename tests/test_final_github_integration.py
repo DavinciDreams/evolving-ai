@@ -100,8 +100,8 @@ def main():
         "evaluation_insights": {"score_trend": "stable", "recent_average_score": 0.8},
     }
 
-    print(f"\n   Testing /github/improve (dry run)...")
-    improve_result = test_api_endpoint("/github/improve", "POST", improvement_data)
+    print(f"\n   Testing /self-improve (dry run)...")
+    improve_result = test_api_endpoint("/self-improve", "POST", improvement_data)
 
     if improve_result.get("error"):
         print(f"   ❌ Error: {improve_result['error']}")
@@ -161,7 +161,7 @@ def main():
     print("   • GET  /github/pull-requests - Open pull requests")
     print("   • GET  /github/commits - Recent commits")
     print("   • GET  /github/improvement-history - AI improvement history")
-    print("   • POST /github/improve - Create code improvements")
+    print("   • POST /self-improve - Run self-improvement loop")
     print("   • POST /github/demo-pr - Create demo pull request")
 
     print(f"\n🌐 Interactive Documentation:")

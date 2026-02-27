@@ -46,7 +46,7 @@ export const githubService = {
    * @returns {Promise} Improvement result
    */
   triggerImprovement: async (data) => {
-    const response = await api.post('/github/improve', data);
+    const response = await api.post('/self-improve', data);
     return response.data;
   },
 

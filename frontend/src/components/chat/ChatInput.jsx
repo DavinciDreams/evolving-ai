@@ -28,12 +28,12 @@ export const ChatInput = ({ onSend, isLoading, disabled }) => {
         onChange={(e) => setMessage(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder="Type your message... (Shift+Enter for new line)"
-        disabled={disabled || isLoading}
+        disabled={disabled}
         className={clsx(
           'flex-1 px-4 py-3 border border-gray-300 rounded-lg',
           'focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500',
           'resize-none',
-          (disabled || isLoading) && 'opacity-50 cursor-not-allowed'
+          disabled && 'opacity-50 cursor-not-allowed'
         )}
         rows={3}
       />

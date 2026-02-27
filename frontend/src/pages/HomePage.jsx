@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
+import ChatContainer from '../components/chat/ChatContainer';
 import { ROUTES } from '../utils/constants';
 
 const HomePage = () => {
@@ -12,6 +13,13 @@ const HomePage = () => {
           A self-improving AI system with memory, knowledge management, and code evolution capabilities.
         </p>
       </div>
+
+      {/* Quick Chat Interface for Debugging */}
+      <Card title="Quick Chat" className="mb-8">
+        <div className="h-96">
+          <ChatContainer />
+        </div>
+      </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <Card title="Chat Interface">

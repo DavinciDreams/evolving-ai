@@ -5,9 +5,11 @@ Allows the agent to access its own repository and create pull requests with impr
 
 import os
 import json
+import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from pathlib import Path
+from collections import defaultdict
 
 import git
 from github import Github, GithubException
@@ -16,6 +18,13 @@ from github.PullRequest import PullRequest
 
 from evolving_agent.utils.logging import setup_logger
 from evolving_agent.utils.config import config
+from ..utils.error_recovery import (
+    error_recovery_manager,
+    CircuitBreakerConfig,
+    RetryConfig,
+    CircuitBreakerOpenError,
+    FallbackExhaustedError
+)
 
 logger = setup_logger(__name__)
 
@@ -47,6 +56,15 @@ class GitHubIntegration:
         self.repository: Optional[Repository] = None
         self.local_repo: Optional[git.Repo] = None
         
+        # Offline mode support
+        self.offline_mode = False
+        self.offline_cache: Dict[str, Any] = {}
+        self.pending_operations: List[Dict] = []
+        
+        # Conflict resolution
+        self.conflict_resolution_strategy = "merge"  # "merge", "ours", "theirs", "manual"
+        self.conflict_history: List[Dict] = []
+        
         if not self.github_token:
             logger.warning("GitHub token not provided. Some features will be unavailable.")
         
@@ -55,21 +73,32 @@ class GitHubIntegration:
     
     async def initialize(self) -> bool:
         """
-        Initialize GitHub client and repository connections.
+        Initialize GitHub client and repository connections with error recovery.
         
         Returns:
             True if initialization successful, False otherwise
         """
         try:
-            # Initialize GitHub client
+            # Initialize GitHub client with error recovery
             if self.github_token:
-                self.github_client = Github(self.github_token)
-                logger.info("GitHub client initialized")
+                async def _init_github():
+                    self.github_client = Github(self.github_token)
+                    logger.info("GitHub client initialized")
+                    
+                    # Get repository
+                    if self.repo_name:
+                        self.repository = self.github_client.get_repo(self.repo_name)
+                        logger.info(f"Connected to repository: {self.repo_name}")
                 
-                # Get repository
-                if self.repo_name:
-                    self.repository = self.github_client.get_repo(self.repo_name)
-                    logger.info(f"Connected to repository: {self.repo_name}")
+                await error_recovery_manager.execute_with_recovery(
+                    "github_init",
+                    _init_github,
+                    circuit_breaker_config=CircuitBreakerConfig(
+                        failure_threshold=3,
+                        recovery_timeout=30.0
+                    ),
+                    retry_config=RetryConfig(max_attempts=3)
+                )
             
             # Initialize local repository
             if os.path.exists(os.path.join(self.local_repo_path, ".git")):
@@ -77,43 +106,223 @@ class GitHubIntegration:
                 logger.info(f"Local repository initialized: {self.local_repo_path}")
             else:
                 logger.warning("Local repository not found. Git operations will be limited.")
+                # Enable offline mode if only local repo is available
+                self.offline_mode = True
+            
+            # Register health check for GitHub
+            error_recovery_manager.register_health_check(
+                "github",
+                self._check_github_health
+            )
             
             return True
             
         except Exception as e:
             logger.error(f"Failed to initialize GitHub integration: {e}")
+            # Enable offline mode if GitHub is unavailable
+            self.offline_mode = True
+            logger.warning("GitHub unavailable, operating in offline mode")
             return False
+    
+    async def _check_github_health(self) -> bool:
+        """Check if GitHub API is accessible."""
+        try:
+            if self.github_client and self.repository:
+                # Simple health check - get rate limit
+                rate_limit = self.github_client.get_rate_limit()
+                return rate_limit.rate.remaining > 0
+            return False
+        except Exception:
+            return False
+    
+    def set_offline_mode(self, enabled: bool):
+        """Enable or disable offline mode."""
+        self.offline_mode = enabled
+        logger.info(f"Offline mode {'enabled' if enabled else 'disabled'}")
+    
+    def is_offline(self) -> bool:
+        """Check if operating in offline mode."""
+        return self.offline_mode
+    
+    def queue_offline_operation(self, operation: Dict[str, Any]):
+        """Queue an operation for when connection is restored."""
+        self.pending_operations.append({
+            **operation,
+            "timestamp": datetime.now().isoformat(),
+            "status": "pending"
+        })
+        logger.info(f"Queued offline operation: {operation.get('type', 'unknown')}")
+    
+    async def process_pending_operations(self) -> List[Dict[str, Any]]:
+        """Process pending operations when connection is restored."""
+        if not self.pending_operations:
+            return []
+        
+        logger.info(f"Processing {len(self.pending_operations)} pending operations")
+        results = []
+        remaining = []
+        
+        for operation in self.pending_operations:
+            try:
+                result = await self._execute_operation(operation)
+                results.append({
+                    "operation": operation,
+                    "result": result,
+                    "status": "completed"
+                })
+            except Exception as e:
+                logger.warning(f"Failed to process operation: {e}")
+                remaining.append(operation)
+                results.append({
+                    "operation": operation,
+                    "error": str(e),
+                    "status": "failed"
+                })
+        
+        self.pending_operations = remaining
+        return results
+    
+    async def _execute_operation(self, operation: Dict[str, Any]) -> Any:
+        """Execute a queued operation."""
+        op_type = operation.get("type")
+        
+        if op_type == "update_file":
+            return await self.update_file(
+                file_path=operation["file_path"],
+                new_content=operation["content"],
+                commit_message=operation["commit_message"],
+                branch=operation["branch"]
+            )
+        elif op_type == "create_branch":
+            return await self.create_branch(
+                branch_name=operation["branch_name"],
+                base_branch=operation.get("base_branch")
+            )
+        elif op_type == "create_pr":
+            return await self.create_pull_request(
+                title=operation["title"],
+                body=operation["body"],
+                head_branch=operation["head_branch"],
+                base_branch=operation.get("base_branch")
+            )
+        else:
+            raise ValueError(f"Unknown operation type: {op_type}")
+    
+    def set_conflict_resolution_strategy(self, strategy: str):
+        """Set the conflict resolution strategy."""
+        valid_strategies = ["merge", "ours", "theirs", "manual"]
+        if strategy not in valid_strategies:
+            raise ValueError(f"Invalid strategy. Must be one of: {valid_strategies}")
+        self.conflict_resolution_strategy = strategy
+        logger.info(f"Conflict resolution strategy set to: {strategy}")
+    
+    async def resolve_conflict(
+        self,
+        file_path: str,
+        branch: str,
+        base_branch: str = None
+    ) -> Dict[str, Any]:
+        """
+        Resolve a merge conflict for a file.
+        
+        Args:
+            file_path: Path to the conflicting file
+            branch: Branch with the conflict
+            base_branch: Base branch (defaults to default branch)
+            
+        Returns:
+            Dictionary with resolution result
+        """
+        try:
+            base_branch = base_branch or (self.repository.default_branch if self.repository else "main")
+            
+            if self.conflict_resolution_strategy == "ours":
+                # Keep our changes
+                logger.info(f"Resolving conflict in {file_path} using 'ours' strategy")
+                return {"strategy": "ours", "resolved": True}
+            elif self.conflict_resolution_strategy == "theirs":
+                # Accept their changes
+                logger.info(f"Resolving conflict in {file_path} using 'theirs' strategy")
+                return {"strategy": "theirs", "resolved": True}
+            elif self.conflict_resolution_strategy == "merge":
+                # Attempt automatic merge
+                logger.info(f"Attempting automatic merge for {file_path}")
+                # In a real implementation, this would use a merge algorithm
+                return {"strategy": "merge", "resolved": True, "note": "Automatic merge attempted"}
+            else:
+                # Manual resolution required
+                logger.warning(f"Manual conflict resolution required for {file_path}")
+                self.conflict_history.append({
+                    "file_path": file_path,
+                    "branch": branch,
+                    "base_branch": base_branch,
+                    "timestamp": datetime.now().isoformat(),
+                    "status": "pending_manual_resolution"
+                })
+                return {"strategy": "manual", "resolved": False, "requires_manual": True}
+        except Exception as e:
+            logger.error(f"Error resolving conflict for {file_path}: {e}")
+            return {"error": str(e), "resolved": False}
+    
+    def get_conflict_history(self) -> List[Dict[str, Any]]:
+        """Get history of conflicts and their resolutions."""
+        return self.conflict_history
     
     async def get_repository_info(self) -> Dict[str, Any]:
         """
-        Get information about the repository.
+        Get information about the repository with retry logic.
         
         Returns:
             Dictionary with repository information
         """
         try:
+            if self.offline_mode:
+                # Return cached data in offline mode
+                if "repository_info" in self.offline_cache:
+                    logger.info("Returning cached repository info (offline mode)")
+                    return self.offline_cache["repository_info"]
+                return {"error": "Repository not available in offline mode"}
+            
             if not self.repository:
                 return {"error": "Repository not connected"}
             
-            repo_info = {
-                "name": self.repository.name,
-                "full_name": self.repository.full_name,
-                "description": self.repository.description,
-                "language": self.repository.language,
-                "default_branch": self.repository.default_branch,
-                "clone_url": self.repository.clone_url,
-                "stars": self.repository.stargazers_count,
-                "forks": self.repository.forks_count,
-                "open_issues": self.repository.open_issues_count,
-                "size": self.repository.size,
-                "created_at": self.repository.created_at.isoformat(),
-                "updated_at": self.repository.updated_at.isoformat(),
-                "topics": list(self.repository.get_topics())
-            }
+            async def _get_repo_info():
+                repo_info = {
+                    "name": self.repository.name,
+                    "full_name": self.repository.full_name,
+                    "description": self.repository.description,
+                    "language": self.repository.language,
+                    "default_branch": self.repository.default_branch,
+                    "clone_url": self.repository.clone_url,
+                    "stars": self.repository.stargazers_count,
+                    "forks": self.repository.forks_count,
+                    "open_issues": self.repository.open_issues_count,
+                    "size": self.repository.size,
+                    "created_at": self.repository.created_at.isoformat(),
+                    "updated_at": self.repository.updated_at.isoformat(),
+                    "topics": list(self.repository.get_topics())
+                }
+                
+                # Cache the result
+                self.offline_cache["repository_info"] = repo_info
+                
+                logger.info(f"Retrieved repository info for {repo_info['full_name']}")
+                return repo_info
             
-            logger.info(f"Retrieved repository info for {repo_info['full_name']}")
-            return repo_info
+            return await error_recovery_manager.execute_with_recovery(
+                "github_get_repo_info",
+                _get_repo_info,
+                circuit_breaker_config=CircuitBreakerConfig(
+                    failure_threshold=3,
+                    recovery_timeout=30.0,
+                    timeout=10.0
+                ),
+                retry_config=RetryConfig(max_attempts=3)
+            )
             
+        except CircuitBreakerOpenError:
+            logger.warning("GitHub circuit breaker open, returning cached data")
+            return self.offline_cache.get("repository_info", {"error": "GitHub unavailable"})
         except Exception as e:
             logger.error(f"Error getting repository info: {e}")
             return {"error": str(e)}
@@ -268,7 +477,8 @@ class GitHubIntegration:
         commit_message: str,
         branch: str,
         author_name: str = "Self-Improving AI Agent",
-        author_email: str = "agent@example.com"
+        author_email: str = "agent@example.com",
+        retry_on_conflict: bool = True
     ) -> Dict[str, Any]:
         """
         Update a file in the repository.
@@ -360,6 +570,18 @@ class GitHubIntegration:
         except GithubException as e:
             error_msg = f"GitHub API error {e.status}: {e.data}"
             logger.error(f"Error updating file {file_path}: {error_msg}")
+            
+            # Handle merge conflicts
+            if e.status == 409 and retry_on_conflict:
+                logger.info(f"Merge conflict detected for {file_path}, attempting resolution")
+                resolution = await self.resolve_conflict(file_path, branch)
+                if resolution.get("resolved"):
+                    # Retry after resolution
+                    return await self.update_file(
+                        file_path, new_content, commit_message, branch,
+                        author_name, author_email, retry_on_conflict=False
+                    )
+            
             return {"error": error_msg}
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
@@ -425,6 +647,53 @@ class GitHubIntegration:
             
         except Exception as e:
             logger.error(f"Error creating pull request: {e}")
+            return {"error": str(e)}
+    
+    async def create_issue(
+        self,
+        title: str,
+        body: str,
+        labels: List[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Create an issue in the repository.
+        
+        Args:
+            title: Issue title
+            body: Issue description
+            labels: List of label names to add
+            
+        Returns:
+            Dictionary with issue information
+        """
+        try:
+            if not self.repository:
+                return {"error": "No repository available"}
+            
+            # Create the issue
+            issue = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.repository.create_issue(
+                    title=title,
+                    body=body,
+                    labels=labels or []
+                )
+            )
+            
+            logger.info(f"Created issue #{issue.number}: {title}")
+            
+            return {
+                "issue_number": issue.number,
+                "title": issue.title,
+                "body": issue.body,
+                "url": issue.html_url,
+                "state": issue.state,
+                "created_at": issue.created_at.isoformat(),
+                "labels": [label.name for label in issue.labels] if issue.labels else []
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating issue: {e}")
             return {"error": str(e)}
     
     async def get_open_pull_requests(self) -> List[Dict[str, Any]]:
@@ -588,7 +857,7 @@ class GitHubIntegration:
         base_branch: str = None
     ) -> Dict[str, Any]:
         """
-        Create a branch with code improvements and submit a pull request.
+        Create a branch with code improvements and submit a pull request with error recovery.
         
         Args:
             improvements: List of improvement dictionaries with file_path, content, description
@@ -664,9 +933,33 @@ class GitHubIntegration:
                 }
             }
             
+        except CircuitBreakerOpenError:
+            logger.warning("GitHub circuit breaker open, queuing operation")
+            # Queue the entire operation for later
+            self.queue_offline_operation({
+                "type": "create_improvement",
+                "improvements": improvements,
+                "base_branch": base_branch
+            })
+            return {
+                "status": "queued",
+                "message": "Operation queued for when connection is restored"
+            }
         except Exception as e:
             logger.error(f"Error creating improvement branch and PR: {e}")
             return {"error": str(e)}
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current GitHub integration status."""
+        return {
+            "connected": self.repository is not None,
+            "offline_mode": self.offline_mode,
+            "pending_operations": len(self.pending_operations),
+            "conflict_strategy": self.conflict_resolution_strategy,
+            "conflict_history": len(self.conflict_history),
+            "repo_name": self.repo_name,
+            "local_repo_available": self.local_repo is not None
+        }
     
     def _generate_pr_description(self, updated_files: List[Dict[str, Any]]) -> str:
         """

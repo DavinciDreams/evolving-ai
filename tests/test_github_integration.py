@@ -5,9 +5,10 @@ Comprehensive test for GitHub integration functionality.
 import asyncio
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 
-from evolving_agent.utils.github_integration import GitHubIntegration
+from evolving_agent.integrations.github_integration import GitHubIntegration
 from evolving_agent.utils.logging import setup_logger
 
 logger = setup_logger(__name__)
@@ -324,7 +325,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    # Fix missing import
-    from datetime import datetime
-
     asyncio.run(main())

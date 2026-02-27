@@ -19,8 +19,8 @@ from evolving_agent.core.agent import SelfImprovingAgent
 from evolving_agent.self_modification.code_analyzer import CodeAnalyzer
 from evolving_agent.self_modification.modifier import CodeModifier
 from evolving_agent.self_modification.validator import CodeValidator
-from evolving_agent.utils.agent_pr_manager import AgentPRManager
-from evolving_agent.utils.github_integration import GitHubIntegration
+from evolving_agent.self_modification.agent_pr_manager import AgentPRManager
+from evolving_agent.integrations.github_integration import GitHubIntegration
 
 
 @pytest.mark.asyncio
@@ -94,7 +94,7 @@ async def test_core_improvements():
                 code_validator=code_validator,
             )
 
-            print(f"   GitHub repository: {github_integration.repo.full_name}")
+            print(f"   GitHub repository: {github_integration.repository.full_name}")
             print("✅ GitHub integration working")
 
             # Test 6: Record successful merge feedback

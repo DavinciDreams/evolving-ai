@@ -3,24 +3,21 @@ import { chatService } from '../services/chatService';
 import toast from 'react-hot-toast';
 
 export const useChat = () => {
-  const sendMessage = useMutation({
-    mutationFn: ({ query, contextHints = [] }) =>
-      chatService.sendMessage(query, contextHints),
-    onSuccess: (data) => {
-      // Optionally show success feedback
-      console.log('Message sent successfully', data);
-    },
+  const mutation = useMutation({
+    mutationFn: ({ query, contextHints = [], conversationId = null }) =>
+      chatService.sendMessage(query, contextHints, conversationId),
     onError: (error) => {
       console.error('Error sending message:', error);
-      toast.error('Failed to send message');
+      toast.error(error?.response?.data?.detail || error?.message || 'Failed to send message');
     },
   });
 
   return {
-    sendMessage: sendMessage.mutate,
-    isLoading: sendMessage.isPending,
-    error: sendMessage.error,
-    data: sendMessage.data,
+    sendMessageAsync: mutation.mutateAsync,
+    sendMessage: mutation.mutate,
+    isLoading: mutation.isPending,
+    error: mutation.error,
+    data: mutation.data,
   };
 };
 

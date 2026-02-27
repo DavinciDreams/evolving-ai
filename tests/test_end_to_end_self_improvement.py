@@ -52,8 +52,8 @@ async def run_end_to_end_self_improvement():
         # Use the new AgentPRManager for comprehensive analysis
         try:
             # Import and use the AgentPRManager for comprehensive analysis
-            from evolving_agent.utils.agent_pr_manager import AgentPRManager
-            from evolving_agent.utils.github_integration import GitHubIntegration
+            from evolving_agent.self_modification.agent_pr_manager import AgentPRManager
+            from evolving_agent.integrations.github_integration import GitHubIntegration
 
             # Initialize GitHub integration for PR management
             github_integration = GitHubIntegration()
@@ -212,7 +212,7 @@ response = await agent.process_query("Optimize this code")
             else:
                 # Fallback to direct GitHub integration
                 print("⚠️  Using direct GitHub integration...")
-                from evolving_agent.utils.github_integration import GitHubIntegration
+                from evolving_agent.integrations.github_integration import GitHubIntegration
 
                 github_integration = GitHubIntegration()
                 await github_integration.initialize()

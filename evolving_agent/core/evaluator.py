@@ -2,6 +2,7 @@
 Output evaluation system for self-improvement.
 """
 
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime
@@ -70,54 +71,36 @@ class OutputEvaluator:
         custom_weights: Optional[Dict[str, float]] = None,
     ) -> EvaluationResult:
         """
-        Evaluate an output against multiple criteria.
+        Evaluate an output with a single consolidated LLM call.
 
-        Args:
-            query: The original query/task
-            output: The generated output to evaluate
-            context: Context used for generation
-            expected_criteria: Specific criteria to focus on
-            custom_weights: Custom weights for criteria
-
-        Returns:
-            EvaluationResult with scores and suggestions
+        Uses one prompt that scores all criteria at once, instead of
+        7 separate LLM calls. Falls back gracefully if parsing fails.
         """
         try:
-            logger.info("Evaluating output...")
+            logger.info("Starting consolidated evaluation of output...")
+            start_time = datetime.now()
 
-            # Use custom weights if provided
             weights = custom_weights or self.criteria_weights
             criteria_to_evaluate = expected_criteria or list(weights.keys())
 
-            # Evaluate each criterion
-            criteria_scores = {}
-            all_feedback = {}
-
-            for criterion in criteria_to_evaluate:
-                score, feedback = await self._evaluate_criterion(
-                    query, output, criterion, context
-                )
-                criteria_scores[criterion] = score
-                all_feedback[criterion] = feedback
-
-            # Calculate overall score
-            overall_score = sum(
-                criteria_scores.get(criterion, 0) * weights.get(criterion, 0)
-                for criterion in criteria_scores
-            ) / sum(weights.get(criterion, 0) for criterion in criteria_scores)
-
-            # Extract strengths and weaknesses
-            strengths, weaknesses = self._extract_strengths_weaknesses(
-                criteria_scores, all_feedback
+            # Single consolidated evaluation call
+            criteria_scores, all_feedback, failed_criteria = await self._evaluate_all_criteria(
+                query, output, criteria_to_evaluate, context
             )
 
-            # Generate improvement suggestions
-            improvement_suggestions = await self._generate_improvement_suggestions(
-                query, output, criteria_scores, all_feedback
-            )
+            if failed_criteria:
+                logger.warning(f"Failed/unreliable evaluations for {len(failed_criteria)} criteria: {failed_criteria}")
 
-            # Calculate confidence based on consistency of scores
+            overall_score = self._calculate_overall_score(criteria_scores, weights)
+            strengths, weaknesses = self._extract_strengths_weaknesses(criteria_scores, all_feedback)
             confidence = self._calculate_confidence(criteria_scores)
+
+            # Extract suggestions from the consolidated response instead of a separate LLM call
+            improvement_suggestions = []
+            for feedback in all_feedback.values():
+                if isinstance(feedback, dict):
+                    improvement_suggestions.extend(feedback.get("suggestions", []))
+            improvement_suggestions = improvement_suggestions[:5]
 
             evaluation_result = EvaluationResult(
                 overall_score=overall_score,
@@ -126,7 +109,7 @@ class OutputEvaluator:
                 weaknesses=weaknesses,
                 improvement_suggestions=improvement_suggestions,
                 feedback=(
-                    " ".join(all_feedback)
+                    " ".join(str(feedback) for feedback in all_feedback.values())
                     if all_feedback
                     else "No specific feedback provided."
                 ),
@@ -136,17 +119,152 @@ class OutputEvaluator:
                     "criteria_evaluated": criteria_to_evaluate,
                     "weights_used": weights,
                     "context_available": context is not None,
+                    "evaluation_time_seconds": (datetime.now() - start_time).total_seconds(),
+                    "consolidated_evaluation": True,
+                    "failed_criteria": failed_criteria,
                 },
             )
 
-            # Store evaluation history
             self.evaluation_history.append((query, output, evaluation_result))
 
-            logger.info(f"Evaluation completed. Overall score: {overall_score:.2f}")
+            total_time = (datetime.now() - start_time).total_seconds()
+            logger.info(f"Consolidated evaluation completed in {total_time:.2f} seconds. Overall score: {overall_score:.2f}")
             return evaluation_result
 
         except Exception as e:
             logger.error(f"Failed to evaluate output: {e}")
+            raise
+
+    async def _evaluate_all_criteria(
+        self,
+        query: str,
+        output: str,
+        criteria: List[str],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]], List[str]]:
+        """Evaluate all criteria in a single LLM call."""
+        try:
+            criteria_list = ", ".join(criteria)
+            scores_template = ", ".join(f'"{c}": 0.0' for c in criteria)
+
+            prompt = f"""\
+Evaluate this response on a 0.0-1.0 scale for each criterion.
+
+QUERY: {query}
+
+RESPONSE: {output[:2000]}
+
+Score each: {criteria_list}
+
+Reply with ONLY this JSON, no other text:
+{{"scores": {{{scores_template}}}, "strengths": ["strength1"], "weaknesses": ["weakness1"], "suggestions": ["suggestion1"]}}"""
+
+            response = await llm_manager.generate_response(
+                prompt=prompt,
+                provider=config.evaluation_provider or config.default_llm_provider,
+                temperature=0.2,
+                max_tokens=600,
+            )
+
+            if not response or not response.strip():
+                logger.warning("Empty consolidated evaluation response, using defaults")
+                return self._default_evaluation(criteria)
+
+            return self._parse_consolidated_response(response, criteria)
+
+        except Exception as e:
+            logger.error(f"Consolidated evaluation failed: {e}")
+            return self._default_evaluation(criteria)
+
+    def _parse_consolidated_response(
+        self, response: str, criteria: List[str]
+    ) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]], List[str]]:
+        """Parse the consolidated evaluation response."""
+        try:
+            response = response.strip()
+            # Extract JSON from response
+            start = response.find("{")
+            end = response.rfind("}") + 1
+            if start >= 0 and end > start:
+                response = response[start:end]
+
+            data = json.loads(response)
+
+            # Extract scores
+            scores_data = data.get("scores", data)  # Handle both nested and flat formats
+            criteria_scores = {}
+            for c in criteria:
+                score = scores_data.get(c, 0.7)
+                criteria_scores[c] = max(0.0, min(1.0, float(score)))
+
+            # Build feedback dict
+            strengths = data.get("strengths", [])
+            weaknesses = data.get("weaknesses", [])
+            suggestions = data.get("suggestions", [])
+
+            all_feedback = {}
+            for c in criteria:
+                all_feedback[c] = {
+                    "reasoning": f"Score: {criteria_scores[c]:.2f}",
+                    "strengths": strengths if criteria_scores[c] >= 0.8 else [],
+                    "specific_issues": weaknesses if criteria_scores[c] <= 0.4 else [],
+                    "suggestions": suggestions,
+                }
+
+            return criteria_scores, all_feedback, []
+
+        except Exception as e:
+            logger.warning(f"Failed to parse consolidated evaluation: {e}")
+            # Try line-by-line score extraction as fallback
+            return self._fallback_parse(response, criteria)
+
+    def _fallback_parse(
+        self, response: str, criteria: List[str]
+    ) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]], List[str]]:
+        """Fallback parser that extracts scores from non-JSON responses."""
+        import re
+        criteria_scores = {}
+        all_feedback = {}
+        failed = []
+
+        for c in criteria:
+            pattern = rf'"{c}"?\s*[:=]\s*(\d+\.?\d*)'
+            match = re.search(pattern, response, re.IGNORECASE)
+            if match:
+                score = float(match.group(1))
+                if score > 1.0:
+                    score = score / 10.0
+                criteria_scores[c] = max(0.0, min(1.0, score))
+            else:
+                criteria_scores[c] = 0.7
+                failed.append(c)
+            all_feedback[c] = {"reasoning": "Parsed from fallback", "strengths": [], "specific_issues": [], "suggestions": []}
+
+        return criteria_scores, all_feedback, failed
+
+    def _default_evaluation(
+        self, criteria: List[str]
+    ) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]], List[str]]:
+        """Return default neutral evaluation when LLM call fails entirely."""
+        criteria_scores = {c: 0.7 for c in criteria}
+        all_feedback = {c: {"reasoning": "Default score (evaluation unavailable)", "strengths": [], "specific_issues": [], "suggestions": []} for c in criteria}
+        return criteria_scores, all_feedback, list(criteria)
+
+    async def _evaluate_criterion_with_error_handling(
+        self,
+        query: str,
+        output: str,
+        criterion: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[float, Dict[str, Any]]:
+        """
+        Wrapper for _evaluate_criterion with enhanced error handling for parallel execution.
+        """
+        try:
+            return await self._evaluate_criterion(query, output, criterion, context)
+        except Exception as e:
+            logger.error(f"Error in _evaluate_criterion_with_error_handling for {criterion}: {e}")
+            # Re-raise to be caught by the gather error handling
             raise
 
     async def _evaluate_criterion(
@@ -176,6 +294,11 @@ class OutputEvaluator:
                 max_tokens=500,
             )
 
+            # Handle empty responses (e.g. from rate limiting or reasoning-only models)
+            if not evaluation_response or not evaluation_response.strip():
+                logger.warning(f"Empty evaluation response for {criterion}, using neutral score")
+                return 0.7, {"reasoning": "Evaluation returned empty response", "parse_error": "empty_response"}
+
             # Parse evaluation response
             score, feedback = self._parse_evaluation_response(
                 evaluation_response, criterion
@@ -185,7 +308,7 @@ class OutputEvaluator:
 
         except Exception as e:
             logger.error(f"Failed to evaluate criterion {criterion}: {e}")
-            return 0.5, {"error": str(e)}
+            return 0.7, {"error": str(e)}
 
     def _create_evaluation_prompt(
         self, query: str, output: str, criterion: str, context_info: str
@@ -258,7 +381,7 @@ class OutputEvaluator:
             try:
                 # Simple score extraction
                 lines = response.split("\n")
-                score = 0.5
+                score = 0.7  # Neutral default for unparseable responses
                 for line in lines:
                     if "score" in line.lower():
                         # Extract number
@@ -274,7 +397,7 @@ class OutputEvaluator:
                 return score, {"reasoning": response, "parse_error": str(e)}
 
             except Exception:
-                return 0.5, {"error": f"Failed to parse evaluation: {e}"}
+                return 0.7, {"error": f"Failed to parse evaluation: {e}"}
 
     def _extract_strengths_weaknesses(
         self, criteria_scores: Dict[str, float], all_feedback: Dict[str, Dict[str, Any]]
@@ -362,6 +485,18 @@ class OutputEvaluator:
         except Exception as e:
             logger.error(f"Failed to generate improvement suggestions: {e}")
             return ["Review and refine the output for better quality"]
+
+    def _calculate_overall_score(
+        self, criteria_scores: Dict[str, float], weights: Dict[str, float]
+    ) -> float:
+        """
+        Calculate overall score from criteria scores and weights.
+        Extracted to separate method for parallel execution.
+        """
+        return sum(
+            criteria_scores.get(criterion, 0) * weights.get(criterion, 0)
+            for criterion in criteria_scores
+        ) / sum(weights.get(criterion, 0) for criterion in criteria_scores)
 
     def _calculate_confidence(self, criteria_scores: Dict[str, float]) -> float:
         """Calculate confidence based on consistency of scores."""

@@ -114,7 +114,7 @@ async def test_github_endpoints():
             "knowledge_suggestions": ["Test knowledge suggestion"],
         }
         results["code_improvements"] = await test_endpoint(
-            session, "POST", "/github/improve", improvement_request
+            session, "POST", "/self-improve", improvement_request
         )
 
         # Only test demo PR if GitHub is available

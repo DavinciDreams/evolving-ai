@@ -5,10 +5,12 @@ Dynamic context management for intelligent query processing.
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
+import asyncio
 
 from ..utils.config import config
 from ..utils.llm_interface import llm_manager
 from ..utils.logging import setup_logger
+from ..utils.error_recovery import error_recovery_manager
 from .memory import LongTermMemory, MemoryEntry
 
 logger = setup_logger(__name__)
@@ -26,13 +28,29 @@ class ContextQuery:
 
 
 class ContextManager:
-    """Manages dynamic context retrieval and processing."""
+    """Manages dynamic context retrieval and processing with error recovery."""
 
     def __init__(self, memory: LongTermMemory):
         self.memory = memory
         self.active_contexts: Dict[str, Any] = {}
         self.context_cache: Dict[str, Tuple[List[MemoryEntry], datetime]] = {}
         self.cache_ttl = timedelta(minutes=30)
+        
+        # Degraded mode support
+        self.degraded_mode = False
+        self.degraded_cache: Dict[str, Any] = {}
+        self.memory_unavailable_count = 0
+        self.memory_failure_threshold = 3
+        
+        # Cache warming
+        self.cache_warming_enabled = True
+        self.warm_cache_keys: List[str] = []
+        self.cache_warm_interval = timedelta(minutes=15)
+        self.last_cache_warm: Optional[datetime] = None
+        
+        # Error recovery
+        self.recovery_attempts: Dict[str, int] = {}
+        self.max_recovery_attempts = 3
 
     async def get_relevant_context(
         self,
@@ -42,7 +60,7 @@ class ContextManager:
         similarity_threshold: float = 0.6,
     ) -> Dict[str, Any]:
         """
-        Get relevant context for a query using dynamic retrieval.
+        Get relevant context for a query using dynamic retrieval with error recovery.
 
         Args:
             query: The main query or task
@@ -56,13 +74,18 @@ class ContextManager:
         try:
             logger.info(f"Retrieving context for query: {query[:100]}...")
 
-            # Generate context queries
-            context_queries = await self._generate_context_queries(query, context_types)
+            # Check degraded mode
+            if self.degraded_mode:
+                logger.info("Operating in degraded mode, using cached context")
+                return self._get_degraded_context(query)
+
+            # Generate context queries with error recovery
+            context_queries = await self._generate_context_queries_with_recovery(query, context_types)
 
             # Retrieve memories for each context query
             all_contexts = {}
             for ctx_query in context_queries:
-                contexts = await self._retrieve_context_memories(
+                contexts = await self._retrieve_context_memories_with_recovery(
                     ctx_query, similarity_threshold, max_context_items
                 )
                 if contexts:
@@ -80,12 +103,160 @@ class ContextManager:
             system_context = await self._get_system_context()
             organized_context["system_state"] = system_context
 
+            # Update degraded cache with successful results
+            self._update_degraded_cache(query, organized_context)
+
             logger.info(f"Retrieved {len(organized_context)} context categories")
             return organized_context
 
         except Exception as e:
             logger.error(f"Failed to get relevant context: {e}")
-            return {}
+            # Try to return degraded context
+            return self._get_degraded_context(query)
+    
+    async def _generate_context_queries_with_recovery(
+        self, main_query: str, context_types: Optional[List[str]] = None
+    ) -> List[ContextQuery]:
+        """Generate context queries with error recovery."""
+        try:
+            return await self._generate_context_queries(main_query, context_types)
+        except Exception as e:
+            logger.error(f"Error generating context queries: {e}")
+            # Return fallback queries
+            return [
+                ContextQuery(
+                    query=main_query,
+                    context_type="fallback",
+                    priority=0.5,
+                    timestamp=datetime.now(),
+                    metadata={"fallback": True, "error": str(e)}
+                )
+            ]
+    
+    async def _retrieve_context_memories_with_recovery(
+        self, context_query: ContextQuery, similarity_threshold: float, max_items: int
+    ) -> List[Tuple[MemoryEntry, float]]:
+        """Retrieve context memories with error recovery."""
+        try:
+            return await self._retrieve_context_memories(
+                context_query, similarity_threshold, max_items
+            )
+        except Exception as e:
+            logger.error(f"Error retrieving context memories: {e}")
+            self.memory_unavailable_count += 1
+            
+            # Check if we should enter degraded mode
+            if self.memory_unavailable_count >= self.memory_failure_threshold:
+                self._enable_degraded_mode()
+            
+            # Try to return cached data
+            cache_key = f"{context_query.query}_{context_query.context_type}"
+            if cache_key in self.context_cache:
+                logger.info(f"Using cached data for {cache_key}")
+                return self.context_cache[cache_key][0]
+            
+            return []
+    
+    def _enable_degraded_mode(self):
+        """Enable degraded mode when memory is unavailable."""
+        self.degraded_mode = True
+        error_recovery_manager.set_degraded_mode(True)
+        logger.warning("Memory unavailable, entering degraded mode")
+    
+    def _disable_degraded_mode(self):
+        """Disable degraded mode when memory is available again."""
+        self.degraded_mode = False
+        self.memory_unavailable_count = 0
+        error_recovery_manager.set_degraded_mode(False)
+        logger.info("Memory available, exiting degraded mode")
+    
+    def _get_degraded_context(self, query: str) -> Dict[str, Any]:
+        """Get context in degraded mode using cached data."""
+        logger.info(f"Returning degraded context for query: {query[:50]}...")
+        
+        # Try to find similar query in degraded cache
+        for cached_query, cached_context in self.degraded_cache.items():
+            if query.lower() in cached_query.lower() or cached_query.lower() in query.lower():
+                logger.info(f"Found similar cached context: {cached_query[:50]}...")
+                return cached_context
+        
+        # Return minimal context if no match
+        return {
+            "system_state": {
+                "timestamp": datetime.now().isoformat(),
+                "mode": "degraded",
+                "message": "Operating in degraded mode with limited context"
+            },
+            "recent_interactions": [],
+            "degraded": True
+        }
+    
+    def _update_degraded_cache(self, query: str, context: Dict[str, Any]):
+        """Update degraded cache with new context."""
+        # Keep only last 10 queries in degraded cache
+        if len(self.degraded_cache) >= 10:
+            oldest_key = next(iter(self.degraded_cache))
+            del self.degraded_cache[oldest_key]
+        
+        self.degraded_cache[query] = context
+    
+    async def warm_cache(self, queries: List[str]):
+        """Warm the cache with common queries for faster recovery."""
+        if not self.cache_warming_enabled:
+            return
+        
+        logger.info(f"Warming cache with {len(queries)} queries")
+        
+        for query in queries:
+            try:
+                await self.get_relevant_context(
+                    query=query,
+                    max_context_items=5,
+                    similarity_threshold=0.5
+                )
+            except Exception as e:
+                logger.warning(f"Cache warming failed for query '{query}': {e}")
+        
+        self.last_cache_warm = datetime.now()
+        logger.info("Cache warming completed")
+    
+    async def auto_warm_cache(self):
+        """Automatically warm cache based on recent queries."""
+        if not self.cache_warming_enabled:
+            return
+        
+        # Check if cache warming is needed
+        if self.last_cache_warm:
+            time_since_warm = datetime.now() - self.last_cache_warm
+            if time_since_warm < self.cache_warm_interval:
+                return
+        
+        # Get recent queries from degraded cache
+        recent_queries = list(self.degraded_cache.keys())[:5]
+        if recent_queries:
+            await self.warm_cache(recent_queries)
+    
+    def enable_cache_warming(self, enabled: bool):
+        """Enable or disable cache warming."""
+        self.cache_warming_enabled = enabled
+        logger.info(f"Cache warming {'enabled' if enabled else 'disabled'}")
+    
+    def is_degraded_mode(self) -> bool:
+        """Check if operating in degraded mode."""
+        return self.degraded_mode
+    
+    async def check_memory_health(self) -> bool:
+        """Check if memory is healthy and available."""
+        try:
+            # Try a simple memory operation
+            stats = await self.memory.get_memory_stats()
+            return stats is not None
+        except Exception as e:
+            logger.error(f"Memory health check failed: {e}")
+            self.memory_unavailable_count += 1
+            if self.memory_unavailable_count >= self.memory_failure_threshold:
+                self._enable_degraded_mode()
+            return False
 
     async def _generate_context_queries(
         self, main_query: str, context_types: Optional[List[str]] = None
@@ -193,11 +364,14 @@ class ContextManager:
                 if datetime.now() - cache_time < self.cache_ttl:
                     return cached_memories[:max_items]
 
-            # Search memories
+            # Search memories — don't filter by memory_type since stored types
+            # (interaction, evaluation, error, etc.) don't match context query
+            # types (similar_tasks, past_solutions, etc.). Vector similarity
+            # search already finds relevant results across all memory types.
             memories = await self.memory.search_memories(
                 query=context_query.query,
                 n_results=max_items * 2,  # Get more for filtering
-                memory_type=context_query.context_type,
+                memory_type=None,
                 similarity_threshold=similarity_threshold,
             )
 
@@ -407,4 +581,17 @@ class ContextManager:
     def clear_cache(self):
         """Clear the context cache."""
         self.context_cache.clear()
+        self.degraded_cache.clear()
         logger.info("Context cache cleared")
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get current context manager status."""
+        return {
+            "degraded_mode": self.degraded_mode,
+            "cache_size": len(self.context_cache),
+            "degraded_cache_size": len(self.degraded_cache),
+            "memory_unavailable_count": self.memory_unavailable_count,
+            "cache_warming_enabled": self.cache_warming_enabled,
+            "last_cache_warm": self.last_cache_warm.isoformat() if self.last_cache_warm else None,
+            "active_contexts": len(self.active_contexts)
+        }

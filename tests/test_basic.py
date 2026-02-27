@@ -1,32 +1,21 @@
-import os
-import sys
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 """
 Basic tests for the self-improving agent.
 """
 
-import asyncio
-import sys
-from pathlib import Path
+import os
 
 import pytest
-
-# Add the project root to the path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
 
 from evolving_agent.core.context_manager import ContextManager
 from evolving_agent.core.evaluator import OutputEvaluator
 from evolving_agent.core.memory import LongTermMemory, MemoryEntry
 from evolving_agent.knowledge.base import KnowledgeBase, KnowledgeEntry
-from evolving_agent.utils.config import config
+from evolving_agent.utils.config import Config
 
 
 class TestMemorySystem:
     """Test the memory system."""
 
-    @pytest.mark.asyncio
     async def test_memory_initialization(self):
         """Test memory system initialization."""
         memory = LongTermMemory()
@@ -35,7 +24,6 @@ class TestMemorySystem:
         assert memory.initialized is True
         assert memory.collection is not None
 
-    @pytest.mark.asyncio
     async def test_add_and_search_memory(self):
         """Test adding and searching memories."""
         memory = LongTermMemory()
@@ -65,7 +53,6 @@ class TestMemorySystem:
 class TestKnowledgeBase:
     """Test the knowledge base system."""
 
-    @pytest.mark.asyncio
     async def test_knowledge_initialization(self):
         """Test knowledge base initialization."""
         kb = KnowledgeBase()
@@ -74,7 +61,6 @@ class TestKnowledgeBase:
         assert kb.initialized is True
         assert len(kb.categories) > 0
 
-    @pytest.mark.asyncio
     async def test_add_and_search_knowledge(self):
         """Test adding and searching knowledge."""
         kb = KnowledgeBase()
@@ -102,17 +88,22 @@ class TestKnowledgeBase:
 class TestEvaluator:
     """Test the evaluation system."""
 
-    @pytest.mark.asyncio
-    async def test_output_evaluation(self):
-        """Test output evaluation."""
+    async def test_output_evaluation(self, monkeypatch):
+        """Test output evaluation with mocked LLM."""
+        from unittest.mock import AsyncMock, patch
+
         evaluator = OutputEvaluator()
 
-        # Test evaluation
-        result = await evaluator.evaluate_output(
-            query="What is Python?",
-            output="Python is a high-level programming language known for its simplicity and readability.",
-            context={"test": True},
-        )
+        mock_response = '{"scores": {"accuracy": 0.8, "completeness": 0.75, "clarity": 0.9, "relevance": 0.85, "creativity": 0.7, "efficiency": 0.8, "safety": 0.95}, "strengths": ["Clear explanation"], "weaknesses": [], "suggestions": ["Add examples"]}'
+
+        with patch('evolving_agent.core.evaluator.llm_manager.generate_response', new_callable=AsyncMock) as mock_gen:
+            mock_gen.return_value = mock_response
+
+            result = await evaluator.evaluate_output(
+                query="What is Python?",
+                output="Python is a high-level programming language known for its simplicity and readability.",
+                context={"test": True},
+            )
 
         assert result.overall_score > 0
         assert result.overall_score <= 1.0
@@ -123,7 +114,6 @@ class TestEvaluator:
 class TestContextManager:
     """Test the context management system."""
 
-    @pytest.mark.asyncio
     async def test_context_manager_initialization(self):
         """Test context manager initialization."""
         memory = LongTermMemory()
@@ -132,7 +122,6 @@ class TestContextManager:
         context_manager = ContextManager(memory)
         assert context_manager.memory is not None
 
-    @pytest.mark.asyncio
     async def test_get_relevant_context(self):
         """Test retrieving relevant context."""
         memory = LongTermMemory()
@@ -163,50 +152,47 @@ class TestConfiguration:
 
     def test_config_properties(self):
         """Test configuration properties."""
-        assert hasattr(config, "default_llm_provider")
-        assert hasattr(config, "openrouter_api_key")
-        assert hasattr(config, "memory_persist_directory")
-        assert hasattr(config, "enable_self_modification")
+        # Create a fresh config to read from current env
+        cfg = Config()
 
-        # Test that default provider is now anthropic
-        assert config.default_llm_provider == "anthropic"
+        assert hasattr(cfg, "default_llm_provider")
+        assert hasattr(cfg, "openrouter_api_key")
+        assert hasattr(cfg, "memory_persist_directory")
+        assert hasattr(cfg, "enable_self_modification")
+
+        # Verify provider is set (value comes from .env, not hardcoded)
+        assert cfg.default_llm_provider is not None
+        assert len(cfg.default_llm_provider) > 0
 
     def test_config_methods(self):
         """Test configuration methods."""
-        all_config = config.get_all_config()
+        cfg = Config()
+        all_config = cfg.get_all_config()
         assert isinstance(all_config, dict)
         assert len(all_config) > 0
 
 
 async def test_basic_functionality():
-    """Basic functionality test."""
-    print("Testing basic functionality...")
+    """Basic functionality smoke test."""
+    from unittest.mock import AsyncMock, patch
 
-    try:
-        # Test memory
-        memory = LongTermMemory()
-        await memory.initialize()
-        print("✓ Memory system initialized")
+    # Test memory
+    memory = LongTermMemory()
+    await memory.initialize()
+    assert memory.initialized is True
 
-        # Test knowledge base
-        kb = KnowledgeBase()
-        await kb.initialize()
-        print("✓ Knowledge base initialized")
+    # Test knowledge base
+    kb = KnowledgeBase()
+    await kb.initialize()
+    assert kb.initialized is True
 
-        # Test evaluator
-        evaluator = OutputEvaluator()
+    # Test evaluator with mocked LLM
+    evaluator = OutputEvaluator()
+    mock_response = '{"scores": {"accuracy": 0.8, "completeness": 0.75, "clarity": 0.9, "relevance": 0.85, "creativity": 0.7, "efficiency": 0.8, "safety": 0.95}, "strengths": ["Good"], "weaknesses": [], "suggestions": ["Improve"]}'
+
+    with patch('evolving_agent.core.evaluator.llm_manager.generate_response', new_callable=AsyncMock) as mock_gen:
+        mock_gen.return_value = mock_response
         result = await evaluator.evaluate_output(
             query="Test query", output="Test output response"
         )
-        print(f"✓ Evaluator working (score: {result.overall_score:.2f})")
-
-        print("All basic tests passed!")
-
-    except Exception as e:
-        print(f"✗ Test failed: {e}")
-        raise
-
-
-if __name__ == "__main__":
-    # Run a simple test
-    asyncio.run(test_basic_functionality())
+    assert result.overall_score > 0

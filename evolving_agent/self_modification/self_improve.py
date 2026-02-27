@@ -14,7 +14,7 @@ def main():
         return
 
     if sys.argv[1] == "self-improve":
-        from evolving_agent.utils.github_enhanced_modifier import (
+        from evolving_agent.self_modification.github_enhanced_modifier import (
             GitHubEnabledSelfModifier,
         )
 
@@ -45,7 +45,7 @@ def main():
             repo_name=repo_name,
             local_repo_path=local_repo_path,
         )
-        from evolving_agent.utils.agent_pr_manager import AgentPRManager
+        from evolving_agent.self_modification.agent_pr_manager import AgentPRManager
 
         modifier.pr_manager = AgentPRManager(
             github_integration=modifier.github_integration,

@@ -5,20 +5,25 @@ FastAPI web server for the Self-Improving AI Agent with Swagger documentation.
 import asyncio
 import os
 import uuid
+import signal
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import uvicorn
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from evolving_agent.core.agent import SelfImprovingAgent
 from evolving_agent.integrations.discord_integration import DiscordIntegration
 from evolving_agent.utils.config import config
-from evolving_agent.utils.github_enhanced_modifier import GitHubEnabledSelfModifier
+from evolving_agent.self_modification.github_enhanced_modifier import GitHubEnabledSelfModifier
 from evolving_agent.utils.logging import setup_logger
+from evolving_agent.utils.error_recovery import error_recovery_manager
+from evolving_agent.utils.llm_interface import llm_manager
 
 logger = setup_logger(__name__)
 
@@ -27,11 +32,15 @@ agent: Optional[SelfImprovingAgent] = None
 github_modifier: Optional[GitHubEnabledSelfModifier] = None
 discord_integration: Optional[DiscordIntegration] = None
 
+# Server state
+server_shutdown = False
+graceful_shutdown_timeout = 30  # seconds
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize and cleanup the agent."""
-    global agent, github_modifier, discord_integration
+    """Initialize and cleanup the agent with graceful shutdown."""
+    global agent, github_modifier, discord_integration, server_shutdown
     try:
         logger.info("Initializing Self-Improving Agent...")
         agent = SelfImprovingAgent()
@@ -44,10 +53,12 @@ async def lifespan(app: FastAPI):
 
         if github_token and github_repo:
             logger.info("Initializing GitHub integration...")
+            local_repo_path = os.getenv("GITHUB_LOCAL_REPO_PATH", ".")
             github_modifier = GitHubEnabledSelfModifier(
-                github_token=github_token, repo_name=github_repo, local_repo_path="."
+                github_token=github_token, repo_name=github_repo, local_repo_path=local_repo_path
             )
             await github_modifier.initialize()
+            agent.github_modifier = github_modifier
             logger.info("GitHub integration initialized successfully")
         else:
             logger.warning(
@@ -75,15 +86,35 @@ async def lifespan(app: FastAPI):
 
         yield
     finally:
+        # Graceful shutdown
+        logger.info("Initiating graceful shutdown...")
+        server_shutdown = True
+        
         # Cleanup Discord integration
         if discord_integration:
             logger.info("Shutting down Discord integration...")
-            await discord_integration.close()
+            try:
+                await discord_integration.close()
+                logger.info("Discord integration shut down successfully")
+            except Exception as e:
+                logger.error(f"Error shutting down Discord: {e}")
 
         if agent:
             logger.info("Cleaning up agent...")
-            # await agent.cleanup()  # Agent doesn't have cleanup method
-            logger.info("Agent cleanup completed")
+            try:
+                await agent.cleanup()
+                logger.info("Agent cleanup completed")
+            except Exception as e:
+                logger.error(f"Error during agent cleanup: {e}")
+        
+        # Clean up error recovery resources
+        try:
+            error_recovery_manager.cleanup_old_checkpoints()
+            logger.info("Error recovery resources cleaned up")
+        except Exception as e:
+            logger.error(f"Error cleaning up error recovery: {e}")
+        
+        logger.info("Graceful shutdown completed")
 
 
 # Pydantic models for API requests and responses
@@ -98,6 +129,9 @@ class QueryRequest(BaseModel):
     )
     context_hints: Optional[List[str]] = Field(
         None, description="Optional context hints to guide the response"
+    )
+    conversation_id: Optional[str] = Field(
+        None, description="Optional conversation ID for tracking multi-turn conversations"
     )
 
     model_config = {
@@ -315,6 +349,159 @@ class RepositoryInfo(BaseModel):
     open_issues: int = Field(..., description="Number of open issues")
 
 
+class CreateIssueRequest(BaseModel):
+    """Request model for creating a GitHub issue."""
+
+    title: str = Field(
+        ...,
+        description="Issue title",
+        min_length=1,
+        max_length=255,
+    )
+    description: str = Field(
+        ...,
+        description="Issue description/body",
+        min_length=1,
+        max_length=65536,
+    )
+    labels: Optional[List[str]] = Field(
+        None,
+        description="Optional list of labels to add to the issue",
+    )
+    assignees: Optional[List[str]] = Field(
+        None,
+        description="Optional list of assignees (note: requires GitHub permissions)",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "title": "Add new feature for Discord integration",
+                "description": "Users should be able to request features from Discord...",
+                "labels": ["enhancement", "discord"],
+                "assignees": ["username"],
+            }
+        }
+    }
+
+
+class CreateIssueResponse(BaseModel):
+    """Response model for creating a GitHub issue."""
+
+    issue_number: int = Field(..., description="GitHub issue number")
+    issue_url: str = Field(..., description="GitHub issue URL")
+
+
+# --- OpenAI-compatible models ---
+
+
+class ChatCompletionMessage(BaseModel):
+    """A single message in the OpenAI chat completions format."""
+
+    role: str = Field(
+        ...,
+        description="The role of the message author (system, user, assistant)",
+    )
+    content: str = Field(
+        ...,
+        description="The content of the message",
+    )
+    name: Optional[str] = Field(
+        None,
+        description="Optional name of the message author",
+    )
+
+
+class ChatCompletionRequest(BaseModel):
+    """OpenAI-compatible chat completion request."""
+
+    model: str = Field(
+        "evolving-ai",
+        description="Model identifier (informational; the agent uses its configured provider)",
+    )
+    messages: List[ChatCompletionMessage] = Field(
+        ...,
+        description="List of messages in the conversation",
+        min_length=1,
+    )
+    temperature: Optional[float] = Field(
+        None,
+        description="Sampling temperature (0.0-2.0)",
+        ge=0.0,
+        le=2.0,
+    )
+    max_tokens: Optional[int] = Field(
+        None,
+        description="Maximum tokens in the response",
+        ge=1,
+    )
+    stream: Optional[bool] = Field(
+        False,
+        description="Streaming is not supported; must be false or omitted",
+    )
+    n: Optional[int] = Field(
+        1,
+        description="Number of completions (only 1 supported)",
+    )
+    stop: Optional[List[str]] = Field(
+        None,
+        description="Stop sequences (accepted for compatibility)",
+    )
+    user: Optional[str] = Field(
+        None,
+        description="End-user identifier for tracking",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "model": "evolving-ai",
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": "What are best practices for code optimization?"},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 2048,
+            }
+        }
+    }
+
+
+class ChatCompletionChoice(BaseModel):
+    """A single completion choice."""
+
+    index: int = Field(0, description="Choice index")
+    message: ChatCompletionMessage = Field(
+        ..., description="The assistant's response message"
+    )
+    finish_reason: str = Field(
+        "stop", description="The reason the model stopped generating"
+    )
+
+
+class ChatCompletionUsage(BaseModel):
+    """Token usage information."""
+
+    prompt_tokens: int = Field(0, description="Tokens in the prompt")
+    completion_tokens: int = Field(0, description="Tokens in the completion")
+    total_tokens: int = Field(0, description="Total tokens used")
+
+
+class ChatCompletionResponse(BaseModel):
+    """OpenAI-compatible chat completion response."""
+
+    id: str = Field(..., description="Unique completion identifier")
+    object: str = Field("chat.completion", description="Object type")
+    created: int = Field(..., description="Unix timestamp of creation")
+    model: str = Field(..., description="Model identifier used")
+    choices: List[ChatCompletionChoice] = Field(
+        ..., description="Completion choices"
+    )
+    usage: ChatCompletionUsage = Field(
+        ..., description="Token usage statistics"
+    )
+
+
 # FastAPI app initialization
 app = FastAPI(
     title="Self-Improving AI Agent API",
@@ -332,6 +519,7 @@ app = FastAPI(
     * **Multi-LLM Support**: OpenAI, Anthropic, and OpenRouter integration
     * **GitHub Integration**: Automated code improvements via pull requests
     * **Discord Integration**: Real-time chat bot interface
+    * **OpenAI Compatible**: Drop-in `/v1/chat/completions` endpoint for standard tooling
 
     ## Getting Started
 
@@ -361,6 +549,42 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Error recovery middleware
+@app.middleware("http")
+async def error_recovery_middleware(request: Request, call_next):
+    """Middleware for error recovery and graceful degradation."""
+    try:
+        response = await call_next(request)
+        return response
+    except HTTPException as e:
+        # Let HTTP exceptions propagate normally
+        raise e
+    except Exception as e:
+        logger.error(f"Unhandled error in request {request.url}: {e}")
+        
+        # Check if we should return a degraded response
+        if error_recovery_manager.is_degraded_mode():
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "Service temporarily unavailable",
+                    "message": "The system is operating in degraded mode. Please try again later.",
+                    "degraded_mode": True,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+        
+        # Return generic error response
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Internal server error",
+                "message": "An unexpected error occurred. Please try again.",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
 
 
 def get_agent() -> SelfImprovingAgent:
@@ -441,23 +665,344 @@ async def chat_with_agent(
         logger.info(f"Processing query {query_id}: {request.query[:100]}...")
 
         # Process the query
-        response = await current_agent.run(request.query, request.context_hints)
-
-        # Note: The agent's run method returns just the response string
-        # Additional metrics would need to be retrieved separately
+        response = await current_agent.run(
+            request.query,
+            context_hints=request.context_hints,
+            conversation_id=request.conversation_id,
+        )
 
         return QueryResponse(
             response=response,
             query_id=query_id,
             timestamp=timestamp,
-            evaluation_score=None,  # Would need to be retrieved from evaluator
-            memory_stored=True,  # Assuming successful storage
-            knowledge_updated=True,  # Assuming knowledge was processed
+            evaluation_score=current_agent.last_evaluation_score,
+            memory_stored=True,
+            knowledge_updated=True,
         )
 
     except Exception as e:
         logger.error(f"Error processing query: {e}")
         raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
+
+
+def _estimate_token_count(text: str) -> int:
+    """Estimate token count for usage reporting."""
+    try:
+        import tiktoken
+
+        encoding = tiktoken.get_encoding("cl100k_base")
+        return len(encoding.encode(text))
+    except Exception:
+        return max(1, len(text) // 4)
+
+
+@app.post(
+    "/v1/chat/completions",
+    response_model=ChatCompletionResponse,
+    tags=["OpenAI Compatible"],
+    summary="OpenAI-compatible chat completions",
+)
+async def openai_chat_completions(
+    request: ChatCompletionRequest,
+    background_tasks: BackgroundTasks,
+    current_agent: SelfImprovingAgent = Depends(get_agent),
+):
+    """
+    OpenAI-compatible chat completions endpoint (non-streaming).
+
+    Accepts the standard OpenAI ChatCompletion request format and returns
+    a compatible response. The agent uses its configured LLM provider
+    regardless of the `model` field value.
+    """
+    try:
+        # Extract system messages as context hints
+        system_messages = [
+            msg.content for msg in request.messages if msg.role == "system"
+        ]
+        context_hints = system_messages if system_messages else None
+
+        # Extract the last user message as the query
+        user_messages = [msg for msg in request.messages if msg.role == "user"]
+        if not user_messages:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "message": "At least one message with role 'user' is required.",
+                        "type": "invalid_request_error",
+                        "param": "messages",
+                        "code": None,
+                    }
+                },
+            )
+
+        query = user_messages[-1].content
+        completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
+        conversation_id = completion_id
+        created_timestamp = int(datetime.now().timestamp())
+
+        logger.info(f"OpenAI-compat request {completion_id}: {query[:100]}...")
+
+        # Handle streaming
+        if request.stream:
+            import json as _json
+
+            async def openai_stream():
+                try:
+                    response_text = await current_agent.run(
+                        query,
+                        context_hints=context_hints,
+                        conversation_id=conversation_id,
+                    )
+
+                    # Stream the response in chunks
+                    chunk_size = 50
+                    for i in range(0, len(response_text), chunk_size):
+                        chunk = response_text[i:i + chunk_size]
+                        delta = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_timestamp,
+                            "model": request.model,
+                            "choices": [{
+                                "index": 0,
+                                "delta": {"content": chunk},
+                                "finish_reason": None,
+                            }],
+                        }
+                        yield f"data: {_json.dumps(delta)}\n\n"
+
+                    # Final chunk with finish_reason
+                    final = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_timestamp,
+                        "model": request.model,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {},
+                            "finish_reason": "stop",
+                        }],
+                    }
+                    yield f"data: {_json.dumps(final)}\n\n"
+                    yield "data: [DONE]\n\n"
+                except Exception as e:
+                    error_chunk = {
+                        "error": {"message": str(e), "type": "internal_error"}
+                    }
+                    yield f"data: {_json.dumps(error_chunk)}\n\n"
+
+            return StreamingResponse(
+                openai_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+            )
+
+        response_text = await current_agent.run(
+            query,
+            context_hints=context_hints,
+            conversation_id=conversation_id,
+        )
+
+        # Estimate token usage
+        prompt_text = " ".join(msg.content for msg in request.messages)
+        prompt_tokens = _estimate_token_count(prompt_text)
+        completion_tokens = _estimate_token_count(response_text)
+
+        return ChatCompletionResponse(
+            id=completion_id,
+            object="chat.completion",
+            created=created_timestamp,
+            model=request.model,
+            choices=[
+                ChatCompletionChoice(
+                    index=0,
+                    message=ChatCompletionMessage(
+                        role="assistant",
+                        content=response_text,
+                    ),
+                    finish_reason="stop",
+                )
+            ],
+            usage=ChatCompletionUsage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=prompt_tokens + completion_tokens,
+            ),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in OpenAI-compat completions: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": {
+                    "message": str(e),
+                    "type": "internal_error",
+                    "param": None,
+                    "code": None,
+                }
+            },
+        )
+
+
+@app.post("/chat/stream", tags=["Interaction"], summary="Chat with streaming + tool visibility")
+async def chat_stream(
+    request: Request,
+    current_agent: SelfImprovingAgent = Depends(get_agent),
+):
+    """
+    Streaming chat endpoint with tool-use visibility via SSE.
+
+    Streams events as Server-Sent Events:
+    - `chunk`: text content from the LLM
+    - `tool_call`: tool invocation (name + arguments)
+    - `tool_result`: tool execution output
+    - `complete`: final response with metadata
+    - `error`: error information
+    """
+    import json as _json
+
+    try:
+        body = await request.json()
+        query = body.get("query", "")
+        context_hints = body.get("context_hints")
+        conversation_id = body.get("conversation_id")
+
+        if not query:
+            raise HTTPException(status_code=400, detail="query is required")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid request body: {e}")
+
+    async def event_stream():
+        try:
+            from ai_sdk import stream_text
+            from evolving_agent.core.tools import get_all_tools
+            import openai as _openai_lib
+            from ai_sdk.providers.openai import OpenAIModel
+
+            # Build context (reusing agent internals)
+            context = await current_agent.context_manager.get_relevant_context(
+                query=query, context_types=context_hints
+            )
+            context_text = current_agent._format_context_for_prompt(context)
+
+            conversation_history = []
+            if conversation_id:
+                try:
+                    conversation_history = await current_agent.data_manager.get_conversation_history(
+                        conversation_id, limit=10
+                    )
+                except Exception:
+                    pass
+
+            history_text = current_agent._format_conversation_history(conversation_history)
+
+            system_prompt = f"""\
+You are Katbot, a self-improving AI with tool access.
+Use your tools (read_file, list_files, run_command, search_web, search_memory, search_tpmjs, execute_tpmjs_tool) to perform real actions.
+Current session: {current_agent.session_id}"""
+
+            user_parts = []
+            if history_text:
+                user_parts.append(f"Conversation History:\n{history_text}")
+            user_parts.append(f"Query: {query}")
+            user_parts.append(f"Relevant Context:\n{context_text}")
+            user_prompt = "\n\n".join(user_parts)
+
+            tools = []
+            if config.enable_tool_use:
+                tools = get_all_tools(
+                    web_search=current_agent.web_search,
+                    memory=current_agent.memory,
+                    tpmjs_client=current_agent.tpmjs_client,
+                    enable_tpmjs=bool(current_agent.tpmjs_client),
+                )
+
+            model = current_agent._get_ai_sdk_model()
+
+            def _run_stream():
+                return stream_text(
+                    model=model,
+                    system=system_prompt,
+                    prompt=user_prompt,
+                    tools=tools if tools else None,
+                    max_steps=config.max_tool_iterations,
+                    temperature=config.temperature,
+                    max_tokens=config.max_tokens,
+                    on_step=lambda step: None,
+                )
+
+            stream_result = await asyncio.to_thread(_run_stream)
+
+            # Stream text chunks
+            full_text = ""
+            async for chunk in stream_result.text_stream:
+                full_text += chunk
+                event_data = _json.dumps({"type": "chunk", "content": chunk})
+                yield f"data: {event_data}\n\n"
+
+            # Send tool call/result info if available
+            if stream_result.tool_results:
+                for tr in stream_result.tool_results:
+                    tc_event = _json.dumps({
+                        "type": "tool_call",
+                        "tool_name": tr.tool_name,
+                        "tool_call_id": tr.tool_call_id,
+                    })
+                    yield f"data: {tc_event}\n\n"
+
+                    tr_event = _json.dumps({
+                        "type": "tool_result",
+                        "tool_name": tr.tool_name,
+                        "result": str(tr.result)[:1000],
+                        "is_error": tr.is_error,
+                    })
+                    yield f"data: {tr_event}\n\n"
+
+            # Final complete event
+            complete_event = _json.dumps({
+                "type": "complete",
+                "text": full_text,
+                "tool_calls_count": len(stream_result.tool_results) if stream_result.tool_results else 0,
+            })
+            yield f"data: {complete_event}\n\n"
+
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
+            error_event = _json.dumps({"type": "error", "message": str(e)})
+            yield f"data: {error_event}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/v1/models", tags=["OpenAI Compatible"], summary="List available models")
+async def list_models():
+    """List available models (OpenAI-compatible)."""
+    model_id = f"{config.default_llm_provider}/{config.default_model}"
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": model_id,
+                "object": "model",
+                "created": 0,
+                "owned_by": "evolving-ai",
+            }
+        ],
+    }
 
 
 @app.post("/analyze", response_model=AnalysisResponse, tags=["Self-Improvement"])
@@ -545,21 +1090,17 @@ async def get_memories(
 
         if search:
             # Search for relevant memories
+            # search_memories returns List[Tuple[MemoryEntry, float]]
             search_results = await current_agent.memory.search_memories(
-                search, top_k=limit + offset
+                query=search, n_results=limit + offset, similarity_threshold=0.0
             )
-            for result in search_results:
-                metadata = result.get("metadata", {})
-                # Get timestamp from metadata or use current time as fallback
-                timestamp_str = metadata.get("timestamp")
-                timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else datetime.now()
-
+            for entry, similarity in search_results:
                 memories.append(
                     MemoryItem(
-                        id=result.get("id", "unknown"),
-                        content=result.get("content", ""),
-                        timestamp=timestamp,
-                        metadata=metadata,
+                        id=entry.id,
+                        content=entry.content,
+                        timestamp=entry.timestamp,
+                        metadata={**entry.metadata, "memory_type": entry.memory_type, "similarity": similarity},
                     )
                 )
         else:
@@ -753,12 +1294,13 @@ async def get_repository_info():
         )
 
 
-@app.post("/github/improve", response_model=ImprovementResponse, tags=["GitHub"])
+
+@app.post("/self-improve", response_model=ImprovementResponse, tags=["Self-Improvement"])
 async def create_code_improvements(
     request: ImprovementRequest, background_tasks: BackgroundTasks
 ):
     """
-    Analyze codebase and create improvements, optionally as a pull request.
+    Run the full self-improvement loop: analyze → modify → validate → PR.
 
     This endpoint will:
     1. Analyze the current codebase for improvement opportunities
@@ -785,14 +1327,14 @@ async def create_code_improvements(
             raise HTTPException(status_code=500, detail=result["error"])
 
         summary = result.get("summary", {})
-        pr_result = result.get("pr_result", {})
+        github_result = result.get("github_result", {})
 
         return ImprovementResponse(
             improvements_generated=summary.get("improvements_generated", 0),
             improvements_validated=summary.get("improvements_validated", 0),
             pr_created=summary.get("pr_created", False),
-            pr_number=pr_result.get("pr_number"),
-            pr_url=pr_result.get("pr_url"),
+            pr_number=github_result.get("number"),
+            pr_url=github_result.get("url"),
             improvement_potential=summary.get("improvement_potential", 0),
         )
 
@@ -916,6 +1458,75 @@ async def get_improvement_history():
         logger.error(f"Error getting improvement history: {e}")
         raise HTTPException(
             status_code=500, detail=f"Error getting improvement history: {str(e)}"
+        )
+
+
+@app.post("/github/issue", response_model=CreateIssueResponse, tags=["GitHub"])
+async def create_github_issue(request: CreateIssueRequest):
+    """
+    Create a new GitHub issue.
+
+    This endpoint allows creating GitHub issues programmatically, useful for
+    integrating with Discord feature requests or other external systems.
+
+    The issue will be created in the configured GitHub repository with the
+    provided title, description, and optional labels.
+
+    Note: Assignees requires proper GitHub permissions and the users must
+    have write access to the repository.
+    """
+    try:
+        if not github_modifier or not github_modifier.github_integration.repository:
+            raise HTTPException(
+                status_code=503,
+                detail="GitHub integration not available or repository not connected"
+            )
+
+        logger.info(f"Creating GitHub issue: {request.title}")
+
+        # Create the issue using the GitHub integration
+        issue_result = await github_modifier.github_integration.create_issue(
+            title=request.title,
+            body=request.description,
+            labels=request.labels
+        )
+
+        # Check for errors in the result
+        if "error" in issue_result:
+            logger.error(f"Failed to create issue: {issue_result['error']}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create issue: {issue_result['error']}"
+            )
+
+        # Handle assignees if provided
+        if request.assignees:
+            try:
+                issue_number = issue_result.get("issue_number")
+                if issue_number:
+                    repository = github_modifier.github_integration.repository
+                    issue = repository.get_issue(issue_number)
+                    # Add assignees to the issue
+                    issue.add_to_assignees(*request.assignees)
+                    logger.info(f"Added assignees {request.assignees} to issue #{issue_number}")
+            except Exception as e:
+                logger.warning(f"Failed to add assignees to issue: {e}")
+                # Don't fail the request if assignees fail, just log a warning
+
+        logger.info(f"Successfully created issue #{issue_result['issue_number']}")
+
+        return CreateIssueResponse(
+            issue_number=issue_result["issue_number"],
+            issue_url=issue_result["url"]
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating GitHub issue: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating GitHub issue: {str(e)}"
         )
 
 
@@ -1051,8 +1662,204 @@ async def get_web_search_status(
         )
 
 
+# Health check endpoints with recovery status
+@app.get("/health/detailed", tags=["System"])
+async def health_check_detailed():
+    """
+    Comprehensive health check endpoint with recovery status.
+
+    Returns overall system health and component status.
+    """
+    try:
+        # Get recovery status
+        recovery_status = error_recovery_manager.get_recovery_status()
+        
+        # Get agent health if available
+        agent_health = {}
+        if agent:
+            agent_health = await agent.check_system_health()
+        
+        # Get LLM provider health
+        llm_health = {}
+        try:
+            llm_health = llm_manager.get_provider_health_status()
+        except Exception as e:
+            llm_health = {"error": str(e)}
+        
+        # Get GitHub integration health
+        github_health = {}
+        if github_modifier:
+            try:
+                github_health = github_modifier.github_integration.get_status()
+            except Exception as e:
+                github_health = {"error": str(e)}
+        
+        # Get Discord integration health
+        discord_health = {}
+        if discord_integration:
+            try:
+                discord_status = await discord_integration.get_status() if hasattr(discord_integration, 'get_status') else {}
+                discord_health = {
+                    "enabled": config.discord_enabled,
+                    "connected": discord_status.get("connected", False),
+                }
+            except Exception as e:
+                discord_health = {"error": str(e)}
+        
+        # Determine overall health
+        all_healthy = True
+        degraded_mode = recovery_status.get("degraded_mode", False)
+        
+        if degraded_mode:
+            overall_status = "degraded"
+            all_healthy = False
+        elif agent_health.get("overall") != "healthy":
+            overall_status = agent_health.get("overall", "unknown")
+            all_healthy = False
+        else:
+            overall_status = "healthy"
+        
+        return {
+            "status": overall_status,
+            "timestamp": datetime.now().isoformat(),
+            "degraded_mode": degraded_mode,
+            "components": {
+                "agent": agent_health,
+                "llm_providers": llm_health,
+                "github": github_health,
+                "discord": discord_health,
+                "error_recovery": {
+                    "circuit_breakers": recovery_status.get("circuit_breakers", {}),
+                    "active_checkpoints": recovery_status.get("active_checkpoints", 0),
+                    "recovery_history_count": recovery_status.get("recovery_history_count", 0),
+                }
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error in health check: {e}")
+        return {
+            "status": "error",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e)
+        }
+
+@app.get("/health/recovery", tags=["System"])
+async def recovery_status():
+    """
+    Get detailed error recovery status.
+    
+    Returns information about circuit breakers, error patterns, and recovery history.
+    """
+    try:
+        recovery_status = error_recovery_manager.get_recovery_status()
+        recovery_history = error_recovery_manager.get_recovery_history(limit=10)
+        health_checks = await error_recovery_manager.perform_health_checks()
+        
+        return {
+            "recovery_status": recovery_status,
+            "health_checks": health_checks,
+            "recent_recoveries": recovery_history,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting recovery status: {e}")
+        return {
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.post("/system/trigger-recovery", tags=["System"])
+async def trigger_recovery():
+    """
+    Trigger recovery operations for failed components.
+    
+    This endpoint can be used to manually trigger recovery attempts.
+    """
+    try:
+        # Process pending GitHub operations if any
+        if github_modifier and github_modifier.github_integration:
+            try:
+                results = await github_modifier.github_integration.process_pending_operations()
+                return {
+                    "message": "Recovery triggered",
+                    "github_operations_processed": len(results),
+                    "results": results
+                }
+            except Exception as e:
+                logger.error(f"Error processing GitHub operations: {e}")
+                return {
+                    "message": "Recovery partially completed",
+                    "error": str(e)
+                }
+        
+        return {
+            "message": "No pending operations to process"
+        }
+    except Exception as e:
+        logger.error(f"Error triggering recovery: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error triggering recovery: {str(e)}"
+        )
+
+@app.post("/system/enable-degraded-mode", tags=["System"])
+async def enable_degraded_mode():
+    """
+    Manually enable degraded mode.
+    
+    This can be useful for maintenance or when issues are detected.
+    """
+    try:
+        error_recovery_manager.set_degraded_mode(True)
+        if agent:
+            agent.degraded_mode = True
+        
+        return {
+            "message": "Degraded mode enabled",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error enabling degraded mode: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error enabling degraded mode: {str(e)}"
+        )
+
+@app.post("/system/disable-degraded-mode", tags=["System"])
+async def disable_degraded_mode():
+    """
+    Manually disable degraded mode.
+    
+    This can be used to attempt to return to normal operation.
+    """
+    try:
+        error_recovery_manager.set_degraded_mode(False)
+        if agent:
+            agent.degraded_mode = False
+        
+        return {
+            "message": "Degraded mode disabled",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error disabling degraded mode: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error disabling degraded mode: {str(e)}"
+        )
+
+
 if __name__ == "__main__":
+    # Setup signal handlers for graceful shutdown
+    def signal_handler(signum, frame):
+        global server_shutdown
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        server_shutdown = True
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     # Run the server
     uvicorn.run(
-        "api_server:app", host="0.0.0.0", port=8000, reload=True, log_level="info"
+        "evolving_agent.utils.api_server:app", host="0.0.0.0", port=8000, reload=True, log_level="info"
     )

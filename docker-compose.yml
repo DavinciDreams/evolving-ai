@@ -31,7 +31,7 @@ services:
       - GITHUB_BRANCH=${GITHUB_BRANCH:-main}
       - GITHUB_LOCAL_REPO_PATH=/app
       - GITHUB_REPO_URL=${GITHUB_REPO_URL}
-      - ENABLE_SELF_MODIFICATION=${ENABLE_SELF_MODIFICATION:-false}
+      - ENABLE_SELF_MODIFICATION=${ENABLE_SELF_MODIFICATION:-true}
       - BACKUP_DIRECTORY=/app/data/backups
       - MAX_MODIFICATION_ATTEMPTS=${MAX_MODIFICATION_ATTEMPTS:-3}
       - REQUIRE_VALIDATION=${REQUIRE_VALIDATION:-true}
@@ -77,10 +77,11 @@ services:
       - memory-data:/app/data/memory_db
       - knowledge-data:/app/data/knowledge_base
       - backup-data:/app/data/backups
+      - persistent-data:/app/data/persistent_data
       - app-logs:/app/logs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -92,6 +93,8 @@ volumes:
   knowledge-data:
     driver: local
   backup-data:
+    driver: local
+  persistent-data:
     driver: local
   app-logs:
     driver: local

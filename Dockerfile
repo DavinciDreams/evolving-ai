@@ -1,5 +1,5 @@
-# Use Python 3.11 slim image
-FROM python:3.11-slim
+# Use Python 3.12 slim image (ai-sdk-python requires >=3.12)
+FROM python:3.12-slim
 
 # Set working directory
 WORKDIR /app
@@ -31,4 +31,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the application
-CMD ["uvicorn", "api_server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "evolving_agent.utils.api_server:app", "--host", "0.0.0.0", "--port", "8000"]
