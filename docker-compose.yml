@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   api:
     build: .
@@ -9,9 +7,6 @@ services:
       - PORT=${PORT:-8000}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       # LLM Provider Configuration
-      # Default: OpenRouter with Claude Sonnet 3.5
-      # Anthropic: use claude-sonnet-4-5-20250929
-      # OpenAI: use gpt-4 or gpt-4-turbo
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
@@ -21,6 +16,11 @@ services:
       - EVALUATION_MODEL=${EVALUATION_MODEL:-nvidia/nemotron-3-nano-30b-a3b:free}
       - TEMPERATURE=${TEMPERATURE:-0.7}
       - MAX_TOKENS=${MAX_TOKENS:-2048}
+
+      # Tool Use
+      - ENABLE_TOOL_USE=${ENABLE_TOOL_USE:-true}
+      - MAX_TOOL_ITERATIONS=${MAX_TOOL_ITERATIONS:-15}
+      - TPMJS_API_KEY=${TPMJS_API_KEY}
 
       # Memory Configuration (ChromaDB)
       - MEMORY_PERSIST_DIRECTORY=/app/data/memory_db
@@ -75,12 +75,23 @@ services:
       - ENABLE_EVALUATION=${ENABLE_EVALUATION:-false}
 
     volumes:
-      # Persistent data storage
-      - memory-data:/app/data/memory_db
-      - knowledge-data:/app/data/knowledge_base
-      - backup-data:/app/data/backups
-      - persistent-data:/app/data/persistent_data
-      - app-logs:/app/logs
+      # Persistent data — survives redeployments
+      # Coolify: deploy as "Docker Compose" to auto-detect these
+      - type: volume
+        source: memory-data
+        target: /app/data/memory_db
+      - type: volume
+        source: knowledge-data
+        target: /app/data/knowledge_base
+      - type: volume
+        source: backup-data
+        target: /app/data/backups
+      - type: volume
+        source: persistent-data
+        target: /app/data/persistent_data
+      - type: volume
+        source: app-logs
+        target: /app/logs
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://localhost:${PORT:-8000}/health"]
@@ -91,12 +102,12 @@ services:
 
 volumes:
   memory-data:
-    driver: local
+    name: evolving-ai-memory
   knowledge-data:
-    driver: local
+    name: evolving-ai-knowledge
   backup-data:
-    driver: local
+    name: evolving-ai-backups
   persistent-data:
-    driver: local
+    name: evolving-ai-persistent
   app-logs:
-    driver: local
+    name: evolving-ai-logs

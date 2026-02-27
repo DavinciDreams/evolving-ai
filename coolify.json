@@ -1,0 +1,9 @@
+{
+  "$schema": "https://cdn.coollabs.io/coolify/coolify.schema.json",
+  "build": {
+    "build_pack": "dockerfile"
+  },
+  "network": {
+    "expose": "8000"
+  }
+}
