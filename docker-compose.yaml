@@ -1,8 +1,11 @@
 services:
   api:
     build: .
-    ports:
-      - "${PORT:-8000}:${PORT:-8000}"
+    # Container listens on PORT (default 8000)
+    # Coolify: Traefik proxy routes to this automatically, no host port needed
+    # Local dev: use docker-compose.override.yaml to publish ports
+    expose:
+      - "${PORT:-8000}"
     environment:
       - PORT=${PORT:-8000}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}

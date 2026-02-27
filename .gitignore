@@ -226,3 +226,7 @@ evolving_agent/utils/__pycache__/llm_interface.cpython-313.pyc
 .roo/
 .roomodes/
 COOLIFY_ENV_CHECKLIST.md
+
+# Local dev overrides (not for Coolify)
+docker-compose.override.yaml
+docker-compose.override.yml
