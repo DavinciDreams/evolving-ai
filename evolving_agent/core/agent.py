@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import openai as _openai_lib
 from ai_sdk import generate_text, stream_text, openai as openai_model, anthropic as anthropic_model
+from ai_sdk.types import CoreUserMessage, CoreAssistantMessage
 from ai_sdk.providers.openai import OpenAIModel
 
 from ..knowledge.base import KnowledgeBase
@@ -402,6 +403,7 @@ class SelfImprovingAgent:
         query: str,
         context_hints: Optional[List[str]] = None,
         conversation_id: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
 
         """
@@ -411,6 +413,9 @@ class SelfImprovingAgent:
             query: The user query or task
             context_hints: Optional hints for context retrieval
             conversation_id: Optional conversation identifier for tracking multi-turn conversations
+            conversation_history: Optional pre-built conversation history (list of dicts with
+                'query' and 'response' keys). When provided, this is used instead of
+                fetching history from the database via conversation_id.
 
         Returns:
             The agent's response
@@ -452,14 +457,16 @@ class SelfImprovingAgent:
             )
 
             # Step 1b: Retrieve conversation history for multi-turn context
-            conversation_history = []
-            if conversation_id:
-                try:
-                    conversation_history = await self.data_manager.get_conversation_history(
-                        conversation_id, limit=10
-                    )
-                except Exception as e:
-                    self.logger.warning(f"Failed to retrieve conversation history: {e}")
+            # Use pre-built history if provided, otherwise fetch from database
+            if conversation_history is None:
+                conversation_history = []
+                if conversation_id:
+                    try:
+                        conversation_history = await self.data_manager.get_conversation_history(
+                            conversation_id, limit=10
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"Failed to retrieve conversation history: {e}")
 
             # Step 2: Generate initial response
             initial_response = await self._generate_response(
@@ -679,23 +686,16 @@ class SelfImprovingAgent:
 
         raise RuntimeError("No LLM provider configured for AI SDK")
 
-    async def _generate_response(
-        self, query: str, context: Dict[str, Any],
-        conversation_history: Optional[List[Dict[str, Any]]] = None,
-    ) -> str:
-        """Generate response using AI SDK with tool-use support."""
-        try:
-            context_text = self._format_context_for_prompt(context)
-            history_text = self._format_conversation_history(conversation_history)
-
-            self_mod_info = ""
-            if config.enable_self_modification and self.github_modifier:
-                self_mod_info = """
+    def _build_system_prompt(self) -> str:
+        """Build the system prompt for the AI SDK."""
+        self_mod_info = ""
+        if config.enable_self_modification and self.github_modifier:
+            self_mod_info = """
 You have active self-modification capabilities.
 When users ask you to improve yourself, edit your code, or self-modify,
 the system will automatically trigger your self-improvement pipeline."""
 
-            system_prompt = f"""\
+        return f"""\
 You are Katbot, a self-improving AI with the ability to analyze and modify your own code.
 KAT stands for Knowledge Adaptive Transformer, indicating you have long term knowledge and the ability to adapt.
 You have access to long-term memory and a knowledge base, enabling you to learn from past interactions and improve over time.
@@ -723,17 +723,46 @@ Interaction count: {self.interaction_count}
 Use the provided context to give a comprehensive, accurate, and helpful response.
 Be specific, actionable, and consider lessons learned from previous interactions."""
 
-            # Build user prompt
-            user_parts = []
-            if history_text:
-                user_parts.append(f"Conversation History:\n{history_text}")
-            user_parts.append(f"Query: {query}")
-            user_parts.append(f"Relevant Context:\n{context_text}")
-            user_parts.append(
-                "Please provide a detailed response that addresses the query "
-                "while incorporating relevant insights from the context and conversation history."
-            )
-            user_prompt = "\n\n".join(user_parts)
+    def _build_messages(
+        self,
+        query: str,
+        context: Dict[str, Any],
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> List:
+        """Build a proper multi-turn messages array for the AI SDK.
+
+        Returns a list of CoreUserMessage / CoreAssistantMessage objects
+        that give the model structured conversation context.
+        """
+        context_text = self._format_context_for_prompt(context)
+        messages = []
+
+        # Add prior conversation turns as proper user/assistant message pairs
+        if conversation_history:
+            for entry in conversation_history[-10:]:
+                q = entry.get("query", "")
+                r = entry.get("response", "")
+                if q:
+                    messages.append(CoreUserMessage(content=q))
+                if r:
+                    messages.append(CoreAssistantMessage(content=r))
+
+        # Build the current user message with context
+        current_parts = [query]
+        if context_text.strip():
+            current_parts.append(f"\n[Relevant context from memory]\n{context_text}")
+        messages.append(CoreUserMessage(content="\n".join(current_parts)))
+
+        return messages
+
+    async def _generate_response(
+        self, query: str, context: Dict[str, Any],
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        """Generate response using AI SDK with tool-use support."""
+        try:
+            system_prompt = self._build_system_prompt()
+            messages = self._build_messages(query, context, conversation_history)
 
             # Build tools list
             tools = []
@@ -751,8 +780,9 @@ Be specific, actionable, and consider lessons learned from previous interactions
             except RuntimeError:
                 # Fall back to LLMManager if AI SDK model can't be created
                 self.logger.warning("AI SDK model unavailable, falling back to LLMManager")
+                fallback_prompt = self._build_fallback_prompt(query, context, conversation_history)
                 response = await llm_manager.generate_response(
-                    prompt=user_prompt,
+                    prompt=fallback_prompt,
                     system_prompt=system_prompt,
                     temperature=config.temperature,
                     max_tokens=config.max_tokens,
@@ -765,7 +795,7 @@ Be specific, actionable, and consider lessons learned from previous interactions
                 return generate_text(
                     model=model,
                     system=system_prompt,
-                    prompt=user_prompt,
+                    messages=messages,
                     tools=tools if tools else None,
                     max_steps=config.max_tool_iterations,
                     temperature=config.temperature,
@@ -784,12 +814,17 @@ Be specific, actionable, and consider lessons learned from previous interactions
             return response_text.strip()
 
         except Exception as e:
-            self.logger.error(f"AI SDK generate failed: {e}, falling back to LLMManager")
+            self.logger.error(f"AI SDK generate failed: {e}", exc_info=True)
             # Fallback to direct LLMManager call (no tools)
             try:
+                fallback_prompt = self._build_fallback_prompt(query, context, conversation_history)
                 response = await llm_manager.generate_response(
-                    prompt=f"Query: {query}\n\nContext: {self._format_context_for_prompt(context)}",
-                    system_prompt="You are Katbot, a helpful AI assistant.",
+                    prompt=fallback_prompt,
+                    system_prompt=(
+                        "You are Katbot, a helpful AI assistant. "
+                        "Note: your tools are temporarily unavailable. "
+                        "Answer based on your knowledge and the conversation context provided."
+                    ),
                     temperature=config.temperature,
                     max_tokens=config.max_tokens,
                     provider=config.default_llm_provider,
@@ -798,6 +833,31 @@ Be specific, actionable, and consider lessons learned from previous interactions
             except Exception as e2:
                 self.logger.error(f"LLMManager fallback also failed: {e2}")
                 raise
+
+    def _build_fallback_prompt(
+        self,
+        query: str,
+        context: Dict[str, Any],
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        """Build a text prompt for the LLMManager fallback (no tool support)."""
+        parts = []
+        if conversation_history:
+            history_lines = []
+            for entry in conversation_history[-10:]:
+                q = entry.get("query", "")
+                r = entry.get("response", "")
+                if q:
+                    history_lines.append(f"User: {q}")
+                if r:
+                    history_lines.append(f"Assistant: {r}")
+            if history_lines:
+                parts.append(f"Conversation History:\n" + "\n".join(history_lines))
+        parts.append(f"Query: {query}")
+        context_text = self._format_context_for_prompt(context)
+        if context_text.strip():
+            parts.append(f"Relevant Context:\n{context_text}")
+        return "\n\n".join(parts)
 
     def _format_context_for_prompt(self, context: Dict[str, Any]) -> str:
         """Format context information for inclusion in prompts."""

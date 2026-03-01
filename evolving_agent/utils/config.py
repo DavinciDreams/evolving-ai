@@ -258,6 +258,16 @@ class Config:
         """Get maximum tool-use iterations per request."""
         return int(os.getenv("MAX_TOOL_ITERATIONS", "15"))
 
+    @property
+    def tool_sandbox_dir(self) -> str:
+        """Get sandbox directory for tool file/command operations.
+
+        In Docker this should be /app. Tools will restrict file reads,
+        directory listings, and command execution to this directory.
+        An empty string disables sandboxing (local dev default).
+        """
+        return os.getenv("TOOL_SANDBOX_DIR", "")
+
     # TPMJS Integration Configuration
     @property
     def tpmjs_api_key(self) -> str:
@@ -313,6 +323,7 @@ class Config:
             "serpapi_key": "***" if self.serpapi_key else "",
             "enable_tool_use": self.enable_tool_use,
             "max_tool_iterations": self.max_tool_iterations,
+            "tool_sandbox_dir": self.tool_sandbox_dir,
             "tpmjs_api_key": "***" if self.tpmjs_api_key else "",
         }
 

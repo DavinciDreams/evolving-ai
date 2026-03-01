@@ -50,7 +50,7 @@ class GitHubIntegration:
         """
         self.github_token = github_token or os.getenv("GITHUB_TOKEN")
         self.repo_name = repo_name or os.getenv("GITHUB_REPO")
-        self.local_repo_path = local_repo_path or os.getenv("LOCAL_REPO_PATH", ".")
+        self.local_repo_path = local_repo_path or os.getenv("GITHUB_LOCAL_REPO_PATH", os.getenv("LOCAL_REPO_PATH", "."))
         
         self.github_client: Optional[Github] = None
         self.repository: Optional[Repository] = None

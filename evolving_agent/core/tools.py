@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from ai_sdk import tool
 
+from ..utils.config import config
 from ..utils.logging import setup_logger
 
 if TYPE_CHECKING:
@@ -26,6 +27,49 @@ if TYPE_CHECKING:
     from ..core.memory import LongTermMemory
 
 logger = setup_logger(__name__)
+
+
+def _get_sandbox_root() -> Optional[Path]:
+    """Return the resolved sandbox root, or None if sandboxing is disabled."""
+    sandbox = config.tool_sandbox_dir
+    if not sandbox:
+        return None
+    return Path(sandbox).resolve()
+
+
+def _is_path_within_sandbox(path: Path, sandbox: Path) -> bool:
+    """Check whether *path* is inside *sandbox* (or is *sandbox* itself)."""
+    try:
+        path.resolve().relative_to(sandbox)
+        return True
+    except ValueError:
+        return False
+
+
+def _resolve_sandboxed_path(raw: str) -> Path:
+    """Resolve a user-supplied path, enforcing the sandbox if configured.
+
+    - If the path is relative it is resolved relative to the sandbox root
+      (or cwd when sandboxing is off).
+    - If the path is absolute and sandboxing is on, it must fall inside the
+      sandbox; otherwise the function raises ValueError.
+    """
+    sandbox = _get_sandbox_root()
+    p = Path(raw).expanduser()
+
+    if sandbox:
+        if not p.is_absolute():
+            p = (sandbox / p).resolve()
+        else:
+            p = p.resolve()
+        if not _is_path_within_sandbox(p, sandbox):
+            raise ValueError(
+                f"Access denied: path '{raw}' is outside the sandbox ({sandbox})"
+            )
+    else:
+        p = p.resolve()
+
+    return p
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +181,7 @@ def make_read_file_tool() -> Any:
     )
     def read_file(path: str, max_lines: int = 200) -> str:
         try:
-            p = Path(path).expanduser().resolve()
+            p = _resolve_sandboxed_path(path)
             if not p.exists():
                 return json.dumps({"error": f"File not found: {path}"})
             if not p.is_file():
@@ -167,7 +211,7 @@ def make_list_files_tool() -> Any:
     )
     def list_files(directory: str = ".", pattern: str = "*") -> str:
         try:
-            base = Path(directory).expanduser().resolve()
+            base = _resolve_sandboxed_path(directory)
             if not base.exists():
                 return json.dumps({"error": f"Directory not found: {directory}"})
 
@@ -210,13 +254,15 @@ def make_run_command_tool() -> Any:
         timeout = min(timeout, 60)
 
         try:
+            sandbox = _get_sandbox_root()
+            work_dir = str(sandbox) if sandbox else os.getcwd()
             result = subprocess.run(
                 command,
                 shell=True,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                cwd=os.getcwd(),
+                cwd=work_dir,
             )
 
             output = {

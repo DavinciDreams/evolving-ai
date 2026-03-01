@@ -740,10 +740,33 @@ async def openai_chat_completions(
 
         query = user_messages[-1].content
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
-        conversation_id = completion_id
+        conversation_id = request.user or completion_id
         created_timestamp = int(datetime.now().timestamp())
 
-        logger.info(f"OpenAI-compat request {completion_id}: {query[:100]}...")
+        # Build conversation history from the OpenAI messages array.
+        # Pair up user/assistant messages (excluding the last user message which is the query).
+        non_system_messages = [msg for msg in request.messages if msg.role != "system"]
+        conversation_history = []
+        i = 0
+        while i < len(non_system_messages) - 1:  # -1 to exclude the final user message (query)
+            msg = non_system_messages[i]
+            if msg.role == "user":
+                entry = {"query": msg.content, "response": ""}
+                # Check if next message is an assistant response
+                if i + 1 < len(non_system_messages) - 1 and non_system_messages[i + 1].role == "assistant":
+                    entry["response"] = non_system_messages[i + 1].content
+                    i += 2
+                else:
+                    i += 1
+                conversation_history.append(entry)
+            elif msg.role == "assistant":
+                # Standalone assistant message (rare but possible)
+                conversation_history.append({"query": "", "response": msg.content})
+                i += 1
+            else:
+                i += 1
+
+        logger.info(f"OpenAI-compat request {completion_id}: {query[:100]}... ({len(conversation_history)} prior turns)")
 
         # Handle streaming
         if request.stream:
@@ -755,6 +778,7 @@ async def openai_chat_completions(
                         query,
                         context_hints=context_hints,
                         conversation_id=conversation_id,
+                        conversation_history=conversation_history if conversation_history else None,
                     )
 
                     # Stream the response in chunks
@@ -804,6 +828,7 @@ async def openai_chat_completions(
             query,
             context_hints=context_hints,
             conversation_id=conversation_id,
+            conversation_history=conversation_history if conversation_history else None,
         )
 
         # Estimate token usage
@@ -884,14 +909,11 @@ async def chat_stream(
         try:
             from ai_sdk import stream_text
             from evolving_agent.core.tools import get_all_tools
-            import openai as _openai_lib
-            from ai_sdk.providers.openai import OpenAIModel
 
             # Build context (reusing agent internals)
             context = await current_agent.context_manager.get_relevant_context(
                 query=query, context_types=context_hints
             )
-            context_text = current_agent._format_context_for_prompt(context)
 
             conversation_history = []
             if conversation_id:
@@ -902,19 +924,9 @@ async def chat_stream(
                 except Exception:
                     pass
 
-            history_text = current_agent._format_conversation_history(conversation_history)
-
-            system_prompt = f"""\
-You are Katbot, a self-improving AI with tool access.
-Use your tools (read_file, list_files, run_command, search_web, search_memory, search_tpmjs, execute_tpmjs_tool) to perform real actions.
-Current session: {current_agent.session_id}"""
-
-            user_parts = []
-            if history_text:
-                user_parts.append(f"Conversation History:\n{history_text}")
-            user_parts.append(f"Query: {query}")
-            user_parts.append(f"Relevant Context:\n{context_text}")
-            user_prompt = "\n\n".join(user_parts)
+            # Use the same system prompt and messages format as _generate_response
+            system_prompt = current_agent._build_system_prompt()
+            messages = current_agent._build_messages(query, context, conversation_history)
 
             tools = []
             if config.enable_tool_use:
@@ -931,7 +943,7 @@ Current session: {current_agent.session_id}"""
                 return stream_text(
                     model=model,
                     system=system_prompt,
-                    prompt=user_prompt,
+                    messages=messages,
                     tools=tools if tools else None,
                     max_steps=config.max_tool_iterations,
                     temperature=config.temperature,
