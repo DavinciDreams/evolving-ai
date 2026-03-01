@@ -22,6 +22,7 @@ from ..utils.config import config
 from ..utils.logging import setup_logger
 
 if TYPE_CHECKING:
+    from ..integrations.e2b_sandbox import E2BSandbox
     from ..integrations.tpmjs import TPMJSClient
     from ..integrations.web_search import WebSearchIntegration
     from ..core.memory import LongTermMemory
@@ -400,6 +401,157 @@ def make_create_tpmjs_tool(tpmjs_client: Optional["TPMJSClient"]) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# E2B sandbox tool
+# ---------------------------------------------------------------------------
+
+class ExecuteCodeParams(BaseModel):
+    code: str = Field(description="Source code to execute")
+    language: str = Field(
+        default="python",
+        description="Language: 'python', 'javascript', or 'shell'",
+    )
+    timeout: int = Field(default=30, description="Max execution seconds (max 60)")
+
+
+def make_execute_code_tool(e2b_sandbox: Optional["E2BSandbox"]) -> Any:
+    """Create the execute_code tool bound to an E2BSandbox instance."""
+    @tool(
+        name="execute_code",
+        description=(
+            "Execute code safely in a remote cloud sandbox (E2B). "
+            "Use this for running AI-generated code, data processing, "
+            "or any command that should NOT run in the production container. "
+            "Supports Python, JavaScript, and shell commands."
+        ),
+        parameters=ExecuteCodeParams,
+    )
+    def execute_code(code: str, language: str = "python", timeout: int = 30) -> str:
+        if e2b_sandbox is None:
+            return json.dumps({"error": "Code sandbox is not configured (no E2B_API_KEY)"})
+        timeout = min(timeout, 60)
+        try:
+            result = asyncio.run(
+                e2b_sandbox.run_code(code, language=language, timeout=timeout)
+            )
+            return json.dumps(result, default=str)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    return execute_code
+
+
+# ---------------------------------------------------------------------------
+# Scratchpad tools
+# ---------------------------------------------------------------------------
+
+class ScratchpadWriteParams(BaseModel):
+    filename: str = Field(description="File name (no path separators, e.g. 'notes.md')")
+    content: str = Field(description="Content to write")
+
+
+class ScratchpadReadParams(BaseModel):
+    filename: str = Field(description="File name to read")
+
+
+class ScratchpadListParams(BaseModel):
+    pattern: str = Field(default="*", description="Glob pattern (e.g. '*.md', '*')")
+
+
+def _get_scratchpad_dir() -> Path:
+    """Return the scratchpad directory, creating it if needed."""
+    scratchpad = config.scratchpad_dir
+    p = Path(scratchpad).resolve()
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _sanitize_filename(name: str) -> str:
+    """Strip path separators to prevent directory traversal."""
+    return Path(name).name  # returns only the final component
+
+
+def make_scratchpad_write_tool() -> Any:
+    """Create the scratchpad_write tool."""
+    @tool(
+        name="scratchpad_write",
+        description=(
+            "Write a file to your persistent scratchpad. "
+            "Use this to save notes, working drafts, intermediate results, "
+            "or anything you want to remember across interactions."
+        ),
+        parameters=ScratchpadWriteParams,
+    )
+    def scratchpad_write(filename: str, content: str) -> str:
+        try:
+            safe_name = _sanitize_filename(filename)
+            if not safe_name:
+                return json.dumps({"error": "Invalid filename"})
+            scratchpad = _get_scratchpad_dir()
+            filepath = scratchpad / safe_name
+            filepath.write_text(content, encoding="utf-8")
+            return json.dumps({
+                "written": True,
+                "filename": safe_name,
+                "size": len(content),
+            })
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    return scratchpad_write
+
+
+def make_scratchpad_read_tool() -> Any:
+    """Create the scratchpad_read tool."""
+    @tool(
+        name="scratchpad_read",
+        description="Read a file from your persistent scratchpad.",
+        parameters=ScratchpadReadParams,
+    )
+    def scratchpad_read(filename: str) -> str:
+        try:
+            safe_name = _sanitize_filename(filename)
+            scratchpad = _get_scratchpad_dir()
+            filepath = scratchpad / safe_name
+            if not filepath.exists():
+                return json.dumps({"error": f"File not found: {safe_name}"})
+            content = filepath.read_text(encoding="utf-8", errors="replace")
+            return json.dumps({
+                "filename": safe_name,
+                "content": content[:50000],
+                "truncated": len(content) > 50000,
+            })
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    return scratchpad_read
+
+
+def make_scratchpad_list_tool() -> Any:
+    """Create the scratchpad_list tool."""
+    @tool(
+        name="scratchpad_list",
+        description="List files in your persistent scratchpad.",
+        parameters=ScratchpadListParams,
+    )
+    def scratchpad_list(pattern: str = "*") -> str:
+        try:
+            scratchpad = _get_scratchpad_dir()
+            matches = sorted(scratchpad.glob(pattern))
+            files = []
+            for m in matches:
+                if m.is_file():
+                    files.append({
+                        "filename": m.name,
+                        "size": m.stat().st_size,
+                    })
+            return json.dumps({"files": files, "count": len(files)})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    return scratchpad_list
+
+
+# ---------------------------------------------------------------------------
 # Tool collection builder
 # ---------------------------------------------------------------------------
 
@@ -409,6 +561,7 @@ def get_all_tools(
     memory: Optional["LongTermMemory"] = None,
     tpmjs_client: Optional["TPMJSClient"] = None,
     enable_tpmjs: bool = True,
+    e2b_sandbox: Optional["E2BSandbox"] = None,
 ) -> List[Any]:
     """Build the complete list of tools available to the agent.
 
@@ -417,6 +570,7 @@ def get_all_tools(
         memory: LongTermMemory instance (or None to disable)
         tpmjs_client: TPMJSClient instance (or None to disable TPMJS tools)
         enable_tpmjs: Whether to include TPMJS tools
+        e2b_sandbox: E2BSandbox instance (or None to disable sandbox execution)
 
     Returns:
         List of ai_sdk.Tool instances
@@ -427,7 +581,14 @@ def get_all_tools(
         make_run_command_tool(),
         make_search_web_tool(web_search),
         make_search_memory_tool(memory),
+        # Scratchpad — always available
+        make_scratchpad_write_tool(),
+        make_scratchpad_read_tool(),
+        make_scratchpad_list_tool(),
     ]
+
+    if e2b_sandbox is not None:
+        tools.append(make_execute_code_tool(e2b_sandbox))
 
     if enable_tpmjs and tpmjs_client is not None:
         tools.extend([

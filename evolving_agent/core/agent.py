@@ -73,6 +73,9 @@ class SelfImprovingAgent:
         # TPMJS client for external tool discovery/execution
         self.tpmjs_client = None
 
+        # E2B sandbox for safe remote code execution
+        self.e2b_sandbox = None
+
         # Last evaluation result (for API consumers)
         self.last_evaluation_score: Optional[float] = None
 
@@ -180,6 +183,17 @@ class SelfImprovingAgent:
                 except Exception as e:
                     self.logger.error(f"Failed to initialize TPMJS: {e}")
                     self.component_health["tpmjs"] = False
+
+            # Initialize E2B sandbox if API key is configured
+            if config.e2b_api_key:
+                try:
+                    from ..integrations.e2b_sandbox import E2BSandbox
+                    self.e2b_sandbox = E2BSandbox(api_key=config.e2b_api_key)
+                    self.component_health["e2b_sandbox"] = True
+                    self.logger.info("E2B sandbox initialized")
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize E2B sandbox: {e}")
+                    self.component_health["e2b_sandbox"] = False
 
             # Register health checks
             self._register_health_checks()
@@ -707,8 +721,12 @@ You have access to tools. USE THEM to perform real actions:
 - read_file: Read files to check configs, source code, .env, etc.
 - list_files: List/glob files to explore directories and project structure.
 - run_command: Execute shell commands (env vars, git, system info, etc.)
+- execute_code: Run code safely in a remote E2B cloud sandbox (Python, JS, shell).
 - search_web: Search the web for current information, docs, tutorials.
 - search_memory: Search your long-term memory for past interactions.
+- scratchpad_write: Save notes, drafts, or working files to your persistent scratchpad.
+- scratchpad_read: Read a file from your scratchpad.
+- scratchpad_list: List files in your scratchpad.
 - search_tpmjs: Find specialized AI tools on tpmjs.com.
 - execute_tpmjs_tool: Run a tool from tpmjs.com.
 - create_tpmjs_tool: Create a new tool on tpmjs.com when none exists.
@@ -772,6 +790,7 @@ Be specific, actionable, and consider lessons learned from previous interactions
                     memory=self.memory,
                     tpmjs_client=self.tpmjs_client,
                     enable_tpmjs=bool(self.tpmjs_client),
+                    e2b_sandbox=self.e2b_sandbox,
                 )
 
             # Get AI SDK model

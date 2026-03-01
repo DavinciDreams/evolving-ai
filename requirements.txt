@@ -42,3 +42,6 @@ duckduckgo-search>=3.9.0
 
 # AI SDK for tool calling and streaming
 ai-sdk-python>=0.1.0
+
+# E2B sandbox for safe remote code execution
+e2b>=1.0.0

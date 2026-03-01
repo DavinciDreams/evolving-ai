@@ -935,6 +935,7 @@ async def chat_stream(
                     memory=current_agent.memory,
                     tpmjs_client=current_agent.tpmjs_client,
                     enable_tpmjs=bool(current_agent.tpmjs_client),
+                    e2b_sandbox=current_agent.e2b_sandbox,
                 )
 
             model = current_agent._get_ai_sdk_model()

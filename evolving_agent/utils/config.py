@@ -268,6 +268,18 @@ class Config:
         """
         return os.getenv("TOOL_SANDBOX_DIR", "")
 
+    # E2B Sandbox Configuration
+    @property
+    def e2b_api_key(self) -> str:
+        """Get E2B sandbox API key."""
+        return os.getenv("E2B_API_KEY", "")
+
+    # Scratchpad Configuration
+    @property
+    def scratchpad_dir(self) -> str:
+        """Get scratchpad directory for the agent's persistent workspace."""
+        return os.getenv("SCRATCHPAD_DIR", "./scratchpad")
+
     # TPMJS Integration Configuration
     @property
     def tpmjs_api_key(self) -> str:
@@ -324,6 +336,8 @@ class Config:
             "enable_tool_use": self.enable_tool_use,
             "max_tool_iterations": self.max_tool_iterations,
             "tool_sandbox_dir": self.tool_sandbox_dir,
+            "e2b_api_key": "***" if self.e2b_api_key else "",
+            "scratchpad_dir": self.scratchpad_dir,
             "tpmjs_api_key": "***" if self.tpmjs_api_key else "",
         }
 
@@ -333,6 +347,7 @@ class Config:
             self.memory_persist_directory,
             self.backup_directory,
             self.knowledge_base_path,
+            self.scratchpad_dir,
             os.path.dirname(self.log_file) if os.path.dirname(self.log_file) else ".",
         ]
 
