@@ -5,9 +5,9 @@ services:
     # Coolify: Traefik proxy routes to this automatically, no host port needed
     # Local dev: use docker-compose.override.yaml to publish ports
     expose:
-      - "${PORT:-8000}"
+      - "${PORT:-80}"
     environment:
-      - PORT=${PORT:-8000}
+      - PORT=${PORT:-80}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       # LLM Provider Configuration
       - OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -107,7 +107,7 @@ services:
         target: /app/logs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl -f http://localhost:${PORT:-8000}/health"]
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:${PORT:-80}/health"]
       interval: 30s
       timeout: 10s
       retries: 3

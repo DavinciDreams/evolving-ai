@@ -24,7 +24,7 @@ COPY . .
 RUN mkdir -p /app/data /app/logs
 
 # Default port (overridable via PORT env var in Coolify/hosting)
-ENV PORT=8000
+ENV PORT=80
 EXPOSE ${PORT}
 
 # Health check
