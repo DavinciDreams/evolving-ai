@@ -4,12 +4,6 @@ services:
     # Container listens on PORT (default 8000)
     # Coolify: Traefik proxy routes to this automatically, no host port needed
     # Local dev: use docker-compose.override.yaml to publish ports
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.katbot-http.rule=Host(`katbot.atlasfoundation.app`)"
-      - "traefik.http.routers.katbot-http.entrypoints=http"
-      - "traefik.http.routers.katbot-http.priority=2000"
-      - "traefik.http.services.katbot.loadbalancer.server.port=80"
     expose:
       - "${PORT:-80}"
     environment:
