@@ -11,9 +11,10 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import uvicorn
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Response, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 from starlette.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -35,6 +36,22 @@ discord_integration: Optional[DiscordIntegration] = None
 # Server state
 server_shutdown = False
 graceful_shutdown_timeout = 30  # seconds
+
+# Optional API key authentication
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(api_key: str = Security(API_KEY_HEADER)):
+    """Validate the X-API-Key header on protected endpoints.
+
+    Auth is disabled when the API_KEY environment variable is not set or empty,
+    preserving backward compatibility for deployments that do not set the key.
+    """
+    configured_key = os.getenv("API_KEY", "")
+    if not configured_key:
+        return  # Auth disabled — no key configured
+    if api_key != configured_key:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
 @asynccontextmanager
@@ -650,7 +667,7 @@ async def get_status(current_agent: SelfImprovingAgent = Depends(get_agent)):
         )
 
 
-@app.post("/chat", response_model=QueryResponse, tags=["Interaction"])
+@app.post("/chat", response_model=QueryResponse, tags=["Interaction"], dependencies=[Depends(verify_api_key)])
 async def chat_with_agent(
     request: QueryRequest,
     background_tasks: BackgroundTasks,
@@ -709,6 +726,7 @@ def _estimate_token_count(text: str) -> int:
     response_model=ChatCompletionResponse,
     tags=["OpenAI Compatible"],
     summary="OpenAI-compatible chat completions",
+    dependencies=[Depends(verify_api_key)],
 )
 async def openai_chat_completions(
     request: ChatCompletionRequest,
@@ -881,7 +899,7 @@ async def openai_chat_completions(
         )
 
 
-@app.post("/chat/stream", tags=["Interaction"], summary="Chat with streaming + tool visibility")
+@app.post("/chat/stream", tags=["Interaction"], summary="Chat with streaming + tool visibility", dependencies=[Depends(verify_api_key)])
 async def chat_stream(
     request: Request,
     current_agent: SelfImprovingAgent = Depends(get_agent),
@@ -1026,7 +1044,7 @@ async def list_models():
     }
 
 
-@app.post("/analyze", response_model=AnalysisResponse, tags=["Self-Improvement"])
+@app.post("/analyze", response_model=AnalysisResponse, tags=["Self-Improvement"], dependencies=[Depends(verify_api_key)])
 async def analyze_code(
     request: AnalysisRequest, current_agent: SelfImprovingAgent = Depends(get_agent)
 ):
@@ -1316,7 +1334,7 @@ async def get_repository_info():
 
 
 
-@app.post("/self-improve", response_model=ImprovementResponse, tags=["Self-Improvement"])
+@app.post("/self-improve", response_model=ImprovementResponse, tags=["Self-Improvement"], dependencies=[Depends(verify_api_key)])
 async def create_code_improvements(
     request: ImprovementRequest, background_tasks: BackgroundTasks
 ):
@@ -1368,7 +1386,7 @@ async def create_code_improvements(
         )
 
 
-@app.post("/github/demo-pr", tags=["GitHub"])
+@app.post("/github/demo-pr", tags=["GitHub"], dependencies=[Depends(verify_api_key)])
 async def create_demo_pr():
     """
     Create a demonstration pull request with documentation improvements.
@@ -1482,7 +1500,7 @@ async def get_improvement_history():
         )
 
 
-@app.post("/github/issue", response_model=CreateIssueResponse, tags=["GitHub"])
+@app.post("/github/issue", response_model=CreateIssueResponse, tags=["GitHub"], dependencies=[Depends(verify_api_key)])
 async def create_github_issue(request: CreateIssueRequest):
     """
     Create a new GitHub issue.
@@ -1789,7 +1807,7 @@ async def recovery_status():
             "timestamp": datetime.now().isoformat()
         }
 
-@app.post("/system/trigger-recovery", tags=["System"])
+@app.post("/system/trigger-recovery", tags=["System"], dependencies=[Depends(verify_api_key)])
 async def trigger_recovery():
     """
     Trigger recovery operations for failed components.
@@ -1823,7 +1841,7 @@ async def trigger_recovery():
             detail=f"Error triggering recovery: {str(e)}"
         )
 
-@app.post("/system/enable-degraded-mode", tags=["System"])
+@app.post("/system/enable-degraded-mode", tags=["System"], dependencies=[Depends(verify_api_key)])
 async def enable_degraded_mode():
     """
     Manually enable degraded mode.
@@ -1846,7 +1864,7 @@ async def enable_degraded_mode():
             detail=f"Error enabling degraded mode: {str(e)}"
         )
 
-@app.post("/system/disable-degraded-mode", tags=["System"])
+@app.post("/system/disable-degraded-mode", tags=["System"], dependencies=[Depends(verify_api_key)])
 async def disable_degraded_mode():
     """
     Manually disable degraded mode.

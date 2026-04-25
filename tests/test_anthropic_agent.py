@@ -1,6 +1,8 @@
 """
 Test Anthropic Claude provider integration.
 """
+import pytest
+pytestmark = pytest.mark.integration
 
 from unittest.mock import AsyncMock, patch
 

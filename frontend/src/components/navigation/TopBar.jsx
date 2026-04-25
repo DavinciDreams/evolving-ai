@@ -1,9 +1,9 @@
-import { Bars3Icon } from '@heroicons/react/24/outline';
+import { Bars3Icon, SunIcon, MoonIcon } from '@heroicons/react/24/outline';
 import { useApp } from '../../context/AppContext';
 import Badge from '../common/Badge';
 
 export const TopBar = () => {
-  const { toggleSidebar } = useApp();
+  const { toggleSidebar, theme, toggleTheme } = useApp();
 
   return (
     <div className="sticky top-0 z-10 flex-shrink-0 flex h-16 bg-white shadow">
@@ -22,6 +22,18 @@ export const TopBar = () => {
           </h2>
         </div>
         <div className="ml-4 flex items-center space-x-4">
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            className="p-1.5 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+          >
+            {theme === 'dark' ? (
+              <SunIcon className="h-5 w-5" aria-hidden="true" />
+            ) : (
+              <MoonIcon className="h-5 w-5" aria-hidden="true" />
+            )}
+          </button>
           <Badge variant="success">Active</Badge>
         </div>
       </div>

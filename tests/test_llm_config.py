@@ -1,3 +1,6 @@
+import pytest
+pytestmark = pytest.mark.skip(reason="debug script — not a real test")
+
 """
 Test script to verify LLM provider configuration changes.
 """

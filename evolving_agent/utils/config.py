@@ -117,7 +117,7 @@ class Config:
     @property
     def enable_evaluation(self) -> bool:
         """Get evaluation enabled setting."""
-        return os.getenv("ENABLE_EVALUATION", "true").lower() == "true"
+        return os.getenv("ENABLE_EVALUATION", "false").lower() == "true"
 
     @property
     def knowledge_base_path(self) -> str:
@@ -285,6 +285,14 @@ class Config:
     def tpmjs_api_key(self) -> str:
         """Get TPMJS API key."""
         return os.getenv("TPMJS_API_KEY", "")
+
+    @property
+    def api_key(self) -> str:
+        """Get optional API key for write-endpoint authentication.
+
+        Returns an empty string when not configured, which disables auth.
+        """
+        return os.getenv("API_KEY", "")
 
     def get_all_config(self) -> Dict[str, Any]:
         """Get all configuration as a dictionary."""

@@ -233,8 +233,9 @@ export const ChatContainer = () => {
             disabled={isImproving || (improvementState?.isActive && !improvementState?.isComplete && !improvementState?.hasError)}
             className="flex items-center gap-1 px-3 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors self-end mb-1"
             title="Trigger self-improvement cycle"
+            aria-label="Trigger self-improvement cycle"
           >
-            <SparklesIcon className="h-4 w-4" />
+            <SparklesIcon className="h-4 w-4" aria-hidden="true" />
             <span className="hidden sm:inline">Improve</span>
           </button>
           {messages.length > 0 && (
@@ -242,6 +243,7 @@ export const ChatContainer = () => {
               onClick={handleClearChat}
               className="px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors self-end mb-1"
               title="Clear chat history"
+              aria-label="Clear chat history"
             >
               Clear
             </button>

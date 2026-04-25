@@ -2,6 +2,8 @@
 """
 Test script to verify the self-improving agent works with MiniMax model
 """
+import pytest
+pytestmark = pytest.mark.integration
 
 import os
 import sys

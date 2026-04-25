@@ -1,3 +1,6 @@
+import pytest
+pytestmark = pytest.mark.skip(reason="debug script — not a real test")
+
 #!/usr/bin/env python3
 """Test script to debug the /memories endpoint issue."""
 

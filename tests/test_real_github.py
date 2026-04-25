@@ -1,6 +1,8 @@
 """
 Test real GitHub integration functionality with actual credentials.
 """
+import pytest
+pytestmark = pytest.mark.integration
 
 import os
 import sys

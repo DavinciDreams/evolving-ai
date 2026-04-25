@@ -1,6 +1,8 @@
 """
 Test the agent with fresh configuration.
 """
+import pytest
+pytestmark = pytest.mark.integration
 
 import asyncio
 import os
