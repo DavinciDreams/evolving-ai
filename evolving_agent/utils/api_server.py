@@ -215,6 +215,7 @@ async def error_recovery_middleware(request: Request, call_next):
 
 # Register routers — imported after app is constructed to avoid circular init issues
 from evolving_agent.api.routes.discord import router as discord_router
+from evolving_agent.api.routes.feedback import router as feedback_router
 from evolving_agent.api.routes.general import router as general_router
 from evolving_agent.api.routes.github import router as github_router
 from evolving_agent.api.routes.interaction import router as interaction_router
@@ -233,6 +234,7 @@ app.include_router(github_router)
 app.include_router(discord_router)
 app.include_router(web_search_router)
 app.include_router(system_router)
+app.include_router(feedback_router)
 
 
 # ---------------------------------------------------------------------------

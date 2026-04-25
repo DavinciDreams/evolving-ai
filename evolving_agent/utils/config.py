@@ -280,6 +280,37 @@ class Config:
         """Get scratchpad directory for the agent's persistent workspace."""
         return os.getenv("SCRATCHPAD_DIR", "./scratchpad")
 
+    # Self-improvement tuning
+    @property
+    def iterative_revision_max_rounds(self) -> int:
+        """Max revision rounds in the CAI-style iterative improvement loop."""
+        return int(os.getenv("ITERATIVE_REVISION_MAX_ROUNDS", "3"))
+
+    @property
+    def iterative_revision_target_score(self) -> float:
+        """Stop iterating when response score reaches this threshold."""
+        return float(os.getenv("ITERATIVE_REVISION_TARGET_SCORE", "0.75"))
+
+    @property
+    def best_of_n_count(self) -> int:
+        """Number of candidate responses to generate for Best-of-N selection."""
+        return int(os.getenv("BEST_OF_N_COUNT", "2"))
+
+    @property
+    def enable_best_of_n(self) -> bool:
+        """Enable Best-of-N sampling for low-confidence responses."""
+        return os.getenv("ENABLE_BEST_OF_N", "true").lower() == "true"
+
+    @property
+    def reflexion_interval(self) -> int:
+        """Number of interactions between Reflexion lesson-extraction runs."""
+        return int(os.getenv("REFLEXION_INTERVAL", "50"))
+
+    @property
+    def enable_ensemble_judge(self) -> bool:
+        """Enable multi-persona ensemble scoring in the evaluator."""
+        return os.getenv("ENABLE_ENSEMBLE_JUDGE", "true").lower() == "true"
+
     # TPMJS Integration Configuration
     @property
     def tpmjs_api_key(self) -> str:
@@ -347,6 +378,12 @@ class Config:
             "e2b_api_key": "***" if self.e2b_api_key else "",
             "scratchpad_dir": self.scratchpad_dir,
             "tpmjs_api_key": "***" if self.tpmjs_api_key else "",
+            "iterative_revision_max_rounds": self.iterative_revision_max_rounds,
+            "iterative_revision_target_score": self.iterative_revision_target_score,
+            "best_of_n_count": self.best_of_n_count,
+            "enable_best_of_n": self.enable_best_of_n,
+            "reflexion_interval": self.reflexion_interval,
+            "enable_ensemble_judge": self.enable_ensemble_judge,
         }
 
     def ensure_directories(self):
