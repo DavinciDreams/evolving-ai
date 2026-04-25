@@ -544,27 +544,25 @@ class SelfImprovingAgent:
                         self.logger.warning(f"Best-of-N failed, using original: {e}")
 
                 # Step 4: Improve response based on evaluation
-                final_response = await self._improve_response(
+                final_response, final_evaluation = await self._improve_response(
                     query, best_response, best_evaluation, context
                 )
 
-                # Save preference pair when revision actually improved the response
+                # Save preference pair when revision actually improved the response.
+                # _improve_response already tracked the final score — no extra LLM call needed.
                 if final_response != best_response and config.enable_evaluation:
                     try:
-                        revised_eval = await self.evaluator.evaluate_output(
-                            query=query, output=final_response, context=context
-                        )
                         await self.data_manager.save_preference_pair(
                             query=query,
                             original_response=best_response,
                             improved_response=final_response,
                             original_score=best_evaluation.overall_score,
-                            improved_score=revised_eval.overall_score,
+                            improved_score=final_evaluation.overall_score,
                         )
                     except Exception as e:
                         self.logger.warning(f"Failed to save preference pair: {e}")
 
-                evaluation = best_evaluation
+                evaluation = final_evaluation
             else:
                 # Skip evaluation and use initial response
                 final_response = initial_response
@@ -581,91 +579,25 @@ class SelfImprovingAgent:
                     metadata={"evaluation_disabled": True}
                 )
 
-            # Step 5: Store interaction and learn
-            interaction_id = await self.data_manager.save_interaction(
-                query=query,
-                response=final_response,
-                evaluation_score=evaluation.overall_score,
-                context_used=context,
-                metadata={
-                    "interaction_count": self.interaction_count,
-                    "session_id": self.session_id,
-                    "improvement_applied": final_response != initial_response,
-                },
-                conversation_id=conversation_id,
-            )
-
-            # Save detailed evaluation
-            await self.data_manager.save_evaluation(
-                interaction_id=interaction_id,
-                overall_score=evaluation.overall_score,
-                criteria_scores=evaluation.criteria_scores,
-                feedback=evaluation.feedback,
-                improvement_suggestions=evaluation.improvement_suggestions,
-                confidence=evaluation.confidence,
-            )
-
-            await self._store_interaction(
-                query, final_response, context, evaluation
-            )
-
-            # Step 6: Update knowledge base
-            if config.auto_update_knowledge:
-                knowledge_added_count = await self.knowledge_updater.update_from_interaction(
-                    query, final_response, evaluation
-                )
-
-                # Notify about significant knowledge updates (only if knowledge was actually added)
-                if (
-                    config.discord_status_on_knowledge_update
-                    and knowledge_added_count > 0
-                    and evaluation.overall_score >= 0.8
-                ):
-                    await self._notify_status(
-                        "knowledge_update",
-                        {
-                            "query": query[:200],
-                            "evaluation_score": evaluation.overall_score,
-                            "interaction_count": self.interaction_count,
-                            "knowledge_added": knowledge_added_count,
-                        }
-                    )
-
-            # Step 6b: Reflexion — extract lessons from evaluation history periodically
-            reflexion_interval = getattr(config, "reflexion_interval", 50)
-            if (
-                config.enable_evaluation
-                and reflexion_interval > 0
-                and self.interaction_count % reflexion_interval == 0
-            ):
-                try:
-                    await self._run_reflexion()
-                except Exception as e:
-                    self.logger.warning(f"Reflexion failed: {e}")
-
-            # Step 7: Consider self-modification (periodically)
-            if (
-                config.enable_self_modification and self.interaction_count % 10 == 0
-            ):  # Every 10 interactions
-                await self._consider_self_modification()
-
             self.last_evaluation_score = evaluation.overall_score
-
-            # Save agent state periodically (every 5 interactions)
-            if self.interaction_count % 5 == 0:
-                try:
-                    await self.data_manager.save_agent_state({
-                        "interaction_count": self.interaction_count,
-                        "improvement_cycle_count": self.improvement_cycle_count,
-                        "component_health": {k: v for k, v in self.component_health.items()},
-                    })
-                except Exception as e:
-                    self.logger.warning(f"Failed to save agent state: {e}")
-
             self.logger.info(
                 f"Query processed successfully. "
                 f"Evaluation score: {evaluation.overall_score:.2f}"
             )
+
+            # Steps 5-7: Storage, knowledge update, and periodic tasks run in the background
+            # so the response is returned to the caller without waiting on DB/vector writes.
+            asyncio.create_task(
+                self._post_response_work(
+                    query=query,
+                    final_response=final_response,
+                    initial_response=initial_response,
+                    context=context,
+                    evaluation=evaluation,
+                    conversation_id=conversation_id,
+                )
+            )
+
             return final_response
 
         except Exception as e:
@@ -1024,6 +956,94 @@ Be specific, actionable, and consider lessons learned from previous interactions
             self.logger.error(f"Failed to format conversation history: {e}")
             return ""
 
+    async def _post_response_work(
+        self,
+        query: str,
+        final_response: str,
+        initial_response: str,
+        context: Dict[str, Any],
+        evaluation: "EvaluationResult",
+        conversation_id: Optional[str],
+    ) -> None:
+        """Background task: persist interaction, update knowledge, run periodic work."""
+        try:
+            # Parallel DB writes: save_interaction and the memory store together
+            interaction_id, _ = await asyncio.gather(
+                self.data_manager.save_interaction(
+                    query=query,
+                    response=final_response,
+                    evaluation_score=evaluation.overall_score,
+                    context_used=context,
+                    metadata={
+                        "interaction_count": self.interaction_count,
+                        "session_id": self.session_id,
+                        "improvement_applied": final_response != initial_response,
+                    },
+                    conversation_id=conversation_id,
+                ),
+                self._store_interaction(query, final_response, context, evaluation),
+            )
+
+            # Save detailed evaluation (needs interaction_id from above)
+            await self.data_manager.save_evaluation(
+                interaction_id=interaction_id,
+                overall_score=evaluation.overall_score,
+                criteria_scores=evaluation.criteria_scores,
+                feedback=evaluation.feedback,
+                improvement_suggestions=evaluation.improvement_suggestions,
+                confidence=evaluation.confidence,
+            )
+
+            # Update knowledge base
+            if config.auto_update_knowledge:
+                knowledge_added_count = await self.knowledge_updater.update_from_interaction(
+                    query, final_response, evaluation
+                )
+                if (
+                    config.discord_status_on_knowledge_update
+                    and knowledge_added_count > 0
+                    and evaluation.overall_score >= 0.8
+                ):
+                    await self._notify_status(
+                        "knowledge_update",
+                        {
+                            "query": query[:200],
+                            "evaluation_score": evaluation.overall_score,
+                            "interaction_count": self.interaction_count,
+                            "knowledge_added": knowledge_added_count,
+                        },
+                    )
+
+            # Reflexion — extract lessons periodically
+            reflexion_interval = getattr(config, "reflexion_interval", 50)
+            if (
+                config.enable_evaluation
+                and reflexion_interval > 0
+                and self.interaction_count % reflexion_interval == 0
+            ):
+                try:
+                    await self._run_reflexion()
+                except Exception as e:
+                    self.logger.warning(f"Reflexion failed: {e}")
+
+            # Consider self-modification every 10 interactions
+            if config.enable_self_modification and self.interaction_count % 10 == 0:
+                await self._consider_self_modification()
+
+            # Save agent state every 5 interactions
+            if self.interaction_count % 5 == 0:
+                try:
+                    await self.data_manager.save_agent_state({
+                        "interaction_count": self.interaction_count,
+                        "improvement_cycle_count": self.improvement_cycle_count,
+                        "component_health": {k: v for k, v in self.component_health.items()},
+                    })
+                except Exception as e:
+                    self.logger.warning(f"Failed to save agent state: {e}")
+
+        except Exception as e:
+            self.logger.error(f"Background post-response work failed: {e}")
+
     async def _store_interaction(
         self,
         query: str,
@@ -1298,8 +1318,12 @@ Memory Types:
         initial_response: str,
         evaluation: "EvaluationResult",
         context: dict,
-    ) -> str:
+    ) -> tuple:
         """Iterative Constitutional-AI-style revision loop.
+
+        Returns (final_response, final_evaluation) where final_evaluation is the
+        EvaluationResult for the returned response (may be the original evaluation
+        if no revision was performed).
 
         Runs up to config.iterative_revision_max_rounds rounds.
         Stops early when score >= target or no improvement between rounds.
@@ -1309,13 +1333,13 @@ Memory Types:
                 self.logger.info(
                     f"Response quality acceptable ({evaluation.overall_score:.2f}), skipping revision"
                 )
-                return initial_response
+                return initial_response, evaluation
 
             failed_criteria = evaluation.metadata.get("failed_criteria", [])
             criteria_evaluated = evaluation.metadata.get("criteria_evaluated", [])
             if criteria_evaluated and len(failed_criteria) > len(criteria_evaluated) / 2:
                 self.logger.warning("Skipping improvement: evaluation data unreliable")
-                return initial_response
+                return initial_response, evaluation
 
             system_prompt = (
                 "You are a self-improving AI assistant. "
@@ -1395,11 +1419,11 @@ Memory Types:
                     current_response = revised
                     break
 
-            return current_response
+            return current_response, current_eval
 
         except Exception as e:
             self.logger.error(f"Failed to improve response: {e}")
-            return initial_response
+            return initial_response, evaluation
 
     async def cleanup(self):
         """Clean up agent resources with error recovery."""

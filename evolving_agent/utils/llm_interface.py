@@ -252,6 +252,7 @@ class OpenRouterInterface(LLMInterface):
         self.api_key = api_key
         self.model = model
         self.base_url = "https://openrouter.ai/api/v1"
+        self._client = httpx.AsyncClient(timeout=60.0)
 
     def _get_headers(self) -> Dict[str, str]:
         """Get fresh headers for each request."""
@@ -293,13 +294,12 @@ class OpenRouterInterface(LLMInterface):
         """Make completion request to OpenRouter API."""
         try:
             headers = self._get_headers()
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    f"{self.base_url}/chat/completions", headers=headers, json=payload
-                )
-                response.raise_for_status()
-                data = response.json()
-                return data["choices"][0]["message"]["content"]
+            response = await self._client.post(
+                f"{self.base_url}/chat/completions", headers=headers, json=payload
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
         except Exception as e:
             logger.error(f"OpenRouter API error: {e}")
             raise
@@ -354,6 +354,7 @@ class ZAIInterface(LLMInterface):
         # Z.AI Coding API endpoint (international/overseas)
         # Separate endpoint specifically for coding tasks
         self.base_url = "https://api.z.ai/api/coding/paas/v4"
+        self._client = httpx.AsyncClient(timeout=60.0)
 
     def _get_headers(self) -> Dict[str, str]:
         """Get headers for Z AI requests."""
@@ -387,18 +388,16 @@ class ZAIInterface(LLMInterface):
         """Make completion request to Z AI API."""
         try:
             headers = self._get_headers()
-            # GLM-4.7 is a coding model - use standard chat completions endpoint
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    f"{self.base_url}/chat/completions", headers=headers, json=payload
-                )
-                response.raise_for_status()
-                data = response.json()
-                message = data["choices"][0]["message"]
-                # GLM-4.7 may return reasoning in reasoning_content with empty content
-                content = message.get("content") or ""
-                reasoning = message.get("reasoning_content") or ""
-                return content if content else reasoning
+            response = await self._client.post(
+                f"{self.base_url}/chat/completions", headers=headers, json=payload
+            )
+            response.raise_for_status()
+            data = response.json()
+            message = data["choices"][0]["message"]
+            # GLM-4.7 may return reasoning in reasoning_content with empty content
+            content = message.get("content") or ""
+            reasoning = message.get("reasoning_content") or ""
+            return content if content else reasoning
         except Exception as e:
             logger.error(f"Z AI API error: {e}")
             raise
