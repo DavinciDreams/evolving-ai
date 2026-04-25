@@ -542,12 +542,18 @@ app = FastAPI(
 )
 
 # Add CORS middleware
-_cors_origins = os.getenv("CORS_ORIGINS", "*")
-_allowed_origins = [o.strip() for o in _cors_origins.split(",")] if _cors_origins != "*" else ["*"]
+_cors_origins = os.getenv("CORS_ORIGINS", "*").strip()
+if _cors_origins == "*":
+    _allowed_origins = ["*"]
+    _allow_credentials = False
+else:
+    _allowed_origins = [o.strip() for o in _cors_origins.split(",") if o.strip()]
+    _allow_credentials = True
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
-    allow_credentials=True,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1877,5 +1883,11 @@ if __name__ == "__main__":
     # Run the server
     port = int(os.getenv("PORT", "8000"))
     uvicorn.run(
-        "evolving_agent.utils.api_server:app", host="0.0.0.0", port=port, reload=True, log_level="info"
+        "evolving_agent.utils.api_server:app",
+        host="0.0.0.0",
+        port=port,
+        reload=True,
+        log_level="info",
+        proxy_headers=True,
+        forwarded_allow_ips="*",
     )

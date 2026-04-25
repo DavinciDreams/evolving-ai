@@ -7,7 +7,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://your-backend-url.coolify.app/:path*"
+      "destination": "https://katbot.atlasfoundation.app/:path*"
     }
   ],
   "headers": [
