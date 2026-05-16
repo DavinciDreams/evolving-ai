@@ -1,8 +1,21 @@
 const LOCAL_API_BASE_URL = 'http://localhost:8000';
+const PRODUCTION_API_BASE_URL = 'https://evolvingai.flobots.xyz/api';
+const STALE_API_HOSTS = [
+  'katbot.atlasfoundation.app',
+  'ae5460180c1d.ngrok-free.app'
+];
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  (import.meta.env.DEV ? LOCAL_API_BASE_URL : '/api');
+function getApiBaseUrl() {
+  const configuredUrl = import.meta.env.VITE_API_BASE_URL;
+
+  if (configuredUrl && !STALE_API_HOSTS.some((host) => configuredUrl.includes(host))) {
+    return configuredUrl;
+  }
+
+  return import.meta.env.DEV ? LOCAL_API_BASE_URL : PRODUCTION_API_BASE_URL;
+}
+
+export const API_BASE_URL = getApiBaseUrl();
 
 export function getWebSocketUrl(path = '/ws/status') {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
