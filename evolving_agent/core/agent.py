@@ -684,6 +684,17 @@ class SelfImprovingAgent:
             )
             return model
 
+        if provider == "openai" and (config.openai_api_key or config.openai_base_url):
+            api_key = config.openai_api_key or "not-needed"
+            if config.openai_base_url:
+                model = OpenAIModel(model_name, api_key=api_key)
+                base_url = config.openai_base_url.rstrip("/")
+                if not base_url.endswith("/v1"):
+                    base_url = f"{base_url}/v1"
+                model._client = _openai_lib.OpenAI(api_key=api_key, base_url=base_url)
+                return model
+            return openai_model(model_name, api_key=api_key)
+
         if config.openai_api_key:
             return openai_model(model_name, api_key=config.openai_api_key)
 
@@ -1296,6 +1307,5 @@ Memory Types:
             health_status["overall"] = "unhealthy"
         
         return health_status
-
 
 
