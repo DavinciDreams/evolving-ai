@@ -68,11 +68,27 @@ class LLMInterface(ABC):
         pass
 
 
+def _normalize_openai_base_url(base_url: str) -> Optional[str]:
+    """Normalize OpenAI-compatible base URLs for SDK clients."""
+    if not base_url:
+        return None
+
+    normalized = base_url.rstrip("/")
+    if normalized.endswith("/v1"):
+        return normalized
+    return f"{normalized}/v1"
+
+
 class OpenAIInterface(LLMInterface):
     """OpenAI API interface."""
 
-    def __init__(self, api_key: str, model: str = "gpt-4"):
-        self.client = openai.AsyncOpenAI(api_key=api_key)
+    def __init__(self, api_key: str, model: str = "gpt-4", base_url: Optional[str] = None):
+        client_kwargs = {"api_key": api_key}
+        normalized_base_url = _normalize_openai_base_url(base_url or "")
+        if normalized_base_url:
+            client_kwargs["base_url"] = normalized_base_url
+
+        self.client = openai.AsyncOpenAI(**client_kwargs)
         self.model = model
 
     def _prepare_messages(
@@ -474,18 +490,25 @@ class LLMManager:
         self.default_provider = config.default_llm_provider
 
         # Initialize OpenAI
-        if (
-            config.openai_api_key
-            and config.openai_api_key != "your_openai_api_key_here"
+        openai_api_key = config.openai_api_key
+        if config.openai_base_url and (
+            not openai_api_key or openai_api_key == "your_openai_api_key_here"
         ):
+            openai_api_key = "not-needed"
+
+        if openai_api_key and openai_api_key != "your_openai_api_key_here":
             model = (
                 config.default_model
                 if config.default_llm_provider == "openai"
                 else "gpt-4"
             )
-            self._initialize_provider(
-                "openai", OpenAIInterface, config.openai_api_key, model
-            )
+            try:
+                self.interfaces["openai"] = OpenAIInterface(
+                    openai_api_key, model, base_url=config.openai_base_url
+                )
+                logger.info("Openai interface initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize openai interface: {e}")
 
         # Initialize Anthropic
         if (

@@ -25,6 +25,11 @@ class Config:
         return os.getenv("OPENAI_API_KEY", "")
 
     @property
+    def openai_base_url(self) -> str:
+        """Get OpenAI-compatible API base URL."""
+        return os.getenv("OPENAI_BASE_URL", "").rstrip("/")
+
+    @property
     def anthropic_api_key(self) -> str:
         """Get Anthropic API key."""
         return os.getenv("ANTHROPIC_API_KEY", "")
