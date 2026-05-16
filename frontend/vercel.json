@@ -7,7 +7,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://your-backend-url.coolify.app/:path*"
+      "destination": "https://evolvingai.flobots.xyz/api/:path*"
     }
   ],
   "headers": [
