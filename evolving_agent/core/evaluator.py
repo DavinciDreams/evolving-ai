@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..utils.config import config
 from ..utils.llm_interface import llm_manager
 from ..utils.logging import setup_logger
+from ..utils.persistent_storage import persistent_data_manager
 from .memory import MemoryEntry
 
 logger = setup_logger(__name__)
@@ -49,6 +50,7 @@ class OutputEvaluator:
     def __init__(self):
         self.evaluation_history: List[Tuple[str, str, EvaluationResult]] = []
         self.criteria_weights = self._get_default_criteria_weights()
+        self._history_loaded_from_db = False
 
     def _get_default_criteria_weights(self) -> Dict[str, float]:
         """Get default weights for evaluation criteria."""
@@ -61,6 +63,34 @@ class OutputEvaluator:
             EvaluationCriteria.EFFICIENCY.value: 0.10,
             EvaluationCriteria.SAFETY.value: 0.05,
         }
+
+    async def _load_history_from_db(self):
+        """Hydrate evaluation_history from persistent DB on first use."""
+        try:
+            rows = await persistent_data_manager.get_recent_evaluations(50)
+            for row in reversed(rows):  # oldest first
+                try:
+                    criteria_scores = json.loads(row["criteria_scores"]) if row["criteria_scores"] else {}
+                    suggestions = json.loads(row["improvement_suggestions"]) if row["improvement_suggestions"] else []
+                    synthetic = EvaluationResult(
+                        overall_score=row["overall_score"],
+                        criteria_scores=criteria_scores,
+                        strengths=[],
+                        weaknesses=[],
+                        improvement_suggestions=suggestions,
+                        feedback=row["feedback"] or "",
+                        confidence=row["confidence"] or 0.7,
+                        metadata={"from_db": True, "timestamp": row["timestamp"]},
+                    )
+                    query = row.get("query", "")
+                    self.evaluation_history.append((query, "", synthetic))
+                except Exception:
+                    continue
+            self._history_loaded_from_db = True
+            logger.info(f"Loaded {len(rows)} historical evaluations from DB")
+        except Exception as e:
+            logger.warning(f"Could not load evaluation history from DB: {e}")
+            self._history_loaded_from_db = True  # don't retry on failure
 
     async def evaluate_output(
         self,
@@ -77,6 +107,9 @@ class OutputEvaluator:
         7 separate LLM calls. Falls back gracefully if parsing fails.
         """
         try:
+            if not self._history_loaded_from_db:
+                await self._load_history_from_db()
+
             logger.info("Starting consolidated evaluation of output...")
             start_time = datetime.now()
 
@@ -142,13 +175,65 @@ class OutputEvaluator:
         criteria: List[str],
         context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]], List[str]]:
-        """Evaluate all criteria in a single LLM call."""
+        """Evaluate all criteria, optionally using an ensemble of judge personas."""
+        from ..utils.config import config as _cfg
+
+        # Primary judge call (existing logic)
+        primary = await self._judge_call(query, output, criteria, persona=None)
+
+        if not _cfg.enable_ensemble_judge:
+            return primary
+
+        # Two additional personas to reduce self-referential bias
+        personas = [
+            "You are a skeptical expert reviewer. Be critical and look for errors, gaps, and weak reasoning.",
+            "You are a helpful user advocate. Assess whether the response genuinely helps the user.",
+        ]
+        try:
+            ensemble_results = await asyncio.gather(
+                self._judge_call(query, output, criteria, persona=personas[0]),
+                self._judge_call(query, output, criteria, persona=personas[1]),
+                return_exceptions=True,
+            )
+        except Exception:
+            return primary
+
+        all_scores = [primary]
+        for result in ensemble_results:
+            if not isinstance(result, Exception):
+                all_scores.append(result)
+
+        if len(all_scores) == 1:
+            return primary
+
+        # Average scores across judges
+        primary_scores, primary_feedback, failed = primary
+        averaged_scores: Dict[str, float] = {}
+        for c in criteria:
+            vals = []
+            for scores, _, _ in all_scores:
+                if c in scores:
+                    vals.append(scores[c])
+            averaged_scores[c] = sum(vals) / len(vals) if vals else primary_scores.get(c, 0.7)
+
+        return averaged_scores, primary_feedback, failed
+
+    async def _judge_call(
+        self,
+        query: str,
+        output: str,
+        criteria: List[str],
+        persona: Optional[str],
+    ) -> Tuple[Dict[str, float], Dict[str, Dict[str, Any]], List[str]]:
+        """Single LLM judge call, optionally with a custom persona injected."""
+        from ..utils.config import config as _cfg
         try:
             criteria_list = ", ".join(criteria)
             scores_template = ", ".join(f'"{c}": 0.0' for c in criteria)
+            persona_line = f"\n{persona}\n" if persona else ""
 
             prompt = f"""\
-Evaluate this response on a 0.0-1.0 scale for each criterion.
+{persona_line}Evaluate this response on a 0.0-1.0 scale for each criterion.
 
 QUERY: {query}
 
@@ -161,19 +246,18 @@ Reply with ONLY this JSON, no other text:
 
             response = await llm_manager.generate_response(
                 prompt=prompt,
-                provider=config.evaluation_provider or config.default_llm_provider,
-                temperature=0.2,
+                provider=_cfg.evaluation_provider or _cfg.default_llm_provider,
+                temperature=0.3 if persona else 0.2,
                 max_tokens=600,
             )
 
             if not response or not response.strip():
-                logger.warning("Empty consolidated evaluation response, using defaults")
                 return self._default_evaluation(criteria)
 
             return self._parse_consolidated_response(response, criteria)
 
         except Exception as e:
-            logger.error(f"Consolidated evaluation failed: {e}")
+            logger.error(f"Judge call failed: {e}")
             return self._default_evaluation(criteria)
 
     def _parse_consolidated_response(
@@ -527,8 +611,8 @@ Reply with ONLY this JSON, no other text:
             if not self.evaluation_history:
                 return {"message": "No evaluation history available"}
 
-            # Analyze trends
-            recent_evaluations = self.evaluation_history[-10:]  # Last 10
+            # Prefer last 20 from full history (includes DB-hydrated entries)
+            recent_evaluations = self.evaluation_history[-20:]
 
             overall_scores = [
                 eval_result.overall_score for _, _, eval_result in recent_evaluations
@@ -584,6 +668,41 @@ Reply with ONLY this JSON, no other text:
                 for criterion, weight in new_weights.items()
             }
             logger.info("Updated evaluation criteria weights")
+
+    def update_weights_from_preferences(self, preferences: List[Dict[str, Any]]) -> None:
+        """Adapt criteria weights based on which criteria changed most in preference pairs.
+
+        Criteria with high delta-correlation to score improvement get upweighted.
+        Called periodically when enough preference data exists.
+        """
+        if len(preferences) < 20:
+            return
+
+        try:
+            criteria_deltas: Dict[str, List[float]] = {c: [] for c in self.criteria_weights}
+
+            for pref in preferences:
+                orig_criteria = pref.get("original_criteria_scores", {})
+                imp_criteria = pref.get("improved_criteria_scores", {})
+                if not orig_criteria or not imp_criteria:
+                    continue
+                for c in criteria_deltas:
+                    if c in orig_criteria and c in imp_criteria:
+                        criteria_deltas[c].append(imp_criteria[c] - orig_criteria[c])
+
+            # Criteria that improved most on average in successful pairs → upweight
+            new_weights = dict(self.criteria_weights)
+            for c, deltas in criteria_deltas.items():
+                if deltas:
+                    avg_delta = sum(deltas) / len(deltas)
+                    # Small nudge: +10% weight for criteria that improved most
+                    adjustment = 1.0 + min(0.1, max(-0.05, avg_delta * 0.5))
+                    new_weights[c] = self.criteria_weights[c] * adjustment
+
+            self.update_criteria_weights(new_weights)
+            logger.info("Updated criteria weights from preference data")
+        except Exception as e:
+            logger.warning(f"Could not update weights from preferences: {e}")
 
     async def create_evaluation_memory(
         self, evaluation: EvaluationResult, query: str, output: str

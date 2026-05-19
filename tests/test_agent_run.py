@@ -4,6 +4,7 @@ Heavy native libraries (chromadb, sentence_transformers, discord, openai,
 ai_sdk) are stubbed in sys.modules before any evolving_agent import so that
 the test runner never needs those packages installed.
 """
+import asyncio
 import sys
 from unittest.mock import MagicMock
 
@@ -42,6 +43,14 @@ from evolving_agent.core.evaluator import EvaluationResult
 # Helpers
 # ---------------------------------------------------------------------------
 
+async def _drain_tasks():
+    """Wait for all pending background tasks to complete."""
+    current = asyncio.current_task()
+    pending = [t for t in asyncio.all_tasks() if t is not current]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
 def _make_config(
     *,
     enable_evaluation: bool = False,
@@ -55,6 +64,7 @@ def _make_config(
     cfg.auto_update_knowledge = auto_update_knowledge
     cfg.enable_self_modification = enable_self_modification
     cfg.discord_status_on_knowledge_update = discord_status_on_knowledge_update
+    cfg.reflexion_interval = 50  # prevent MagicMock arithmetic in _post_response_work
     return cfg
 
 
@@ -115,7 +125,8 @@ def agent():
 
     # ---- Private methods that hit external systems ----
     a._generate_response = AsyncMock(return_value="Test answer")
-    a._improve_response = AsyncMock(return_value="Improved answer")
+    # _improve_response now returns (response_str, EvaluationResult)
+    a._improve_response = AsyncMock(return_value=("Improved answer", _make_eval_result()))
     a._store_interaction = AsyncMock()
     a._store_error = AsyncMock()
     a._is_self_edit_request = MagicMock(return_value=False)
@@ -194,9 +205,11 @@ async def test_run_uses_prebuilt_history_when_provided(agent):
 
 
 async def test_run_stores_interaction(agent):
-    """run() must persist the interaction with the correct query and response."""
+    """run() must persist the interaction with the correct query and response.
+    Storage happens in a background task, so we drain the event loop first."""
     with patch("evolving_agent.core.agent.config", _make_config()):
         await agent.run("hello")
+        await _drain_tasks()  # drain inside patch so background task sees mocked config
 
     agent.data_manager.save_interaction.assert_called_once()
     call_kwargs = agent.data_manager.save_interaction.call_args.kwargs
@@ -209,7 +222,7 @@ async def test_run_with_evaluation_enabled(agent):
     response is returned."""
     mock_eval = _make_eval_result(overall_score=0.9)
     agent.evaluator.evaluate_output = AsyncMock(return_value=mock_eval)
-    agent._improve_response = AsyncMock(return_value="Improved answer")
+    agent._improve_response = AsyncMock(return_value=("Improved answer", mock_eval))
 
     with patch("evolving_agent.core.agent.config", _make_config(enable_evaluation=True)):
         result = await agent.run("hello")
@@ -257,6 +270,7 @@ async def test_run_triggers_self_modification_every_10_interactions(agent):
         _make_config(enable_self_modification=True),
     ):
         await agent.run("hello")
+        await _drain_tasks()  # drain inside patch so background task sees mocked config
 
     assert agent.interaction_count == 10
     agent._consider_self_modification.assert_called_once()
@@ -298,6 +312,7 @@ async def test_run_updates_knowledge_when_enabled(agent):
         _make_config(auto_update_knowledge=True),
     ):
         await agent.run("hello")
+        await _drain_tasks()  # drain inside patch so background task sees mocked config
 
     agent.knowledge_updater.update_from_interaction.assert_called_once()
 
@@ -310,5 +325,6 @@ async def test_run_skips_knowledge_update_when_disabled(agent):
         _make_config(auto_update_knowledge=False),
     ):
         await agent.run("hello")
+        await _drain_tasks()  # drain inside patch so background task sees mocked config
 
     agent.knowledge_updater.update_from_interaction.assert_not_called()
