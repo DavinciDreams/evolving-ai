@@ -11,12 +11,13 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
       # LLM Provider Configuration
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-http://monumentals-mac-studio.local:12345}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - ZAI_API_KEY=${ZAI_API_KEY}
-      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-openrouter}
-      - DEFAULT_MODEL=${DEFAULT_MODEL:-nvidia/nemotron-3-nano-30b-a3b:free}
-      - EVALUATION_MODEL=${EVALUATION_MODEL:-nvidia/nemotron-3-nano-30b-a3b:free}
+      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-openai}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4}
+      - EVALUATION_MODEL=${EVALUATION_MODEL:-mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4}
       - TEMPERATURE=${TEMPERATURE:-0.7}
       - MAX_TOKENS=${MAX_TOKENS:-2048}
 

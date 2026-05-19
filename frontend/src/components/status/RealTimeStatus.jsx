@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Badge from '../common/Badge';
 import { formatRelativeTime } from '../../utils/formatting';
+import { API_BASE_URL } from '../../utils/apiConfig';
 
 const RealTimeStatus = ({ onStatusUpdate, onConnectionChange, className = '' }) => {
   const [connectionStatus, setConnectionStatus] = useState('disconnected'); // disconnected, connecting, connected, error
@@ -8,143 +9,75 @@ const RealTimeStatus = ({ onStatusUpdate, onConnectionChange, className = '' }) 
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [error, setError] = useState(null);
   
-  const wsRef = useRef(null);
-  const reconnectTimeoutRef = useRef(null);
-  const heartbeatIntervalRef = useRef(null);
+  const pollIntervalRef = useRef(null);
+  const reconnectAttemptsRef = useRef(0);
   
   const maxReconnectAttempts = 5;
-  const reconnectDelay = 3000; // 3 seconds
-  const heartbeatInterval = 30000; // 30 seconds
+  const pollInterval = 5000; // 5 seconds
+
+  const pollStatus = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/status`);
+
+      if (!response.ok) {
+        throw new Error(`Status request failed (${response.status})`);
+      }
+
+      const data = await response.json();
+      const timestamp = new Date();
+
+      setConnectionStatus('connected');
+      setReconnectAttempts(0);
+      reconnectAttemptsRef.current = 0;
+      setError(null);
+      setLastUpdate(timestamp);
+
+      if (onStatusUpdate) {
+        onStatusUpdate({ type: 'status_update', data, timestamp });
+      }
+
+      if (onConnectionChange) {
+        onConnectionChange({ status: 'connected', timestamp });
+      }
+    } catch (err) {
+      const nextAttempt = reconnectAttemptsRef.current + 1;
+      const connectionState = nextAttempt >= maxReconnectAttempts ? 'error' : 'connecting';
+
+      reconnectAttemptsRef.current = nextAttempt;
+      setReconnectAttempts(nextAttempt);
+      setConnectionStatus(connectionState);
+      setError(err.message);
+
+      if (onConnectionChange) {
+        onConnectionChange({
+          status: connectionState,
+          timestamp: new Date(),
+          error: err.message
+        });
+      }
+    }
+  }, [onStatusUpdate, onConnectionChange]);
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    if (pollIntervalRef.current) {
       return;
     }
 
     setConnectionStatus('connecting');
     setError(null);
-
-    try {
-      // Determine WebSocket URL based on current location
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsHost = window.location.host || 'localhost:8000';
-      const wsUrl = `${wsProtocol}//${wsHost}/ws/status`;
-      
-      wsRef.current = new WebSocket(wsUrl);
-
-      wsRef.current.onopen = () => {
-        setConnectionStatus('connected');
-        setReconnectAttempts(0);
-        setError(null);
-        setLastUpdate(new Date());
-        
-        if (onConnectionChange) {
-          onConnectionChange({ status: 'connected', timestamp: new Date() });
-        }
-
-        // Start heartbeat
-        heartbeatIntervalRef.current = setInterval(() => {
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: 'heartbeat' }));
-          }
-        }, heartbeatInterval);
-
-        console.log('WebSocket connected for real-time status updates');
-      };
-
-      wsRef.current.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          
-          if (data.type === 'status_update') {
-            setLastUpdate(new Date());
-            
-            if (onStatusUpdate) {
-              onStatusUpdate(data);
-            }
-          } else if (data.type === 'heartbeat_response') {
-            // Heartbeat received, connection is alive
-            setLastUpdate(new Date());
-          }
-        } catch (err) {
-          console.error('Error parsing WebSocket message:', err);
-        }
-      };
-
-      wsRef.current.onclose = (event) => {
-        setConnectionStatus('disconnected');
-        
-        if (onConnectionChange) {
-          onConnectionChange({ 
-            status: 'disconnected', 
-            timestamp: new Date(),
-            code: event.code,
-            reason: event.reason
-          });
-        }
-
-        // Clear heartbeat
-        if (heartbeatIntervalRef.current) {
-          clearInterval(heartbeatIntervalRef.current);
-          heartbeatIntervalRef.current = null;
-        }
-
-        // Attempt to reconnect if not explicitly closed
-        if (event.code !== 1000 && reconnectAttempts < maxReconnectAttempts) {
-          const nextAttempt = reconnectAttempts + 1;
-          setReconnectAttempts(nextAttempt);
-          
-          reconnectTimeoutRef.current = setTimeout(() => {
-            console.log(`WebSocket reconnection attempt ${nextAttempt}/${maxReconnectAttempts}`);
-            connect();
-          }, reconnectDelay * nextAttempt); // Exponential backoff
-        } else if (reconnectAttempts >= maxReconnectAttempts) {
-          setError('Maximum reconnection attempts reached');
-          setConnectionStatus('error');
-        }
-
-        console.log('WebSocket disconnected:', event.code, event.reason);
-      };
-
-      wsRef.current.onerror = (event) => {
-        console.error('WebSocket error:', event);
-        setError('Connection error');
-        setConnectionStatus('error');
-        
-        if (onConnectionChange) {
-          onConnectionChange({ 
-            status: 'error', 
-            timestamp: new Date(),
-            error: 'Connection error'
-          });
-        }
-      };
-
-    } catch (err) {
-      console.error('Error creating WebSocket connection:', err);
-      setError(`Failed to connect: ${err.message}`);
-      setConnectionStatus('error');
-    }
-  }, [onStatusUpdate, onConnectionChange, reconnectAttempts]);
+    pollStatus();
+    pollIntervalRef.current = setInterval(pollStatus, pollInterval);
+  }, [pollStatus]);
 
   const disconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-
-    if (heartbeatIntervalRef.current) {
-      clearInterval(heartbeatIntervalRef.current);
-      heartbeatIntervalRef.current = null;
-    }
-
-    if (wsRef.current) {
-      wsRef.current.close(1000, 'User disconnected');
-      wsRef.current = null;
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
     }
 
     setConnectionStatus('disconnected');
     setReconnectAttempts(0);
+    reconnectAttemptsRef.current = 0;
     setError(null);
   }, []);
 
@@ -166,27 +99,11 @@ const RealTimeStatus = ({ onStatusUpdate, onConnectionChange, className = '' }) 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (heartbeatIntervalRef.current) {
-        clearInterval(heartbeatIntervalRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close(1000, 'Component unmounting');
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
       }
     };
   }, []);
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'connected': return 'green';
-      case 'connecting': return 'blue';
-      case 'disconnected': return 'gray';
-      case 'error': return 'red';
-      default: return 'gray';
-    }
-  };
 
   const getStatusText = (status) => {
     switch (status) {
@@ -283,16 +200,16 @@ const RealTimeStatus = ({ onStatusUpdate, onConnectionChange, className = '' }) 
       {/* Connection Info */}
       <div className="mt-3 pt-3 border-t border-gray-200 text-xs text-gray-500">
         <div className="flex justify-between">
-          <span>WebSocket Endpoint:</span>
-          <span className="font-mono">/ws/status</span>
+          <span>Status Endpoint:</span>
+          <span className="font-mono">/status</span>
         </div>
         <div className="flex justify-between mt-1">
           <span>Update Frequency:</span>
           <span>~5 seconds</span>
         </div>
         <div className="flex justify-between mt-1">
-          <span>Heartbeat:</span>
-          <span>30 seconds</span>
+          <span>Mode:</span>
+          <span>HTTP polling</span>
         </div>
       </div>
     </div>
