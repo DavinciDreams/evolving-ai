@@ -4,6 +4,18 @@
 
 The Self-Improving AI Agent now includes a comprehensive REST API with Swagger documentation, allowing you to interact with the agent through HTTP endpoints instead of just command-line interfaces.
 
+## Authentication
+
+By default, the API has no authentication. All GET endpoints remain open.
+
+Write endpoints (POST /chat, POST /self-improve, etc.) can be protected by setting the `API_KEY` environment variable. When set, include the key in requests:
+
+```http
+X-API-Key: your-api-key
+```
+
+Leave `API_KEY` empty to disable authentication (default).
+
 ## 🚀 Quick Start
 
 ### 1. Install Dependencies

@@ -16,6 +16,8 @@ logger = setup_logger(__name__)
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_github_integration():

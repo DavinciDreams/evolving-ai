@@ -2,6 +2,8 @@
 """
 Comprehensive test of the self-improving agent system.
 """
+import pytest
+pytestmark = pytest.mark.integration
 
 import asyncio
 import os

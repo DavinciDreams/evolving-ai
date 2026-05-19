@@ -1,6 +1,8 @@
 """
 Test provider availability and initialization.
 """
+import pytest
+pytestmark = pytest.mark.integration
 
 from unittest.mock import AsyncMock, MagicMock, patch
 

@@ -206,8 +206,10 @@ export const ImprovementStatus = ({
           <button
             onClick={() => setExpanded(!expanded)}
             className="text-gray-500 hover:text-gray-700 transition-colors"
+            aria-expanded={expanded}
+            aria-label={expanded ? 'Collapse improvement details' : 'Expand improvement details'}
           >
-            {expanded ? <ChevronUpIcon className="h-4 w-4" /> : <ChevronDownIcon className="h-4 w-4" />}
+            {expanded ? <ChevronUpIcon className="h-4 w-4" aria-hidden="true" /> : <ChevronDownIcon className="h-4 w-4" aria-hidden="true" />}
           </button>
         </div>
       </div>
@@ -242,8 +244,8 @@ export const ImprovementStatus = ({
             const isLast = index === progressUpdates.length - 1;
             
             return (
-              <div 
-                key={index} 
+              <div
+                key={`${update.event_type}-${update.timestamp || index}`}
                 className={`flex items-start gap-3 p-2 rounded-md ${
                   isLast ? 'bg-white shadow-sm' : 'bg-gray-100/50'
                 }`}

@@ -1,6 +1,8 @@
 """
 Test the complete agent with the free OpenRouter model.
 """
+import pytest
+pytestmark = pytest.mark.integration
 
 import asyncio
 import os

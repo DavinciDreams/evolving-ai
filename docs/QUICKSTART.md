@@ -1,5 +1,9 @@
 # Quick Start Guide
 
+## Requirements
+
+- Python 3.12+
+
 ## Setup Instructions
 
 1. **Configure API Keys** (Required for full functionality):
@@ -18,6 +22,15 @@
    ```bash
    python main.py
    ```
+
+   **Alternatively, run with Docker** (no local Python install required):
+
+   ```bash
+   docker compose up
+   # API available at http://localhost:8000
+   # Frontend (Vite dev server) at http://localhost:5173
+   ```
+   The `docker-compose.override.yaml` file is automatically merged — no extra flags needed.
 
 3. **Run Tests**:
    ```bash
