@@ -684,7 +684,7 @@ class SelfImprovingAgent:
             model = OpenAIModel(model_name, api_key=config.zai_api_key)
             model._client = _openai_lib.OpenAI(
                 api_key=config.zai_api_key,
-                base_url="https://api.z.ai/api/coding/paas/v4",
+                base_url=config.zai_base_url,
             )
             return model
 
@@ -703,10 +703,10 @@ class SelfImprovingAgent:
         if config.anthropic_api_key:
             return anthropic_model("claude-3-5-sonnet-20241022", api_key=config.anthropic_api_key)
         if config.zai_api_key:
-            model = OpenAIModel("glm-4.5", api_key=config.zai_api_key)
+            model = OpenAIModel(config.zai_model, api_key=config.zai_api_key)
             model._client = _openai_lib.OpenAI(
                 api_key=config.zai_api_key,
-                base_url="https://api.z.ai/api/coding/paas/v4",
+                base_url=config.zai_base_url,
             )
             return model
 

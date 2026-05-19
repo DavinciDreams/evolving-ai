@@ -348,12 +348,10 @@ class OpenRouterInterface(LLMInterface):
 class ZAIInterface(LLMInterface):
     """Z AI API interface for GLM models."""
 
-    def __init__(self, api_key: str, model: str = "glm-4.7"):
+    def __init__(self, api_key: str, model: str = "glm-5", base_url: str = "https://api.z.ai/api/coding/paas/v4"):
         self.api_key = api_key
         self.model = model
-        # Z.AI Coding API endpoint (international/overseas)
-        # Separate endpoint specifically for coding tasks
-        self.base_url = "https://api.z.ai/api/coding/paas/v4"
+        self.base_url = base_url
         self._client = httpx.AsyncClient(timeout=60.0)
 
     def _get_headers(self) -> Dict[str, str]:
@@ -516,14 +514,16 @@ class LLMManager:
 
         # Initialize Z AI
         if config.zai_api_key:
-            model = (
-                config.default_model
-                if config.default_llm_provider == "zai"
-                else "glm-4.7"
-            )
-            self._initialize_provider(
-                "zai", ZAIInterface, config.zai_api_key, model
-            )
+            model = config.default_model if config.default_llm_provider == "zai" else config.zai_model
+            try:
+                self.interfaces["zai"] = ZAIInterface(
+                    api_key=config.zai_api_key,
+                    model=model,
+                    base_url=config.zai_base_url,
+                )
+                logger.info("Zai interface initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize zai interface: {e}")
 
         self._initialize_provider_status()
 

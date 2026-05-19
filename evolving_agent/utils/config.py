@@ -40,6 +40,16 @@ class Config:
         return os.getenv("ZAI_API_KEY", "")
 
     @property
+    def zai_base_url(self) -> str:
+        """Get Z AI base URL."""
+        return os.getenv("ZAI_BASE_URL", "https://api.z.ai/api/coding/paas/v4")
+
+    @property
+    def zai_model(self) -> str:
+        """Get Z AI model name."""
+        return os.getenv("ZAI_MODEL", "glm-5")
+
+    @property
     def log_level(self) -> str:
         """Get logging level."""
         return os.getenv("LOG_LEVEL", "INFO")
