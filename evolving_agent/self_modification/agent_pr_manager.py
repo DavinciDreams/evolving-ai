@@ -17,6 +17,7 @@ from .code_analyzer import CodeAnalyzer
 from .modifier import CodeModifier
 from .validator import CodeValidator
 from ..integrations.github_integration import GitHubIntegration
+from ..utils.config import config
 
 
 class AgentPRManager:
@@ -43,7 +44,9 @@ class AgentPRManager:
         self.validator = code_validator
 
         # Track improvement history
-        self.improvement_history_file = Path("persistent_data/improvement_history.json")
+        self.improvement_history_file = (
+            Path(config.persistent_data_dir) / "improvement_history.json"
+        )
         self.improvement_history = self._load_improvement_history()
 
         logger.info("AgentPRManager initialized")
