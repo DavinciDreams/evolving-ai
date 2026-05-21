@@ -5,6 +5,7 @@ Enhanced self-modification system with GitHub integration.
 import ast
 import asyncio
 import os
+import textwrap
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -286,14 +287,16 @@ class GitHubEnabledSelfModifier:
             )
 
             # Generate improvements for high complexity functions
-            for func_info in high_complexity_functions[:3]:  # Limit to top 3
+            for func_info in high_complexity_functions[
+                : config.self_improvement_max_functions
+            ]:
                 improvement = await self._generate_function_improvement(func_info)
                 if improvement:
                     improvements.append(improvement)
 
             # Generate improvements based on opportunities
             opportunities = analysis_result.get("improvement_opportunities", [])
-            for opportunity in opportunities[:5]:  # Limit to top 5
+            for opportunity in opportunities[: config.self_improvement_max_opportunities]:
                 improvement = await self._generate_opportunity_improvement(opportunity)
                 if improvement:
                     improvements.append(improvement)
@@ -357,6 +360,7 @@ class GitHubEnabledSelfModifier:
                 
                 # Create a simple refactored version that actually works
                 refactored_code = await self._create_simple_refactor(function_name, complexity, content)
+                has_code_changes = bool(refactored_code and refactored_code != content)
                 
                 improvement = {
                     "type": "function_refactor",
@@ -369,7 +373,7 @@ class GitHubEnabledSelfModifier:
                     "category": "complexity_reduction",
                     "original_code": content,
                     "refactored_code": refactored_code,
-                    "has_code_changes": True,
+                    "has_code_changes": has_code_changes,
                 }
 
                 return improvement
@@ -397,22 +401,26 @@ class GitHubEnabledSelfModifier:
             Refactored code as a string
         """
         try:
+            function_source = self._extract_function_source(content, function_name)
+            prompt_source = function_source["source"] if function_source else content
+
             # Create the refactoring prompt
             refactor_prompt = f"""You are a Python code refactoring expert. Analyze the following function and refactor it to improve readability and maintainability.
 
 Function name: {function_name}
 Current complexity: {complexity}
 
-File content:
+Function source:
 ```python
-{content}
+{prompt_source}
 ```
 
 Your task:
 1. Analyze the function for complexity issues
 2. Refactor to improve readability and maintainability
 3. Preserve the original functionality
-4. Return ONLY the refactored Python code (no explanations, no markdown code blocks)
+4. Preserve the original indentation level
+5. Return ONLY the refactored function code (no explanations, no markdown code blocks)
 
 Focus on:
 - Breaking down complex logic into smaller helper functions
@@ -426,13 +434,25 @@ Focus on:
             refactored_code = await llm_manager.generate_response(
                 prompt=refactor_prompt,
                 temperature=0.3,
-                max_tokens=4000
+                max_tokens=2500,
+                timeout=45.0,
             )
 
             if refactored_code:
                 refactored_code = self._extract_code_from_llm_response(refactored_code)
                 # Verify the extracted code is valid Python
                 if refactored_code:
+                    if function_source:
+                        refactored_code = self._normalize_replacement_indentation(
+                            refactored_code,
+                            function_source["indent"],
+                        )
+                        refactored_code = self._replace_source_range(
+                            content,
+                            function_source["start_line"],
+                            function_source["end_line"],
+                            refactored_code,
+                        )
                     try:
                         ast.parse(refactored_code)
                     except SyntaxError:
@@ -445,6 +465,58 @@ Focus on:
             logger.error(f"Failed to create simple refactor for {function_name}: {e}")
             # Return original content if refactoring fails
             return content
+
+    def _extract_function_source(
+        self, content: str, function_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """Extract a top-level or nested function source range from Python content."""
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            return None
+
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name == function_name
+            ):
+                if not getattr(node, "end_lineno", None):
+                    return None
+                lines = content.splitlines(keepends=True)
+                start_line = node.lineno
+                end_line = node.end_lineno
+                source = "".join(lines[start_line - 1:end_line])
+                first_line = lines[start_line - 1]
+                indent = first_line[: len(first_line) - len(first_line.lstrip())]
+                return {
+                    "source": source,
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "indent": indent,
+                }
+
+        return None
+
+    def _normalize_replacement_indentation(self, code: str, expected_indent: str) -> str:
+        """Normalize returned function code to match the original indentation."""
+        stripped = textwrap.dedent(code).strip("\n")
+        if not expected_indent:
+            return stripped
+        return "\n".join(
+            f"{expected_indent}{line}" if line.strip() else line
+            for line in stripped.splitlines()
+        )
+
+    def _replace_source_range(
+        self, content: str, start_line: int, end_line: int, replacement: str
+    ) -> str:
+        """Replace a 1-based inclusive line range while preserving the rest of the file."""
+        lines = content.splitlines(keepends=True)
+        replacement_lines = replacement.splitlines()
+        replacement_text = "\n".join(replacement_lines)
+        if end_line < len(lines) or content.endswith("\n"):
+            replacement_text += "\n"
+        return "".join(lines[: start_line - 1]) + replacement_text + "".join(lines[end_line:])
 
     async def _generate_opportunity_improvement(
         self, opportunity: Dict[str, Any]
@@ -486,6 +558,16 @@ Focus on:
                             with open(full_path, 'r', encoding='utf-8') as f:
                                 original_code = f.read()
                             file_path = str(full_path)
+                            function_source = (
+                                self._extract_function_source(original_code, function_name)
+                                if function_name
+                                else None
+                            )
+                            prompt_code = (
+                                function_source["source"]
+                                if function_source
+                                else original_code
+                            )
                             
                             # Generate refactored code using LLM
                             refactored_code = await self._generate_opportunity_refactor(
@@ -493,9 +575,21 @@ Focus on:
                                 description=description,
                                 suggested_action=suggested_action,
                                 function_name=function_name,
-                                original_code=original_code,
+                                original_code=prompt_code,
                                 priority=priority
                             )
+
+                            if refactored_code and function_source:
+                                refactored_code = self._normalize_replacement_indentation(
+                                    refactored_code,
+                                    function_source["indent"],
+                                )
+                                refactored_code = self._replace_source_range(
+                                    original_code,
+                                    function_source["start_line"],
+                                    function_source["end_line"],
+                                    refactored_code,
+                                )
                             
                             if refactored_code and refactored_code != original_code:
                                 has_code_changes = True
@@ -665,7 +759,8 @@ Improvement Guidelines:
             refactored_code = await llm_manager.generate_response(
                 prompt=refactor_prompt,
                 temperature=0.3,
-                max_tokens=4000
+                max_tokens=2500,
+                timeout=45.0,
             )
 
             if refactored_code:
