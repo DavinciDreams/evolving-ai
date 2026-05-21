@@ -22,6 +22,7 @@ from evolving_agent.core.tools import (
     make_create_tpmjs_tool,
     get_all_tools,
 )
+from evolving_agent.core.memory import MemoryEntry
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +168,50 @@ def test_search_memory_no_instance():
     result = json.loads(tool.handler(query="test"))
     assert "error" in result
     assert "not available" in result["error"]
+
+
+def test_search_memory_uses_zero_threshold():
+    """search_memory should expose stored memories even for weak broad matches."""
+    class MemoryStub:
+        async def search_memories(self, query, n_results=5, similarity_threshold=0.5):
+            assert query == "previous interactions"
+            assert n_results == 3
+            assert similarity_threshold == 0.0
+            return [
+                (
+                    MemoryEntry(
+                        content="Query: hello\n\nResponse: hi",
+                        memory_type="interaction",
+                    ),
+                    0.12,
+                )
+            ]
+
+    tool = make_search_memory_tool(MemoryStub())
+    result = json.loads(tool.handler(query="previous interactions", limit=3))
+    assert len(result["results"]) == 1
+    assert result["results"][0]["type"] == "interaction"
+
+
+def test_search_memory_falls_back_to_recent_memories():
+    """When semantic search finds nothing, list recent memories like the UI does."""
+    class MemoryStub:
+        async def search_memories(self, query, n_results=5, similarity_threshold=0.5):
+            return []
+
+        async def list_recent_memories(self, limit=5):
+            assert limit == 2
+            return [
+                MemoryEntry(
+                    content="Query: remembered thing\n\nResponse: saved answer",
+                    memory_type="interaction",
+                )
+            ]
+
+    tool = make_search_memory_tool(MemoryStub())
+    result = json.loads(tool.handler(query="", limit=2))
+    assert len(result["results"]) == 1
+    assert "remembered thing" in result["results"][0]["content"]
 
 
 # ---------------------------------------------------------------------------

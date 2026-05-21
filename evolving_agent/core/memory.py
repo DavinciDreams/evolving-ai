@@ -333,6 +333,46 @@ class LongTermMemory:
             results, similarity_threshold
         )
 
+    async def list_recent_memories(
+        self,
+        limit: int = 10,
+        memory_type: Optional[str] = None,
+    ) -> List[MemoryEntry]:
+        """List memories directly from storage, newest first when timestamps exist."""
+        self._ensure_initialized()
+
+        where_clause = (
+            self.search_processor.get_where_clause(memory_type)
+            if memory_type else None
+        )
+        get_kwargs = {
+            "limit": limit,
+            "include": ["documents", "metadatas"],
+        }
+        if where_clause:
+            get_kwargs["where"] = where_clause
+
+        results = self.collection.get(**get_kwargs)
+        documents = results.get("documents") or []
+        metadatas = results.get("metadatas") or []
+        ids = results.get("ids") or []
+
+        memories: List[MemoryEntry] = []
+        for index, content in enumerate(documents):
+            metadata = metadatas[index] if index < len(metadatas) else {}
+            doc_id = ids[index] if index < len(ids) else None
+            if not metadata.get("timestamp"):
+                metadata = {**metadata, "timestamp": datetime.now().isoformat()}
+            memories.append(
+                MemoryEntry.from_chroma_result(
+                    doc_id or str(uuid.uuid4()),
+                    content,
+                    metadata,
+                )
+            )
+
+        return sorted(memories, key=lambda entry: entry.timestamp, reverse=True)
+
     async def get_memory(self, memory_id: str) -> Optional[MemoryEntry]:
         """Get a specific memory by ID."""
         return await self._handle_memory_operation(

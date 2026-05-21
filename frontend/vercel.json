@@ -8,6 +8,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://evolvingai.flobots.xyz/api/:path*"
+    },
+    {
+      "source": "/:path*",
+      "destination": "/index.html"
     }
   ],
   "headers": [

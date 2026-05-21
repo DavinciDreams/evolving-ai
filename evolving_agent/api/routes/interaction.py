@@ -65,6 +65,7 @@ async def chat_with_agent(
             request.query,
             context_hints=request.context_hints,
             conversation_id=request.conversation_id,
+            wait_for_storage=True,
         )
 
         return QueryResponse(
@@ -163,6 +164,7 @@ async def openai_chat_completions(
                         context_hints=context_hints,
                         conversation_id=conversation_id,
                         conversation_history=conversation_history if conversation_history else None,
+                        wait_for_storage=True,
                     )
 
                     # Stream the response in chunks
@@ -213,6 +215,7 @@ async def openai_chat_completions(
             context_hints=context_hints,
             conversation_id=conversation_id,
             conversation_history=conversation_history if conversation_history else None,
+            wait_for_storage=True,
         )
 
         # Estimate token usage
@@ -376,15 +379,13 @@ async def chat_stream(
                 metadata={"streaming": True},
             )
             current_agent.last_evaluation_score = evaluation.overall_score
-            asyncio.create_task(
-                current_agent._post_response_work(
-                    query=query,
-                    final_response=full_text,
-                    initial_response=full_text,
-                    context=context,
-                    evaluation=evaluation,
-                    conversation_id=conversation_id,
-                )
+            await current_agent._post_response_work(
+                query=query,
+                final_response=full_text,
+                initial_response=full_text,
+                context=context,
+                evaluation=evaluation,
+                conversation_id=conversation_id,
             )
 
             complete_event = _json.dumps({

@@ -313,7 +313,22 @@ def make_search_memory_tool(memory: Optional["LongTermMemory"]) -> Any:
         if memory is None:
             return json.dumps({"error": "Memory system is not available"})
         try:
-            results = asyncio.run(memory.search_memories(query, n_results=limit))
+            search_query = (query or "").strip()
+            if search_query:
+                results = asyncio.run(
+                    memory.search_memories(
+                        search_query,
+                        n_results=limit,
+                        similarity_threshold=0.0,
+                    )
+                )
+            else:
+                results = []
+
+            if not results and hasattr(memory, "list_recent_memories"):
+                recent = asyncio.run(memory.list_recent_memories(limit=limit))
+                results = [(entry, 0.0) for entry in recent]
+
             memories = []
             for entry, score in results:
                 memories.append({

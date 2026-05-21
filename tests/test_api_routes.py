@@ -140,6 +140,23 @@ class TestChatEndpoint:
             data = client.post("/chat", json={"query": "Hi"}).json()
         assert data["response"] == "Expected answer"
 
+    def test_chat_waits_for_storage_before_returning(self, client):
+        with patch.object(
+            api_server_module.agent,
+            "run",
+            new_callable=AsyncMock,
+            return_value="Stored answer",
+        ) as run_mock:
+            response = client.post(
+                "/chat",
+                json={"query": "Remember this", "conversation_id": "conv-1"},
+            )
+
+        assert response.status_code == 200
+        run_mock.assert_awaited_once()
+        assert run_mock.call_args.kwargs["wait_for_storage"] is True
+        assert run_mock.call_args.kwargs["conversation_id"] == "conv-1"
+
 
 class TestMemoriesEndpoint:
     def test_memories_returns_200(self, client):

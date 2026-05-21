@@ -499,16 +499,17 @@ class ContextManager:
     async def _get_recent_context(self, hours: int = 24) -> List[Dict[str, Any]]:
         """Get recent interaction context."""
         try:
-            # Search for recent memories
             cutoff_time = datetime.now() - timedelta(hours=hours)
 
-            # Get all recent memories (this is a simplified version)
-            # In a real implementation, you'd want a more efficient query
-            recent_memories = await self.memory.search_memories(
-                query="",  # Empty query to get all
-                n_results=20,
-                similarity_threshold=0.0,
-            )
+            if hasattr(self.memory, "list_recent_memories"):
+                recent_entries = await self.memory.list_recent_memories(limit=20)
+                recent_memories = [(entry, 0.0) for entry in recent_entries]
+            else:
+                recent_memories = await self.memory.search_memories(
+                    query="recent interactions",
+                    n_results=20,
+                    similarity_threshold=0.0,
+                )
 
             # Filter by time and format
             recent_context = []
