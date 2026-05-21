@@ -1,0 +1,35 @@
+name: Deploy backend to Coolify
+
+on:
+  workflow_run:
+    workflows: ["Python application"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate Coolify secrets
+        env:
+          COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+        run: |
+          test -n "$COOLIFY_WEBHOOK" || { echo "Missing COOLIFY_WEBHOOK secret"; exit 1; }
+          test -n "$COOLIFY_TOKEN" || { echo "Missing COOLIFY_TOKEN secret"; exit 1; }
+
+      - name: Trigger Coolify deployment
+        env:
+          COOLIFY_WEBHOOK: ${{ secrets.COOLIFY_WEBHOOK }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+        run: |
+          curl --fail --show-error --silent --request GET "$COOLIFY_WEBHOOK" \
+            --header "Authorization: Bearer $COOLIFY_TOKEN"
