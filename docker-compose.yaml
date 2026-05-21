@@ -22,6 +22,7 @@ services:
       - EVALUATION_MODEL=${EVALUATION_MODEL:-mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4}
       - TEMPERATURE=${TEMPERATURE:-0.7}
       - MAX_TOKENS=${MAX_TOKENS:-2048}
+      - ENABLE_ENSEMBLE_JUDGE=${ENABLE_ENSEMBLE_JUDGE:-false}
 
       # Tool Use
       - ENABLE_TOOL_USE=${ENABLE_TOOL_USE:-true}

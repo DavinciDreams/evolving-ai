@@ -26,6 +26,7 @@ services:
       - EVALUATION_MODEL=${EVALUATION_MODEL:-nvidia/nemotron-3-nano-30b-a3b:free}
       - TEMPERATURE=${TEMPERATURE:-0.7}
       - MAX_TOKENS=${MAX_TOKENS:-2048}
+      - ENABLE_ENSEMBLE_JUDGE=${ENABLE_ENSEMBLE_JUDGE:-false}
 
       # Tool Use
       - ENABLE_TOOL_USE=${ENABLE_TOOL_USE:-true}

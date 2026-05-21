@@ -642,9 +642,10 @@ class LLMManager:
         
         # Track error patterns
         if error:
+            error_type = "ProviderError" if isinstance(error, str) else type(error).__name__
             error_recovery_manager.track_error_pattern(
                 f"llm_{provider}",
-                type(Exception(error).__name__ if isinstance(error, str) else error).__name__,
+                error_type,
                 {"error": error}
             )
 
