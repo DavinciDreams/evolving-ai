@@ -412,6 +412,13 @@ class ZAIInterface(LLMInterface):
             content = message.get("content") or ""
             reasoning = message.get("reasoning_content") or ""
             return content if content else reasoning
+        except httpx.HTTPStatusError as e:
+            response_text = e.response.text[:500] if e.response is not None else ""
+            logger.error(
+                f"Z AI API error: status={e.response.status_code if e.response else 'unknown'} "
+                f"body={response_text}"
+            )
+            raise
         except Exception as e:
             logger.error(f"Z AI API error: {e}")
             raise
@@ -488,7 +495,10 @@ class LLMManager:
 
         # Initialize OpenAI
         openai_api_key = config.openai_api_key
-        if config.openai_base_url and (
+        should_use_keyless_openai = (
+            config.default_llm_provider == "openai" and config.openai_base_url
+        )
+        if should_use_keyless_openai and (
             not openai_api_key or openai_api_key == "your_openai_api_key_here"
         ):
             openai_api_key = "not-needed"
@@ -497,7 +507,7 @@ class LLMManager:
             model = (
                 config.default_model
                 if config.default_llm_provider == "openai"
-                else "gpt-4"
+                else config.openai_model
             )
             try:
                 self.interfaces["openai"] = OpenAIInterface(
@@ -581,6 +591,11 @@ class LLMManager:
 
     async def check_provider_availability(self, provider: str) -> bool:
         """Check if a provider is currently available."""
+        self._ensure_initialized()
+        if provider not in self.interfaces:
+            self._update_provider_status(provider, False, "Provider is not initialized")
+            return False
+
         # Check if we've recently verified this provider
         current_time = datetime.now().timestamp()
         last_check = self.last_health_check.get(provider, 0)
@@ -590,7 +605,13 @@ class LLMManager:
         
         try:
             test_message = "Hello"
-            response = await self.generate_response(test_message, provider=provider, timeout=30.0)
+            response = await asyncio.wait_for(
+                self.interfaces[provider].generate_response(
+                    test_message,
+                    max_tokens=16,
+                ),
+                timeout=30.0,
+            )
             self._update_provider_status(provider, True)
             self.last_health_check[provider] = current_time
             return True
@@ -776,6 +797,8 @@ class LLMManager:
                 system_prompt=system_prompt,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                circuit_breaker_config=CircuitBreakerConfig(timeout=timeout),
+                retry_config=RetryConfig(max_attempts=1),
                 **kwargs
             )
             

@@ -30,6 +30,11 @@ class Config:
         return os.getenv("OPENAI_BASE_URL", "").rstrip("/")
 
     @property
+    def openai_model(self) -> str:
+        """Get OpenAI or OpenAI-compatible model name."""
+        return os.getenv("OPENAI_MODEL", "gpt-4")
+
+    @property
     def anthropic_api_key(self) -> str:
         """Get Anthropic API key."""
         return os.getenv("ANTHROPIC_API_KEY", "")
@@ -136,6 +141,16 @@ class Config:
     def max_modification_attempts(self) -> int:
         """Get max modification attempts."""
         return int(os.getenv("MAX_MODIFICATION_ATTEMPTS", "3"))
+
+    @property
+    def self_improvement_max_functions(self) -> int:
+        """Get max high-complexity functions to consider per self-improvement cycle."""
+        return int(os.getenv("SELF_IMPROVEMENT_MAX_FUNCTIONS", "3"))
+
+    @property
+    def self_improvement_max_opportunities(self) -> int:
+        """Get max improvement opportunities to consider per self-improvement cycle."""
+        return int(os.getenv("SELF_IMPROVEMENT_MAX_OPPORTUNITIES", "5"))
 
     @property
     def require_validation(self) -> bool:
