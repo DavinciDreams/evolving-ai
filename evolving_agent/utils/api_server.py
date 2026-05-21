@@ -43,79 +43,121 @@ graceful_shutdown_timeout = 30
 async def lifespan(app: FastAPI):
     """Initialize and cleanup the agent with graceful shutdown."""
     try:
-        logger.info("Initializing Self-Improving Agent...")
-        app_state.agent = SelfImprovingAgent()
-        await app_state.agent.initialize()
-        logger.info("Agent initialized successfully")
-
-        # Initialize GitHub modifier if GitHub credentials are available
-        github_token = os.getenv("GITHUB_TOKEN")
-        github_repo = os.getenv("GITHUB_REPO")
-
-        if github_token and github_repo:
-            logger.info("Initializing GitHub integration...")
-            local_repo_path = os.getenv("GITHUB_LOCAL_REPO_PATH", ".")
-            app_state.github_modifier = GitHubEnabledSelfModifier(
-                github_token=github_token, repo_name=github_repo, local_repo_path=local_repo_path
-            )
-            await app_state.github_modifier.initialize()
-            app_state.agent.github_modifier = app_state.github_modifier
-            logger.info("GitHub integration initialized successfully")
-        else:
-            logger.warning(
-                "GitHub credentials not found. GitHub features will be unavailable."
-            )
-
-        # Initialize Discord integration if enabled
-        if config.discord_enabled and config.discord_bot_token:
-            logger.info("Initializing Discord integration...")
-            app_state.discord_integration = DiscordIntegration(
-                bot_token=config.discord_bot_token,
-                agent=app_state.agent,
-                config=config
-            )
-            await app_state.discord_integration.initialize()
-
-            # Start Discord bot in background task
-            asyncio.create_task(app_state.discord_integration.start())
-            logger.info("Discord integration started successfully")
-        else:
-            logger.info(
-                "Discord integration disabled or token not configured. "
-                "Discord features will be unavailable."
-            )
-
+        await _initialize_components()
         yield
     finally:
-        # Graceful shutdown
-        logger.info("Initiating graceful shutdown...")
-        app_state.server_shutdown = True
+        await _perform_graceful_shutdown()
 
-        # Cleanup Discord integration
-        if app_state.discord_integration:
-            logger.info("Shutting down Discord integration...")
-            try:
-                await app_state.discord_integration.close()
-                logger.info("Discord integration shut down successfully")
-            except Exception as e:
-                logger.error(f"Error shutting down Discord: {e}")
 
-        if app_state.agent:
-            logger.info("Cleaning up agent...")
-            try:
-                await app_state.agent.cleanup()
-                logger.info("Agent cleanup completed")
-            except Exception as e:
-                logger.error(f"Error during agent cleanup: {e}")
+async def _initialize_components():
+    """Initialize all application components."""
+    await _initialize_agent()
+    await _initialize_github_integration()
+    await _initialize_discord_integration()
 
-        # Clean up error recovery resources
-        try:
-            error_recovery_manager.cleanup_old_checkpoints()
-            logger.info("Error recovery resources cleaned up")
-        except Exception as e:
-            logger.error(f"Error cleaning up error recovery: {e}")
 
-        logger.info("Graceful shutdown completed")
+async def _initialize_agent():
+    """Initialize the self-improving agent."""
+    logger.info("Initializing Self-Improving Agent...")
+    app_state.agent = SelfImprovingAgent()
+    await app_state.agent.initialize()
+    logger.info("Agent initialized successfully")
+
+
+async def _initialize_github_integration():
+    """Initialize GitHub integration if credentials are available."""
+    github_token = os.getenv("GITHUB_TOKEN")
+    github_repo = os.getenv("GITHUB_REPO")
+
+    if not (github_token and github_repo):
+        logger.warning("GitHub credentials not found. GitHub features will be unavailable.")
+        return
+
+    logger.info("Initializing GitHub integration...")
+    local_repo_path = os.getenv("GITHUB_LOCAL_REPO_PATH", ".")
+    app_state.github_modifier = GitHubEnabledSelfModifier(
+        github_token=github_token, repo_name=github_repo, local_repo_path=local_repo_path
+    )
+    await app_state.github_modifier.initialize()
+    app_state.agent.github_modifier = app_state.github_modifier
+    logger.info("GitHub integration initialized successfully")
+
+
+async def _initialize_discord_integration():
+    """Initialize Discord integration if enabled."""
+    if not (config.discord_enabled and config.discord_bot_token):
+        logger.info(
+            "Discord integration disabled or token not configured. "
+            "Discord features will be unavailable."
+        )
+        return
+
+    logger.info("Initializing Discord integration...")
+    app_state.discord_integration = DiscordIntegration(
+        bot_token=config.discord_bot_token,
+        agent=app_state.agent,
+        config=config
+    )
+    await app_state.discord_integration.initialize()
+    asyncio.create_task(app_state.discord_integration.start())
+    logger.info("Discord integration started successfully")
+
+
+async def _perform_graceful_shutdown():
+    """Perform graceful shutdown of all components."""
+    logger.info("Initiating graceful shutdown...")
+    app_state.server_shutdown = True
+
+    await _cleanup_discord_integration()
+    await _cleanup_agent()
+    _cleanup_error_recovery()
+
+    logger.info("Graceful shutdown completed")
+
+
+async def _cleanup_discord_integration():
+    """Clean up Discord integration resources."""
+    if not app_state.discord_integration:
+        return
+
+    await _safe_cleanup(
+        "Shutting down Discord integration...",
+        "Discord integration shut down successfully",
+        "shutting down Discord",
+        app_state.discord_integration.close
+    )
+
+
+async def _cleanup_agent():
+    """Clean up agent resources."""
+    if not app_state.agent:
+        return
+
+    await _safe_cleanup(
+        "Cleaning up agent...",
+        "Agent cleanup completed",
+        "agent cleanup",
+        app_state.agent.cleanup
+    )
+
+
+async def _safe_cleanup(start_message: str, success_message: str, error_context: str, cleanup_coroutine):
+    """Safely execute a cleanup operation with logging and error handling."""
+    logger.info(start_message)
+    try:
+        await cleanup_coroutine()
+        logger.info(success_message)
+    except Exception as e:
+        logger.error(f"Error during {error_context}: {e}")
+
+
+def _cleanup_error_recovery():
+    """Clean up error recovery resources."""
+    try:
+        error_recovery_manager.cleanup_old_checkpoints()
+        logger.info("Error recovery resources cleaned up")
+    except Exception as e:
+        logger.error(f"Error cleaning up error recovery: {e}")
 
 
 # FastAPI app initialization
