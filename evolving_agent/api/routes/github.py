@@ -3,6 +3,7 @@
 import evolving_agent.utils.app_state as state
 from fastapi import APIRouter, Depends, HTTPException
 
+from evolving_agent.utils.config import config
 from evolving_agent.utils.deps import verify_api_key
 
 from evolving_agent.utils.logging import setup_logger
@@ -170,6 +171,11 @@ async def create_demo_pr():
     This is a safe demo endpoint that creates a PR with README enhancements.
     """
     try:
+        if not config.enable_self_modification:
+            raise HTTPException(
+                status_code=403, detail="Self-modification is disabled"
+            )
+
         if not state.github_modifier:
             raise HTTPException(
                 status_code=503, detail="GitHub integration not available"

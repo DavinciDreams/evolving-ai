@@ -224,9 +224,10 @@ class DiscordIntegration:
         query = message.content
 
         # Remove bot mention from query if present
-        if self.client.user.mentioned_in(message):
-            query = query.replace(f"<@{self.client.user.id}>", "").strip()
-            query = query.replace(f"<@!{self.client.user.id}>", "").strip()
+        bot_user = self.client.user
+        if bot_user and bot_user.mentioned_in(message):
+            query = query.replace(f"<@{bot_user.id}>", "").strip()
+            query = query.replace(f"<@!{bot_user.id}>", "").strip()
 
         if not query:
             return
@@ -262,10 +263,16 @@ class DiscordIntegration:
                     f"discord_user_id:{user_id}",
                     f"discord_channel:{message.channel.name}",
                 ]
+                conversation_id = self._get_conversation_id(message)
 
                 # Process query with agent
                 start_time = datetime.utcnow()
-                response = await self.agent.run(query, context_hints=context_hints)
+                response = await self.agent.run(
+                    query,
+                    context_hints=context_hints,
+                    conversation_id=conversation_id,
+                    wait_for_storage=True,
+                )
                 processing_time = (datetime.utcnow() - start_time).total_seconds()
 
                 # Get evaluation score if available
@@ -293,6 +300,12 @@ class DiscordIntegration:
                     str(e), user_friendly=True
                 )
                 await message.channel.send(embed=error_embed)
+
+    def _get_conversation_id(self, message: discord.Message) -> str:
+        """Build a stable conversation key for Discord channel context."""
+        guild_id = getattr(getattr(message, "guild", None), "id", "dm")
+        channel_id = getattr(message.channel, "id", "unknown")
+        return f"discord:{guild_id}:{channel_id}"
 
     async def send_response(
         self,

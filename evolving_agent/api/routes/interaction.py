@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from starlette.responses import StreamingResponse
 
 from evolving_agent.core.agent import SelfImprovingAgent
+from evolving_agent.core.evaluator import EvaluationResult
 from evolving_agent.utils.config import config
 from evolving_agent.utils.deps import get_agent, verify_api_key
 from evolving_agent.utils.logging import setup_logger
@@ -294,6 +295,7 @@ async def chat_stream(
             from evolving_agent.core.tools import get_all_tools
 
             # Build context (reusing agent internals)
+            current_agent.interaction_count += 1
             context = await current_agent.context_manager.get_relevant_context(
                 query=query, context_types=context_hints
             )
@@ -363,6 +365,28 @@ async def chat_stream(
                     yield f"data: {tr_event}\n\n"
 
             # Final complete event
+            evaluation = EvaluationResult(
+                overall_score=0.8,
+                criteria_scores={},
+                strengths=[],
+                weaknesses=[],
+                improvement_suggestions=[],
+                feedback="Streaming interaction stored without evaluation",
+                confidence=1.0,
+                metadata={"streaming": True},
+            )
+            current_agent.last_evaluation_score = evaluation.overall_score
+            asyncio.create_task(
+                current_agent._post_response_work(
+                    query=query,
+                    final_response=full_text,
+                    initial_response=full_text,
+                    context=context,
+                    evaluation=evaluation,
+                    conversation_id=conversation_id,
+                )
+            )
+
             complete_event = _json.dumps({
                 "type": "complete",
                 "text": full_text,

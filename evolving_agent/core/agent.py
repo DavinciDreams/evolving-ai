@@ -434,6 +434,7 @@ class SelfImprovingAgent:
         context_hints: Optional[List[str]] = None,
         conversation_id: Optional[str] = None,
         conversation_history: Optional[List[Dict[str, Any]]] = None,
+        wait_for_storage: bool = False,
     ) -> str:
 
         """
@@ -446,6 +447,9 @@ class SelfImprovingAgent:
             conversation_history: Optional pre-built conversation history (list of dicts with
                 'query' and 'response' keys). When provided, this is used instead of
                 fetching history from the database via conversation_id.
+            wait_for_storage: When true, persist SQLite/Chroma memory writes before
+                returning. Useful for synchronous chat adapters like Discord where
+                the next message may arrive immediately after the response is sent.
 
         Returns:
             The agent's response
@@ -463,7 +467,9 @@ class SelfImprovingAgent:
             if config.enable_self_modification and self._is_self_edit_request(query):
                 response = await self._handle_self_edit_request(query)
                 self.last_evaluation_score = None  # no evaluation for self-edit
-                # Still store the interaction for learning
+                # Still store the interaction for learning. This path returns
+                # before normal response generation, so it must persist both the
+                # conversation row and Chroma long-term memory itself.
                 try:
                     await self.data_manager.save_interaction(
                         query=query,
@@ -476,6 +482,21 @@ class SelfImprovingAgent:
                             "self_edit_triggered": True,
                         },
                         conversation_id=conversation_id,
+                    )
+                    await self._store_interaction(
+                        query,
+                        response,
+                        {},
+                        EvaluationResult(
+                            overall_score=0.8,
+                            criteria_scores={},
+                            strengths=[],
+                            weaknesses=[],
+                            improvement_suggestions=[],
+                            feedback="Self-edit interaction stored without evaluation",
+                            confidence=1.0,
+                            metadata={"self_edit_triggered": True},
+                        ),
                     )
                 except Exception as e:
                     self.logger.error(f"Failed to store self-edit interaction: {e}")
@@ -567,7 +588,6 @@ class SelfImprovingAgent:
                 # Skip evaluation and use initial response
                 final_response = initial_response
                 # Create a dummy evaluation for storage
-                from .evaluator import EvaluationResult
                 evaluation = EvaluationResult(
                     overall_score=0.8,
                     criteria_scores={},
@@ -587,16 +607,18 @@ class SelfImprovingAgent:
 
             # Steps 5-7: Storage, knowledge update, and periodic tasks run in the background
             # so the response is returned to the caller without waiting on DB/vector writes.
-            asyncio.create_task(
-                self._post_response_work(
-                    query=query,
-                    final_response=final_response,
-                    initial_response=initial_response,
-                    context=context,
-                    evaluation=evaluation,
-                    conversation_id=conversation_id,
-                )
+            post_response_work = self._post_response_work(
+                query=query,
+                final_response=final_response,
+                initial_response=initial_response,
+                context=context,
+                evaluation=evaluation,
+                conversation_id=conversation_id,
             )
+            if wait_for_storage:
+                await post_response_work
+            else:
+                asyncio.create_task(post_response_work)
 
             return final_response
 
@@ -1519,5 +1541,3 @@ Memory Types:
             health_status["overall"] = "unhealthy"
         
         return health_status
-
-

@@ -7,6 +7,7 @@ import evolving_agent.utils.app_state as state
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from evolving_agent.core.agent import SelfImprovingAgent
+from evolving_agent.utils.config import config
 from evolving_agent.utils.deps import get_agent, verify_api_key
 from evolving_agent.utils.logging import setup_logger
 from evolving_agent.utils.schemas import (
@@ -119,6 +120,11 @@ async def create_code_improvements(
     4. Optionally create a pull request with the improvements
     """
     try:
+        if not config.enable_self_modification:
+            raise HTTPException(
+                status_code=403, detail="Self-modification is disabled"
+            )
+
         if not state.github_modifier:
             raise HTTPException(
                 status_code=503, detail="GitHub integration not available"
