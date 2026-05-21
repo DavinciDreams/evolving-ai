@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Card from '../common/Card';
 import Badge from '../common/Badge';
 import Button from '../common/Button';
@@ -6,6 +6,12 @@ import { formatDuration, formatRelativeTime } from '../../utils/formatting';
 
 const OperationStatusCard = ({ operationsStatus, className = '' }) => {
   const [showCompleted, setShowCompleted] = useState(false);
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setCurrentTime(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
   
   if (!operationsStatus) {
     return (
@@ -58,7 +64,7 @@ const OperationStatusCard = ({ operationsStatus, className = '' }) => {
 
   const renderActiveOperation = (operation, index) => {
     const startTime = new Date(operation.start_time);
-    const elapsed = Date.now() - startTime.getTime();
+    const elapsed = currentTime - startTime.getTime();
     const estimatedDuration = operation.estimated_duration;
     
     return (
