@@ -605,7 +605,7 @@ class LLMManager:
         
         try:
             test_message = "Hello"
-            response = await asyncio.wait_for(
+            await asyncio.wait_for(
                 self.interfaces[provider].generate_response(
                     test_message,
                     max_tokens=16,
