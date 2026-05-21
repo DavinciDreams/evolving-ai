@@ -225,6 +225,23 @@ async def test_run_waits_for_storage_when_requested(agent):
     agent._store_interaction.assert_called_once()
 
 
+async def test_run_wait_for_storage_defers_heavy_maintenance(agent):
+    """Synchronous storage should not wait for periodic self-modification work."""
+    agent.interaction_count = 9
+    agent._run_post_response_maintenance = AsyncMock()
+
+    with patch(
+        "evolving_agent.core.agent.config",
+        _make_config(enable_self_modification=True),
+    ):
+        await agent.run("hello", wait_for_storage=True)
+
+    agent.data_manager.save_interaction.assert_called_once()
+    agent._store_interaction.assert_called_once()
+    agent._run_post_response_maintenance.assert_called_once()
+    agent._consider_self_modification.assert_not_called()
+
+
 async def test_run_with_evaluation_enabled(agent):
     """When enable_evaluation=True, the evaluator is called and the improved
     response is returned."""

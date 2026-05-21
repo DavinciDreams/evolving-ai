@@ -614,9 +614,17 @@ class SelfImprovingAgent:
                 context=context,
                 evaluation=evaluation,
                 conversation_id=conversation_id,
+                run_maintenance=not wait_for_storage,
             )
             if wait_for_storage:
                 await post_response_work
+                asyncio.create_task(
+                    self._run_post_response_maintenance(
+                        query=query,
+                        final_response=final_response,
+                        evaluation=evaluation,
+                    )
+                )
             else:
                 asyncio.create_task(post_response_work)
 
@@ -997,8 +1005,9 @@ Be specific, actionable, and consider lessons learned from previous interactions
         context: Dict[str, Any],
         evaluation: "EvaluationResult",
         conversation_id: Optional[str],
+        run_maintenance: bool = True,
     ) -> None:
-        """Background task: persist interaction, update knowledge, run periodic work."""
+        """Persist interaction data and optionally run slower maintenance work."""
         try:
             # Parallel DB writes: save_interaction and the memory store together
             interaction_id, _ = await asyncio.gather(
@@ -1027,6 +1036,24 @@ Be specific, actionable, and consider lessons learned from previous interactions
                 confidence=evaluation.confidence,
             )
 
+            if run_maintenance:
+                await self._run_post_response_maintenance(
+                    query=query,
+                    final_response=final_response,
+                    evaluation=evaluation,
+                )
+
+        except Exception as e:
+            self.logger.error(f"Background post-response work failed: {e}")
+
+    async def _run_post_response_maintenance(
+        self,
+        query: str,
+        final_response: str,
+        evaluation: "EvaluationResult",
+    ) -> None:
+        """Run slower learning and maintenance tasks after the response is durable."""
+        try:
             # Update knowledge base
             if config.auto_update_knowledge:
                 knowledge_added_count = await self.knowledge_updater.update_from_interaction(
@@ -1073,9 +1100,8 @@ Be specific, actionable, and consider lessons learned from previous interactions
                     })
                 except Exception as e:
                     self.logger.warning(f"Failed to save agent state: {e}")
-
         except Exception as e:
-            self.logger.error(f"Background post-response work failed: {e}")
+            self.logger.error(f"Post-response maintenance failed: {e}")
 
     async def _store_interaction(
         self,

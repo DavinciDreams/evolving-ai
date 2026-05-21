@@ -386,6 +386,14 @@ async def chat_stream(
                 context=context,
                 evaluation=evaluation,
                 conversation_id=conversation_id,
+                run_maintenance=False,
+            )
+            asyncio.create_task(
+                current_agent._run_post_response_maintenance(
+                    query=query,
+                    final_response=full_text,
+                    evaluation=evaluation,
+                )
             )
 
             complete_event = _json.dumps({
