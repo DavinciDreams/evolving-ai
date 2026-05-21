@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { Toaster } from 'react-hot-toast';
@@ -20,10 +20,21 @@ const AppContext = createContext();
 
 export const AppProvider = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [theme, setTheme] = useState('light');
+  const [theme, setTheme] = useState(
+    () => localStorage.getItem('evolving-ai-theme') || 'light'
+  );
 
   const toggleSidebar = () => setSidebarOpen((prev) => !prev);
   const toggleTheme = () => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('evolving-ai-theme', theme);
+  }, [theme]);
 
   const value = {
     sidebarOpen,

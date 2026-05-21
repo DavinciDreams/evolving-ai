@@ -1,6 +1,8 @@
 """
 Final integration test to demonstrate GitHub integration in the Self-Improving AI Agent.
 """
+import pytest
+pytestmark = pytest.mark.integration
 
 import json
 import os

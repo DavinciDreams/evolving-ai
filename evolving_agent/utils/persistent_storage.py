@@ -146,6 +146,42 @@ class PersistentDataManager:
                 )
                 conn.commit()
 
+            # preferences table: stores (worse, better) response pairs for proto-DPO
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS preferences (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp DATETIME NOT NULL,
+                    query TEXT NOT NULL,
+                    original_response TEXT NOT NULL,
+                    improved_response TEXT NOT NULL,
+                    original_score REAL NOT NULL,
+                    improved_score REAL NOT NULL,
+                    score_delta REAL NOT NULL
+                )
+            """)
+
+            # user_feedback table: stores explicit human ratings
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    interaction_id INTEGER,
+                    timestamp DATETIME NOT NULL,
+                    rating INTEGER NOT NULL,
+                    comment TEXT,
+                    FOREIGN KEY (interaction_id) REFERENCES interactions (id)
+                )
+            """)
+
+            # lessons table: stores LLM-extracted lessons for Reflexion
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS lessons (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp DATETIME NOT NULL,
+                    lesson_text TEXT NOT NULL,
+                    source TEXT DEFAULT 'reflexion'
+                )
+            """)
+
             conn.commit()
             conn.close()
 
@@ -494,6 +530,119 @@ class PersistentDataManager:
 
         except Exception as e:
             logger.error(f"Failed to cleanup session: {e}")
+
+    async def get_recent_evaluations(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return the most recent N evaluation rows joined with interaction query."""
+        try:
+            conn = sqlite3.connect(self.interactions_db)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT e.overall_score, e.criteria_scores, e.feedback,
+                       e.improvement_suggestions, e.confidence, e.timestamp,
+                       i.query
+                FROM evaluations e
+                LEFT JOIN interactions i ON e.interaction_id = i.id
+                ORDER BY e.timestamp DESC
+                LIMIT ?
+            """, (limit,))
+            columns = ["overall_score", "criteria_scores", "feedback",
+                       "improvement_suggestions", "confidence", "timestamp", "query"]
+            rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+            conn.close()
+            return rows
+        except Exception as e:
+            logger.error(f"Failed to get recent evaluations: {e}")
+            return []
+
+    async def save_preference_pair(
+        self,
+        query: str,
+        original_response: str,
+        improved_response: str,
+        original_score: float,
+        improved_score: float,
+    ) -> int:
+        """Save a (worse, better) response pair for preference learning."""
+        try:
+            conn = sqlite3.connect(self.interactions_db)
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO preferences
+                (timestamp, query, original_response, improved_response,
+                 original_score, improved_score, score_delta)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                datetime.now().isoformat(),
+                query,
+                original_response,
+                improved_response,
+                original_score,
+                improved_score,
+                improved_score - original_score,
+            ))
+            pair_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            return pair_id
+        except Exception as e:
+            logger.error(f"Failed to save preference pair: {e}")
+            return -1
+
+    async def save_user_feedback(
+        self,
+        interaction_id: int,
+        rating: int,
+        comment: Optional[str] = None,
+    ) -> int:
+        """Save explicit human feedback (rating +1 or -1) for an interaction."""
+        try:
+            conn = sqlite3.connect(self.interactions_db)
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO user_feedback (interaction_id, timestamp, rating, comment)
+                VALUES (?, ?, ?, ?)
+            """, (interaction_id, datetime.now().isoformat(), rating, comment))
+            feedback_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            logger.info(f"Saved user feedback {feedback_id} for interaction {interaction_id}: {rating}")
+            return feedback_id
+        except Exception as e:
+            logger.error(f"Failed to save user feedback: {e}")
+            return -1
+
+    async def save_learned_lessons(self, lessons: List[str]) -> None:
+        """Persist Reflexion lessons (replaces previous lesson set)."""
+        try:
+            conn = sqlite3.connect(self.interactions_db)
+            cursor = conn.cursor()
+            # Keep history but mark old lessons; insert new batch
+            cursor.executemany("""
+                INSERT INTO lessons (timestamp, lesson_text, source)
+                VALUES (?, ?, 'reflexion')
+            """, [(datetime.now().isoformat(), lesson) for lesson in lessons])
+            conn.commit()
+            conn.close()
+            logger.info(f"Saved {len(lessons)} learned lessons")
+        except Exception as e:
+            logger.error(f"Failed to save learned lessons: {e}")
+
+    async def get_learned_lessons(self, limit: int = 10) -> List[str]:
+        """Return the most recent learned lessons."""
+        try:
+            conn = sqlite3.connect(self.interactions_db)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT lesson_text FROM lessons
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """, (limit,))
+            lessons = [row[0] for row in cursor.fetchall()]
+            conn.close()
+            return lessons
+        except Exception as e:
+            logger.error(f"Failed to get learned lessons: {e}")
+            return []
 
 
 # Global persistent data manager instance

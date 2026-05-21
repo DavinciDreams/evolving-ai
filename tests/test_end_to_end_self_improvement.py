@@ -2,6 +2,8 @@
 End-to-end test of the Self-Improving AI Agent's GitHub integration.
 This will have the agent analyze its own code and create a real PR with improvements.
 """
+import pytest
+pytestmark = pytest.mark.integration
 
 import asyncio
 import os

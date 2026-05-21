@@ -1,6 +1,9 @@
 """
 Test script for conversation tracking functionality.
 """
+import pytest
+pytestmark = pytest.mark.integration
+
 import asyncio
 import sys
 from evolving_agent.core.agent import SelfImprovingAgent

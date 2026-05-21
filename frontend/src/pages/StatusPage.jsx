@@ -1,64 +1,53 @@
-import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import Card from '../components/common/Card';
 import Badge from '../components/common/Badge';
 import Spinner from '../components/common/Spinner';
-import { getAgentStatus, getHealthStatus } from '../services/api';
+import { api } from '../services/api';
 import { getGitHubStatus } from '../services/githubService';
 import { getDiscordStatus } from '../services/discordService';
 
 const StatusPage = () => {
-  const [loading, setLoading] = useState(true);
-  const [agentStatus, setAgentStatus] = useState(null);
-  const [healthStatus, setHealthStatus] = useState(null);
-  const [githubStatus, setGitHubStatus] = useState(null);
-  const [discordStatus, setDiscordStatus] = useState(null);
-  const [error, setError] = useState(null);
+  const { data: agentStatus, isLoading: loadingStatus, error: statusError } = useQuery({
+    queryKey: ['status'],
+    queryFn: () => api.get('/status').then(r => r.data),
+    refetchInterval: 30000,
+  });
 
-  useEffect(() => {
-    fetchAllStatus();
-    // Refresh status every 30 seconds
-    const interval = setInterval(fetchAllStatus, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  const { data: healthStatus, isLoading: loadingHealth } = useQuery({
+    queryKey: ['health'],
+    queryFn: () => api.get('/health').then(r => r.data),
+    refetchInterval: 30000,
+  });
 
-  const fetchAllStatus = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+  const { data: githubStatus, isLoading: loadingGithub } = useQuery({
+    queryKey: ['github-status'],
+    queryFn: getGitHubStatus,
+    refetchInterval: 30000,
+  });
 
-      const [agent, health, github, discord] = await Promise.all([
-        getAgentStatus().catch(err => ({ error: err.message })),
-        getHealthStatus().catch(err => ({ error: err.message })),
-        getGitHubStatus().catch(err => ({ error: err.message })),
-        getDiscordStatus().catch(err => ({ error: err.message })),
-      ]);
+  const { data: discordStatus, isLoading: loadingDiscord } = useQuery({
+    queryKey: ['discord-status'],
+    queryFn: getDiscordStatus,
+    refetchInterval: 30000,
+  });
 
-      setAgentStatus(agent);
-      setHealthStatus(health);
-      setGitHubStatus(github);
-      setDiscordStatus(discord);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const isInitialLoading = loadingStatus && !agentStatus;
 
   const getStatusBadge = (isHealthy) => {
     if (isHealthy) {
-      return <Badge color="success">Healthy</Badge>;
+      return <Badge variant="success">Healthy</Badge>;
     }
-    return <Badge color="danger">Unhealthy</Badge>;
+    return <Badge variant="danger">Unhealthy</Badge>;
   };
 
   const getConnectionBadge = (isConnected) => {
     if (isConnected) {
-      return <Badge color="success">Connected</Badge>;
+      return <Badge variant="success">Connected</Badge>;
     }
-    return <Badge color="danger">Disconnected</Badge>;
+    return <Badge variant="danger">Disconnected</Badge>;
   };
 
-  if (loading && !agentStatus) {
+  if (isInitialLoading) {
     return (
       <div className="flex justify-center items-center min-h-screen">
         <Spinner size="lg" />
@@ -66,11 +55,11 @@ const StatusPage = () => {
     );
   }
 
-  if (error && !agentStatus) {
+  if (statusError && !agentStatus) {
     return (
       <div className="max-w-7xl mx-auto">
         <Card title="Error Loading Status">
-          <p className="text-red-600">{error}</p>
+          <p className="text-red-600">{statusError.message}</p>
         </Card>
       </div>
     );
@@ -88,7 +77,9 @@ const StatusPage = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Agent Status */}
         <Card title="Agent Status">
-          {agentStatus?.error ? (
+          {loadingStatus && !agentStatus ? (
+            <Spinner size="sm" />
+          ) : agentStatus?.error ? (
             <div className="text-red-600">
               <p className="font-semibold">Error:</p>
               <p>{agentStatus.error}</p>
@@ -133,7 +124,9 @@ const StatusPage = () => {
 
         {/* API Health */}
         <Card title="API Health">
-          {healthStatus?.error ? (
+          {loadingHealth && !healthStatus ? (
+            <Spinner size="sm" />
+          ) : healthStatus?.error ? (
             <div className="text-red-600">
               <p className="font-semibold">Error:</p>
               <p>{healthStatus.error}</p>
@@ -166,7 +159,9 @@ const StatusPage = () => {
 
         {/* GitHub Integration */}
         <Card title="GitHub Integration">
-          {githubStatus?.error ? (
+          {loadingGithub && !githubStatus ? (
+            <Spinner size="sm" />
+          ) : githubStatus?.error ? (
             <div className="text-red-600">
               <p className="font-semibold">Error:</p>
               <p>{githubStatus.error}</p>
@@ -207,7 +202,9 @@ const StatusPage = () => {
 
         {/* Discord Integration */}
         <Card title="Discord Integration">
-          {discordStatus?.error ? (
+          {loadingDiscord && !discordStatus ? (
+            <Spinner size="sm" />
+          ) : discordStatus?.error ? (
             <div className="text-red-600">
               <p className="font-semibold">Error:</p>
               <p>{discordStatus.error}</p>
@@ -255,16 +252,6 @@ const StatusPage = () => {
             </div>
           )}
         </Card>
-      </div>
-
-      <div className="mt-4 text-center">
-        <button
-          onClick={fetchAllStatus}
-          disabled={loading}
-          className="text-indigo-600 hover:text-indigo-800 font-medium"
-        >
-          {loading ? 'Refreshing...' : 'Refresh Status'}
-        </button>
       </div>
     </div>
   );

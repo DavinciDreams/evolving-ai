@@ -56,6 +56,10 @@ DEFAULT_MODEL=gpt-4o-mini  # or your preferred provider model
 
 **Optional but Recommended:**
 ```bash
+# Routing / Domain
+DOMAIN=katbot.atlasfoundation.app
+TRAEFIK_DOCKER_NETWORK=coolify
+
 # GitHub Integration
 GITHUB_TOKEN=ghp_...
 GITHUB_REPO=DavinciDreams/evolving-ai
@@ -79,6 +83,9 @@ MEMORY_COLLECTION_NAME=agent_memory
 KNOWLEDGE_BASE_PATH=/app/data/knowledge_base
 BACKUP_DIRECTORY=/app/data/backups
 SCRATCHPAD_DIR=/app/data/scratchpad
+
+# CORS for Vercel frontend
+CORS_ORIGINS=https://<your-vercel-domain>.vercel.app,https://katbot.atlasfoundation.app
 
 # Logging
 LOG_LEVEL=INFO
@@ -105,14 +112,14 @@ testing reboot persistence.
 
 1. Click **"Deploy"**
 2. Wait for the build to complete
-3. Once deployed, note your backend URL: `https://your-app.coolify.app`
-4. Test the API by visiting: `https://your-app.coolify.app/docs`
+3. Once deployed, note your backend URL: `https://katbot.atlasfoundation.app`
+4. Test the API by visiting: `https://katbot.atlasfoundation.app/docs`
 
 ### Step 5: Verify Deployment
 
 Check the health endpoint:
 ```bash
-curl https://your-app.coolify.app/health
+curl https://katbot.atlasfoundation.app/health
 ```
 
 Should return:
@@ -151,23 +158,23 @@ Vercel should auto-detect Vite. Verify these settings:
 Add these environment variables in Vercel:
 
 ```bash
-VITE_API_BASE_URL=https://your-app.coolify.app
+VITE_API_BASE_URL=https://katbot.atlasfoundation.app
 VITE_APP_NAME=Evolving AI Agent
 VITE_ENABLE_DEVTOOLS=false
 ```
 
-**Important:** Replace `https://your-app.coolify.app` with your actual Coolify backend URL from Part 1.
+If `VITE_API_BASE_URL` is missing, the frontend now falls back to `/api` and uses `frontend/vercel.json` rewrites.
 
 ### Step 4: Update vercel.json
 
-Before deploying, update `frontend/vercel.json` with your actual backend URL:
+`frontend/vercel.json` is already configured to route `/api/*` to your backend:
 
 ```json
 {
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://your-actual-backend.coolify.app/:path*"
+      "destination": "https://katbot.atlasfoundation.app/:path*"
     }
   ]
 }
@@ -322,10 +329,10 @@ For issues:
 ## Quick Reference
 
 ### Important URLs
-- Backend API: `https://your-app.coolify.app`
-- API Docs: `https://your-app.coolify.app/docs`
+- Backend API: `https://katbot.atlasfoundation.app`
+- API Docs: `https://katbot.atlasfoundation.app/docs`
 - Frontend: `https://your-app.vercel.app`
-- Health Check: `https://your-app.coolify.app/health`
+- Health Check: `https://katbot.atlasfoundation.app/health`
 
 ### Useful Commands
 ```bash

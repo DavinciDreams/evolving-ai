@@ -29,7 +29,7 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
 
 ## 📋 Requirements
 
-- Python 3.8+
+- Python 3.12+
 - ChromaDB for vector storage
 - FastAPI for web server
 - Multiple LLM provider APIs
@@ -55,6 +55,18 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
    cp .env.example .env
    # Edit .env with your API keys and configuration
    ```
+
+### Local Development with Docker
+
+For local development, a `docker-compose.override.yaml` file is included that publishes port 8000 to your host machine:
+
+```bash
+docker compose up
+# API available at http://localhost:8000
+# Frontend (Vite dev server) at http://localhost:5173
+```
+
+The override file is automatically merged by `docker compose up` — no extra flags needed.
 
 ## 🚀 Usage
 

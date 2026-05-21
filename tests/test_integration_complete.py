@@ -1,6 +1,8 @@
 """
 Complete integration test for the self-improving agent with code analysis.
 """
+import pytest
+pytestmark = pytest.mark.integration
 
 import asyncio
 from pathlib import Path
