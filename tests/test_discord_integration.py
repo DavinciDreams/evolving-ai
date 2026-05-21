@@ -274,6 +274,56 @@ class TestDiscordIntegration:
         # Verify channel.send was called
         assert mock_channel.send.called
 
+    async def test_discord_conversation_id_uses_channel(self, mock_agent, mock_config):
+        """Discord messages should share stable channel conversation context."""
+        from evolving_agent.integrations.discord_integration import DiscordIntegration
+
+        integration = DiscordIntegration(
+            bot_token="test_token",
+            agent=mock_agent,
+            config=mock_config
+        )
+
+        message = Mock()
+        message.guild.id = 987
+        message.channel.id = 123456789
+
+        assert integration._get_conversation_id(message) == "discord:987:123456789"
+
+    async def test_handle_message_passes_conversation_id_and_waits_for_storage(
+        self, mock_agent, mock_config
+    ):
+        """Discord adapter should preserve context and wait for memory writes."""
+        from evolving_agent.integrations.discord_integration import DiscordIntegration
+
+        integration = DiscordIntegration(
+            bot_token="test_token",
+            agent=mock_agent,
+            config=mock_config
+        )
+        integration.send_response = AsyncMock()
+
+        typing_context = AsyncMock()
+        typing_context.__aenter__ = AsyncMock(return_value=None)
+        typing_context.__aexit__ = AsyncMock(return_value=None)
+
+        message = Mock()
+        message.author.id = 42
+        message.author.name = "alice"
+        message.author.bot = False
+        message.channel.id = 123456789
+        message.channel.name = "memory-lab"
+        message.channel.typing = Mock(return_value=typing_context)
+        message.channel.send = AsyncMock()
+        message.guild.id = 987
+        message.content = "remember this"
+
+        await integration.handle_message(message)
+
+        mock_agent.run.assert_called_once()
+        assert mock_agent.run.call_args.kwargs["conversation_id"] == "discord:987:123456789"
+        assert mock_agent.run.call_args.kwargs["wait_for_storage"] is True
+
     async def test_get_stats(self, mock_agent, mock_config):
         """Test getting integration stats."""
         from evolving_agent.integrations.discord_integration import DiscordIntegration

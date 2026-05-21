@@ -23,7 +23,6 @@ _STUB_MODULES = [
     "ai_sdk.types",
     "ai_sdk.providers",
     "ai_sdk.providers.openai",
-    "discord",
 ]
 for _mod in _STUB_MODULES:
     if _mod not in sys.modules:
@@ -217,6 +216,15 @@ async def test_run_stores_interaction(agent):
     assert call_kwargs["response"] == "Test answer"
 
 
+async def test_run_waits_for_storage_when_requested(agent):
+    """Adapters can request synchronous storage before run() returns."""
+    with patch("evolving_agent.core.agent.config", _make_config()):
+        await agent.run("hello", wait_for_storage=True)
+
+    agent.data_manager.save_interaction.assert_called_once()
+    agent._store_interaction.assert_called_once()
+
+
 async def test_run_with_evaluation_enabled(agent):
     """When enable_evaluation=True, the evaluator is called and the improved
     response is returned."""
@@ -257,6 +265,8 @@ async def test_run_detects_self_edit_request(agent):
     assert result == "Self-edit response"
     agent._handle_self_edit_request.assert_called_once_with("improve yourself")
     agent._generate_response.assert_not_called()
+    agent.data_manager.save_interaction.assert_called_once()
+    agent._store_interaction.assert_called_once()
 
 
 async def test_run_triggers_self_modification_every_10_interactions(agent):
