@@ -60,10 +60,15 @@ DEFAULT_MODEL=gpt-4o-mini  # or your preferred provider model
 DOMAIN=katbot.atlasfoundation.app
 TRAEFIK_DOCKER_NETWORK=coolify
 
+# Security
+# Required if the backend is reachable from the internet.
+API_KEY=generate-a-long-random-secret
+
 # GitHub Integration
 GITHUB_TOKEN=ghp_...
 GITHUB_REPO=DavinciDreams/evolving-ai
 ENABLE_SELF_MODIFICATION=false
+AUTO_PR_ENABLED=false
 
 # Discord Integration
 DISCORD_ENABLED=false

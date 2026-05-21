@@ -51,7 +51,7 @@ class GitHubEnabledSelfModifier:
 
         # State tracking
         self.improvement_history: List[Dict[str, Any]] = []
-        self.auto_pr_enabled = True
+        self.auto_pr_enabled = config.auto_pr_enabled
         self._is_running = False
         self._improvement_lock = asyncio.Lock()
 
@@ -866,7 +866,7 @@ Improvement Guidelines:
             )
 
             # Configuration
-            status["auto_pr_enabled"] = True  # Could be configurable
+            status["auto_pr_enabled"] = self.auto_pr_enabled
 
             return status
 

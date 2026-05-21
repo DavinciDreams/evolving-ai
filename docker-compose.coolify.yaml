@@ -13,6 +13,7 @@ services:
       - PORT=${PORT:-8000}
       - DOMAIN=${DOMAIN:-katbot.atlasfoundation.app}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - API_KEY=${API_KEY}
       # LLM Provider Configuration
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -38,6 +39,7 @@ services:
 
       # Memory Configuration (ChromaDB)
       - MEMORY_PERSIST_DIRECTORY=/app/data/memory_db
+      - PERSISTENT_DATA_DIR=/app/data/persistent_data
       - MEMORY_COLLECTION_NAME=${MEMORY_COLLECTION_NAME:-agent_memory}
       - MAX_MEMORY_ENTRIES=${MAX_MEMORY_ENTRIES:-10000}
 
@@ -48,6 +50,7 @@ services:
       - GITHUB_LOCAL_REPO_PATH=/app
       - GITHUB_REPO_URL=${GITHUB_REPO_URL}
       - ENABLE_SELF_MODIFICATION=${ENABLE_SELF_MODIFICATION:-true}
+      - AUTO_PR_ENABLED=${AUTO_PR_ENABLED:-true}
       - BACKUP_DIRECTORY=/app/data/backups
       - MAX_MODIFICATION_ATTEMPTS=${MAX_MODIFICATION_ATTEMPTS:-3}
       - REQUIRE_VALIDATION=${REQUIRE_VALIDATION:-true}

@@ -9,6 +9,7 @@ services:
     environment:
       - PORT=${PORT:-8000}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - API_KEY=${API_KEY}
       # LLM Provider Configuration
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-http://monumentals-mac-studio.local:12345}
@@ -46,6 +47,7 @@ services:
       - GITHUB_LOCAL_REPO_PATH=/app
       - GITHUB_REPO_URL=${GITHUB_REPO_URL}
       - ENABLE_SELF_MODIFICATION=${ENABLE_SELF_MODIFICATION:-true}
+      - AUTO_PR_ENABLED=${AUTO_PR_ENABLED:-true}
       - BACKUP_DIRECTORY=/app/data/backups
       - MAX_MODIFICATION_ATTEMPTS=${MAX_MODIFICATION_ATTEMPTS:-3}
       - REQUIRE_VALIDATION=${REQUIRE_VALIDATION:-true}

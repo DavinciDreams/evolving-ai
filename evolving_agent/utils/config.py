@@ -123,6 +123,11 @@ class Config:
         return os.getenv("ENABLE_SELF_MODIFICATION", "true").lower() == "true"
 
     @property
+    def auto_pr_enabled(self) -> bool:
+        """Get automatic PR/issue creation setting for self-improvement."""
+        return os.getenv("AUTO_PR_ENABLED", "true").lower() == "true"
+
+    @property
     def backup_directory(self) -> str:
         """Get backup directory."""
         return os.getenv("BACKUP_DIRECTORY", "./backups")
@@ -368,6 +373,7 @@ class Config:
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "enable_self_modification": self.enable_self_modification,
+            "auto_pr_enabled": self.auto_pr_enabled,
             "backup_directory": self.backup_directory,
             "max_modification_attempts": self.max_modification_attempts,
             "require_validation": self.require_validation,
