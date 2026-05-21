@@ -20,8 +20,26 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+# Runtime storage defaults. These paths are mounted as persistent volumes by
+# docker-compose.yaml and should be configured as persistent storage in Coolify
+# if deploying this Dockerfile directly.
+ENV MEMORY_PERSIST_DIRECTORY=/app/data/memory_db \
+    PERSISTENT_DATA_DIR=/app/data/persistent_data \
+    KNOWLEDGE_BASE_PATH=/app/data/knowledge_base \
+    BACKUP_DIRECTORY=/app/data/backups \
+    SCRATCHPAD_DIR=/app/data/scratchpad \
+    LOG_FILE=/app/logs/agent.log
+
 # Create necessary directories
-RUN mkdir -p /app/data /app/logs
+RUN mkdir -p \
+    /app/data/memory_db \
+    /app/data/persistent_data \
+    /app/data/knowledge_base \
+    /app/data/backups \
+    /app/data/scratchpad \
+    /app/logs
+
+VOLUME ["/app/data/memory_db", "/app/data/persistent_data", "/app/data/knowledge_base", "/app/data/backups", "/app/data/scratchpad", "/app/logs"]
 
 # Default port (overridable via PORT env var in Coolify/hosting)
 ENV PORT=8000

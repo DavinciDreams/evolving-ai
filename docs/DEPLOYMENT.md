@@ -16,20 +16,22 @@ This guide covers deploying the Evolving AI Agent to Coolify (backend) and Verce
 
 1. Log in to your Coolify dashboard
 2. Click **"+ New Resource"**
-3. Select **"Docker Compose"** or **"Dockerfile"**
+3. Select **"Docker Compose"**
 4. Choose your GitHub repository: `DavinciDreams/evolving-ai`
 5. Select branch: `main`
 
 ### Step 2: Configure Build Settings
 
-**If using Dockerfile:**
-- Build context: `/`
-- Dockerfile location: `./Dockerfile`
+- Build pack: `Docker Compose`
+- Base directory: `/`
+- Compose file: `./docker-compose.yaml`
 - Port: `8000`
 
-**If using Docker Compose (recommended for Coolify + Traefik):**
-- Compose file: `./docker-compose.coolify.yaml`
-- Container port: `8000`
+Use Docker Compose for production. The compose file mounts named volumes for
+ChromaDB, session state, knowledge, backups, scratchpad data, and logs. A plain
+Dockerfile deployment can run the app, but you must add the same persistent
+storage mounts in Coolify manually or memory will be lost when the container is
+recreated.
 
 ### Step 3: Set Environment Variables
 
@@ -38,18 +40,18 @@ In Coolify, add these environment variables:
 **Required:**
 ```bash
 # LLM Provider (choose one)
-LLM_PROVIDER=openai
+DEFAULT_LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 
 # Or use Anthropic
-LLM_PROVIDER=anthropic
+DEFAULT_LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
 
 # Or use OpenRouter
-LLM_PROVIDER=openrouter
+DEFAULT_LLM_PROVIDER=openrouter
 OPENROUTER_API_KEY=sk-or-...
 
-MODEL_NAME=gpt-4  # or claude-3-opus-20240229, etc.
+DEFAULT_MODEL=gpt-4o-mini  # or your preferred provider model
 ```
 
 **Optional but Recommended:**
@@ -66,7 +68,7 @@ ENABLE_SELF_MODIFICATION=false
 # Discord Integration
 DISCORD_ENABLED=false
 DISCORD_BOT_TOKEN=your_discord_bot_token
-DISCORD_ALLOWED_CHANNEL_IDS=123456789,987654321
+DISCORD_CHANNEL_IDS=123456789,987654321
 
 # Web Search
 WEB_SEARCH_ENABLED=true
@@ -75,15 +77,36 @@ TAVILY_API_KEY=tvly-...
 SERPAPI_KEY=your_serpapi_key
 
 # Memory
-CHROMA_PERSIST_DIR=/app/data/chroma
-MEMORY_COLLECTION_NAME=agent_memories
+MEMORY_PERSIST_DIRECTORY=/app/data/memory_db
+PERSISTENT_DATA_DIR=/app/data/persistent_data
+MEMORY_COLLECTION_NAME=agent_memory
+KNOWLEDGE_BASE_PATH=/app/data/knowledge_base
+BACKUP_DIRECTORY=/app/data/backups
+SCRATCHPAD_DIR=/app/data/scratchpad
 
 # CORS for Vercel frontend
 CORS_ORIGINS=https://<your-vercel-domain>.vercel.app,https://katbot.atlasfoundation.app
 
 # Logging
 LOG_LEVEL=INFO
+LOG_FILE=/app/logs/agent.log
 ```
+
+### Persistent Volumes
+
+`docker-compose.yaml` defines these production volumes:
+
+```text
+evolving-ai-memory       -> /app/data/memory_db
+evolving-ai-persistent   -> /app/data/persistent_data
+evolving-ai-knowledge    -> /app/data/knowledge_base
+evolving-ai-backups      -> /app/data/backups
+evolving-ai-scratchpad   -> /app/data/scratchpad
+evolving-ai-logs         -> /app/logs
+```
+
+After deploying, verify Coolify created or attached these storages before
+testing reboot persistence.
 
 ### Step 4: Deploy
 

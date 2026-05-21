@@ -35,6 +35,7 @@ services:
 
       # Memory Configuration (ChromaDB)
       - MEMORY_PERSIST_DIRECTORY=/app/data/memory_db
+      - PERSISTENT_DATA_DIR=/app/data/persistent_data
       - MEMORY_COLLECTION_NAME=${MEMORY_COLLECTION_NAME:-agent_memory}
       - MAX_MEMORY_ENTRIES=${MAX_MEMORY_ENTRIES:-10000}
 

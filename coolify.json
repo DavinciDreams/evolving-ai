@@ -1,7 +1,8 @@
 {
   "$schema": "https://cdn.coollabs.io/coolify/coolify.schema.json",
   "build": {
-    "build_pack": "dockerfile"
+    "build_pack": "dockercompose",
+    "docker_compose_location": "./docker-compose.yaml"
   },
   "network": {
     "expose": "8000"

@@ -37,6 +37,11 @@ frontend/.next/
 # Data and logs
 data/
 logs/
+memory_db/
+persistent_data/
+knowledge_base/
+backups/
+scratchpad/
 *.log
 
 # Tests

@@ -20,20 +20,25 @@ class PersistentDataManager:
     """Manages persistent storage for all agent components."""
 
     def __init__(self):
-        self.data_dir = Path(config.memory_persist_directory).parent / "persistent_data"
+        self._configure_paths()
+
+        self.session_id = None
+        self.session_start_time = None
+
+    def _configure_paths(self):
+        """Refresh storage paths from environment-backed configuration."""
+        self.data_dir = Path(config.persistent_data_dir)
         self.session_file = self.data_dir / "session_data.json"
         self.agent_state_file = self.data_dir / "agent_state.json"
         self.interactions_db = self.data_dir / "interactions.db"
         self.evaluations_file = self.data_dir / "evaluations.json"
         self.modifications_log = self.data_dir / "modifications.json"
 
-        self.session_id = None
-        self.session_start_time = None
-
     async def initialize(self):
         """Initialize persistent data manager."""
         try:
             logger.info("Initializing persistent data manager...")
+            self._configure_paths()
 
             # Ensure data directory exists
             self.data_dir.mkdir(parents=True, exist_ok=True)

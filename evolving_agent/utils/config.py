@@ -70,6 +70,14 @@ class Config:
         return os.getenv("MEMORY_PERSIST_DIRECTORY", "./memory_db")
 
     @property
+    def persistent_data_dir(self) -> str:
+        """Get persistent data directory for sessions, state, and SQLite data."""
+        return os.getenv(
+            "PERSISTENT_DATA_DIR",
+            str(Path(self.memory_persist_directory).parent / "persistent_data"),
+        )
+
+    @property
     def memory_collection_name(self) -> str:
         """Get memory collection name."""
         return os.getenv("MEMORY_COLLECTION_NAME", "agent_memory")
@@ -350,6 +358,7 @@ class Config:
             "log_level": self.log_level,
             "log_file": self.log_file,
             "memory_persist_directory": self.memory_persist_directory,
+            "persistent_data_dir": self.persistent_data_dir,
             "memory_collection_name": self.memory_collection_name,
             "max_memory_entries": self.max_memory_entries,
             "default_llm_provider": self.default_llm_provider,
@@ -405,6 +414,7 @@ class Config:
         """Ensure all required directories exist."""
         directories = [
             self.memory_persist_directory,
+            self.persistent_data_dir,
             self.backup_directory,
             self.knowledge_base_path,
             self.scratchpad_dir,
