@@ -120,6 +120,32 @@ testing reboot persistence.
 3. Once deployed, note your backend URL: `https://katbot.atlasfoundation.app`
 4. Test the API by visiting: `https://katbot.atlasfoundation.app/docs`
 
+### Step 4.1: Enable Automatic Redeploys
+
+Preferred Coolify setup:
+
+1. In Coolify, open the backend application.
+2. Go to **Advanced** and enable **Auto Deploy**.
+3. If the application uses the Coolify GitHub App, Coolify should automatically
+   deploy whenever commits are pushed to the configured branch.
+
+GitHub Actions fallback:
+
+The repo includes `.github/workflows/coolify-deploy.yml`, which triggers a
+Coolify deployment after the `Python application` workflow succeeds on `main`.
+It can also be run manually from GitHub Actions.
+
+Add these repository secrets in GitHub:
+
+```bash
+COOLIFY_WEBHOOK=<Coolify resource Webhooks -> Deploy Webhook URL>
+COOLIFY_TOKEN=<Coolify API token>
+```
+
+In Coolify, get the deploy webhook from the backend resource's **Webhooks**
+page, then create an API token from the Coolify dashboard. The workflow calls
+the deploy webhook with `Authorization: Bearer $COOLIFY_TOKEN`.
+
 ### Step 5: Verify Deployment
 
 Check the health endpoint:
