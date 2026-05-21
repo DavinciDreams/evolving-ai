@@ -352,7 +352,7 @@ class Config:
     @property
     def enable_ensemble_judge(self) -> bool:
         """Enable multi-persona ensemble scoring in the evaluator."""
-        return os.getenv("ENABLE_ENSEMBLE_JUDGE", "true").lower() == "true"
+        return os.getenv("ENABLE_ENSEMBLE_JUDGE", "false").lower() == "true"
 
     # TPMJS Integration Configuration
     @property
