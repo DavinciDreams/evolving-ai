@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import Card from '../common/Card';
 import Badge from '../common/Badge';
-import { formatDuration, formatRelativeTime } from '../../utils/formatting';
+import { formatRelativeTime } from '../../utils/formatting';
 
 // Simple chart components since we don't have a chart library
 const SimpleLineChart = ({ data, color = 'blue', height = 200 }) => {
@@ -74,18 +74,21 @@ const SimpleLineChart = ({ data, color = 'blue', height = 200 }) => {
 const StatusHistoryChart = ({ historyData, className = '' }) => {
   const [timeRange, setTimeRange] = useState(6); // hours
   const [metricType, setMetricType] = useState('cpu'); // cpu, memory, disk, operations, alerts
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
 
-  if (!historyData) {
-    return (
-      <Card title="Status History" className={className}>
-        <div className="flex items-center justify-center py-8">
-          <div className="text-gray-500">Loading history data...</div>
-        </div>
-      </Card>
-    );
-  }
+  useEffect(() => {
+    const interval = setInterval(() => setCurrentTime(Date.now()), 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
 
-  const { system_metrics, operations, alerts, providers, summary, hours } = historyData;
+  const {
+    system_metrics = [],
+    operations = [],
+    alerts = [],
+    providers = {},
+    summary,
+    hours,
+  } = historyData || {};
 
   // Process data for charts
   const chartData = useMemo(() => {
@@ -110,6 +113,7 @@ const StatusHistoryChart = ({ historyData, className = '' }) => {
         }));
       case 'operations':
         // Count operations per hour
+      {
         const operationCounts = {};
         operations.forEach(op => {
           const hour = new Date(op.start_time).toISOString().slice(0, 13);
@@ -120,8 +124,10 @@ const StatusHistoryChart = ({ historyData, className = '' }) => {
           value: count,
           label: 'Operations'
         }));
+      }
       case 'alerts':
         // Count alerts per hour
+      {
         const alertCounts = {};
         alerts.forEach(alert => {
           const hour = new Date(alert.timestamp).toISOString().slice(0, 13);
@@ -132,6 +138,7 @@ const StatusHistoryChart = ({ historyData, className = '' }) => {
           value: count,
           label: 'Alerts'
         }));
+      }
       default:
         return [];
     }
@@ -141,9 +148,9 @@ const StatusHistoryChart = ({ historyData, className = '' }) => {
   const filteredData = useMemo(() => {
     if (!chartData.length) return [];
     
-    const cutoffTime = new Date(Date.now() - timeRange * 60 * 60 * 1000);
+    const cutoffTime = new Date(currentTime - timeRange * 60 * 60 * 1000);
     return chartData.filter(point => new Date(point.timestamp) >= cutoffTime);
-  }, [chartData, timeRange]);
+  }, [chartData, currentTime, timeRange]);
 
   const getMetricColor = (type) => {
     switch (type) {
@@ -209,12 +216,11 @@ const StatusHistoryChart = ({ historyData, className = '' }) => {
   );
 
   const renderSummaryStats = () => {
-    const latestMetric = system_metrics[system_metrics.length - 1];
     const recentAlerts = alerts.filter(alert => 
-      new Date(alert.timestamp) >= new Date(Date.now() - 24 * 60 * 60 * 1000)
+      new Date(alert.timestamp) >= new Date(currentTime - 24 * 60 * 60 * 1000)
     );
     const recentOperations = operations.filter(op => 
-      new Date(op.start_time) >= new Date(Date.now() - 24 * 60 * 60 * 1000)
+      new Date(op.start_time) >= new Date(currentTime - 24 * 60 * 60 * 1000)
     );
 
     return (
@@ -246,6 +252,16 @@ const StatusHistoryChart = ({ historyData, className = '' }) => {
       </div>
     );
   };
+
+  if (!historyData) {
+    return (
+      <Card title="Status History" className={className}>
+        <div className="flex items-center justify-center py-8">
+          <div className="text-gray-500">Loading history data...</div>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card

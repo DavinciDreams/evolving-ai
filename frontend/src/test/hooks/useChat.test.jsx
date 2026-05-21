@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, act, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 vi.mock('../../services/chatService', () => ({
@@ -44,7 +44,7 @@ describe('useChat', () => {
       result.current.sendMessage({ query: 'hello', contextHints: [], conversationId: null });
     });
 
-    expect(result.current.isLoading).toBe(true);
+    await waitFor(() => expect(result.current.isLoading).toBe(true));
   });
 
   it('data is set after successful sendMessageAsync', async () => {
@@ -62,8 +62,8 @@ describe('useChat', () => {
     });
 
     expect(chatService.sendMessage).toHaveBeenCalledWith('hello', [], null);
-    expect(result.current.data).toEqual(responseData);
-    expect(result.current.isLoading).toBe(false);
+    await waitFor(() => expect(result.current.data).toEqual(responseData));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
   });
 
   it('error is set when mutation fails', async () => {
@@ -79,12 +79,13 @@ describe('useChat', () => {
           contextHints: [],
           conversationId: null,
         });
-      } catch (_) {
+      } catch (error) {
+        expect(error).toBe(networkError);
         // mutateAsync re-throws — expected
       }
     });
 
-    expect(result.current.error).toEqual(networkError);
-    expect(result.current.isLoading).toBe(false);
+    await waitFor(() => expect(result.current.error).toEqual(networkError));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
   });
 });

@@ -37,7 +37,7 @@ export const ImprovementStatus = ({
   onCancel = null
 }) => {
   const [expanded, setExpanded] = useState(false);
-  const [currentTime, setCurrentTime] = useState(Date.now());
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [retryCount, setRetryCount] = useState(0);
 
   // Update current time for elapsed time calculations
@@ -438,8 +438,6 @@ export const ImprovementStatus = ({
  * Enhanced component to display improvement summary with detailed before/after comparison
  */
 export const ImprovementSummary = ({ 
-  improvementId,
-  improvementType,
   filesAffected = [],
   changesCount = 0,
   beforeContent = '',
