@@ -42,13 +42,16 @@ graceful_shutdown_timeout = 30
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup the agent with graceful shutdown."""
-    try:
+
+    async def initialize_agent():
+        """Initialize the core Self-Improving Agent."""
         logger.info("Initializing Self-Improving Agent...")
         app_state.agent = SelfImprovingAgent()
         await app_state.agent.initialize()
         logger.info("Agent initialized successfully")
 
-        # Initialize GitHub modifier if GitHub credentials are available
+    async def initialize_github():
+        """Initialize GitHub integration if credentials are present."""
         github_token = os.getenv("GITHUB_TOKEN")
         github_repo = os.getenv("GITHUB_REPO")
 
@@ -66,7 +69,8 @@ async def lifespan(app: FastAPI):
                 "GitHub credentials not found. GitHub features will be unavailable."
             )
 
-        # Initialize Discord integration if enabled
+    async def initialize_discord():
+        """Initialize and start Discord bot if enabled."""
         if config.discord_enabled and config.discord_bot_token:
             logger.info("Initializing Discord integration...")
             app_state.discord_integration = DiscordIntegration(
@@ -76,7 +80,6 @@ async def lifespan(app: FastAPI):
             )
             await app_state.discord_integration.initialize()
 
-            # Start Discord bot in background task
             asyncio.create_task(app_state.discord_integration.start())
             logger.info("Discord integration started successfully")
         else:
@@ -85,13 +88,8 @@ async def lifespan(app: FastAPI):
                 "Discord features will be unavailable."
             )
 
-        yield
-    finally:
-        # Graceful shutdown
-        logger.info("Initiating graceful shutdown...")
-        app_state.server_shutdown = True
-
-        # Cleanup Discord integration
+    async def cleanup_discord():
+        """Safely shut down the Discord integration."""
         if app_state.discord_integration:
             logger.info("Shutting down Discord integration...")
             try:
@@ -100,6 +98,8 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"Error shutting down Discord: {e}")
 
+    async def cleanup_agent():
+        """Safely clean up the agent."""
         if app_state.agent:
             logger.info("Cleaning up agent...")
             try:
@@ -108,14 +108,32 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"Error during agent cleanup: {e}")
 
-        # Clean up error recovery resources
+    async def cleanup_error_recovery():
+        """Clean up error recovery manager checkpoints."""
         try:
             error_recovery_manager.cleanup_old_checkpoints()
             logger.info("Error recovery resources cleaned up")
         except Exception as e:
             logger.error(f"Error cleaning up error recovery: {e}")
 
+    async def graceful_shutdown():
+        """Execute all cleanup operations in order."""
+        logger.info("Initiating graceful shutdown...")
+        app_state.server_shutdown = True
+
+        await cleanup_discord()
+        await cleanup_agent()
+        await cleanup_error_recovery()
+
         logger.info("Graceful shutdown completed")
+
+    try:
+        await initialize_agent()
+        await initialize_github()
+        await initialize_discord()
+        yield
+    finally:
+        await graceful_shutdown()
 
 
 # FastAPI app initialization
