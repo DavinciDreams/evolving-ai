@@ -25,6 +25,7 @@ from ..utils.logging import setup_logger
 from ..utils.persistent_storage import persistent_data_manager
 from ..utils.error_recovery import error_recovery_manager
 from .context_manager import ContextManager
+from .dream_cycle import DreamConsolidationService
 from .evaluator import EvaluationResult, OutputEvaluator
 from .memory import LongTermMemory, MemoryEntry
 from .tools import get_all_tools
@@ -73,6 +74,10 @@ class SelfImprovingAgent:
 
         # TPMJS client for external tool discovery/execution
         self.tpmjs_client = None
+
+        # Background memory consolidation
+        self.dream_cycle = None
+        self._dream_cycle_task = None
 
         # E2B sandbox for safe remote code execution
         self.e2b_sandbox = None
@@ -237,6 +242,24 @@ class SelfImprovingAgent:
                     self.logger.info(f"Loaded {len(self.learned_lessons)} Reflexion lessons from DB")
             except Exception as e:
                 self.logger.warning(f"Could not load learned lessons: {e}")
+
+            # Initialize dream-time consolidation after memory and SQLite are available.
+            if (
+                self.component_health.get("memory", False)
+                and self.component_health.get("persistent_storage", False)
+            ):
+                try:
+                    self.dream_cycle = DreamConsolidationService(
+                        memory=self.memory,
+                        data_manager=self.data_manager,
+                        llm_manager=llm_manager,
+                    )
+                    await self.dream_cycle.seed_capability_memory()
+                    self.component_health["dream_cycle"] = True
+                    self.logger.info("Dream consolidation service initialized")
+                except Exception as e:
+                    self.component_health["dream_cycle"] = False
+                    self.logger.warning(f"Dream consolidation unavailable: {e}")
 
             self.initialized = True
             self.logger.info("Agent initialization completed successfully")
@@ -760,7 +783,9 @@ class SelfImprovingAgent:
             self_mod_info = """
 You have active self-modification capabilities.
 When users ask you to improve yourself, edit your code, or self-modify,
-the system will automatically trigger your self-improvement pipeline."""
+the system will automatically trigger your self-improvement pipeline.
+For code changes and pull requests, use the tool-backed GitHub/self-modification
+workflow rather than pasting source code into chat."""
 
         system_prompt = f"""\
 You are Katbot, a self-improving AI with the ability to analyze and modify your own code.
@@ -787,6 +812,11 @@ You have access to tools. USE THEM to perform real actions:
 When a user asks you to check something, look something up, or perform an action,
 use the appropriate tool instead of generating hypothetical commands as text.
 You MUST actually perform the action and include real data in your response.
+When a user asks you to implement, modify code, test, deploy, or create a PR,
+use your file, command, memory, and GitHub/self-modification tools to make real
+repository changes. Do not present a large code dump as if it changed the repo.
+Dream-time memory consolidation happens in background maintenance; do not try to
+simulate it as a chat response.
 
 Current session: {self.session_id}
 Interaction count: {self.interaction_count}
@@ -1086,6 +1116,9 @@ Be specific, actionable, and consider lessons learned from previous interactions
                 except Exception as e:
                     self.logger.warning(f"Reflexion failed: {e}")
 
+            if self.dream_cycle and self.dream_cycle.due_for_cycle(self.interaction_count):
+                self._schedule_dream_consolidation(reason="post_response_maintenance")
+
             # Consider self-modification every 10 interactions
             if config.enable_self_modification and self.interaction_count % 10 == 0:
                 await self._consider_self_modification()
@@ -1102,6 +1135,26 @@ Be specific, actionable, and consider lessons learned from previous interactions
                     self.logger.warning(f"Failed to save agent state: {e}")
         except Exception as e:
             self.logger.error(f"Post-response maintenance failed: {e}")
+
+    def _schedule_dream_consolidation(self, reason: str) -> None:
+        """Schedule one background dream cycle if another is not already running."""
+        if not self.dream_cycle:
+            return
+        if self._dream_cycle_task and not self._dream_cycle_task.done():
+            return
+
+        async def _run() -> None:
+            try:
+                result = await self.dream_cycle.run_once(reason=reason)
+                if result.created:
+                    self.logger.info(
+                        f"Dream consolidation stored {result.memory_id} "
+                        f"from {result.source_interaction_count} interactions"
+                    )
+            except Exception as e:
+                self.logger.warning(f"Dream consolidation failed: {e}")
+
+        self._dream_cycle_task = asyncio.create_task(_run())
 
     async def _store_interaction(
         self,
@@ -1506,6 +1559,16 @@ Memory Types:
             except Exception as e:
                 self.logger.error(f"Failed to save agent state: {e}")
             
+            try:
+                if self._dream_cycle_task and not self._dream_cycle_task.done():
+                    self._dream_cycle_task.cancel()
+                    try:
+                        await self._dream_cycle_task
+                    except asyncio.CancelledError:
+                        pass
+            except Exception as e:
+                self.logger.error(f"Failed to cleanup dream cycle task: {e}")
+
             try:
                 await self.data_manager.cleanup()
             except Exception as e:

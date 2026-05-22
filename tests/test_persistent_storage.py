@@ -73,6 +73,19 @@ async def test_persistent_storage():
         interactions = await persistent_data_manager.get_recent_interactions(limit=5)
         print(f"✓ Retrieved {len(interactions)} recent interactions")
 
+        # Test saving dream consolidation
+        dream_id = await persistent_data_manager.save_dream_consolidation(
+            source_interaction_count=1,
+            memory_id="test-memory-id",
+            summary="Consolidated durable memory",
+            insights=["Use persistent tools for code changes"],
+            metadata={"test": True},
+        )
+        assert dream_id > 0
+        dreams = await persistent_data_manager.get_recent_dream_consolidations(limit=1)
+        assert dreams and dreams[0]["memory_id"] == "test-memory-id"
+        print(f"✓ Saved dream consolidation: {dream_id}")
+
         # Test creating backup
         backup_path = await persistent_data_manager.create_backup("agent_state")
         print(f"✓ Created backup: {backup_path}")
@@ -120,6 +133,32 @@ async def test_persistent_storage_uses_configured_data_dir(tmp_path, monkeypatch
         assert manager.data_dir == data_dir
         assert manager.session_file.exists()
         assert manager.interactions_db.exists()
+    finally:
+        await manager.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_persistent_storage_saves_dream_consolidation(tmp_path, monkeypatch):
+    """Dream consolidation records should live in the persistent SQLite DB."""
+    data_dir = tmp_path / "agent_state"
+    monkeypatch.setenv("PERSISTENT_DATA_DIR", str(data_dir))
+
+    manager = PersistentDataManager()
+    await manager.initialize()
+
+    try:
+        row_id = await manager.save_dream_consolidation(
+            source_interaction_count=2,
+            memory_id="memory-123",
+            summary="Useful pattern",
+            insights=["The user wants durable memory"],
+            metadata={"reason": "test"},
+        )
+        rows = await manager.get_recent_dream_consolidations(limit=5)
+
+        assert row_id > 0
+        assert rows[0]["memory_id"] == "memory-123"
+        assert rows[0]["source_interaction_count"] == 2
     finally:
         await manager.cleanup()
 

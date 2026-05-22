@@ -182,6 +182,20 @@ class PersistentDataManager:
                 )
             """)
 
+            # dream_consolidations table: records background memory synthesis runs
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS dream_consolidations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT,
+                    timestamp DATETIME NOT NULL,
+                    source_interaction_count INTEGER NOT NULL,
+                    memory_id TEXT,
+                    summary TEXT,
+                    insights TEXT,
+                    metadata TEXT
+                )
+            """)
+
             conn.commit()
             conn.close()
 
@@ -443,6 +457,69 @@ class PersistentDataManager:
         except Exception as e:
             logger.error(f"Failed to get session statistics: {e}")
             return {}
+
+    async def save_dream_consolidation(
+        self,
+        source_interaction_count: int,
+        memory_id: Optional[str],
+        summary: str,
+        insights: List[str],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Save a dream-cycle consolidation record."""
+        try:
+            conn = sqlite3.connect(self.interactions_db)
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                INSERT INTO dream_consolidations
+                (session_id, timestamp, source_interaction_count, memory_id, summary, insights, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    self.session_id,
+                    datetime.now().isoformat(),
+                    source_interaction_count,
+                    memory_id,
+                    summary,
+                    json.dumps(insights),
+                    json.dumps(metadata) if metadata else None,
+                ),
+            )
+
+            consolidation_id = cursor.lastrowid
+            conn.commit()
+            conn.close()
+            logger.info(f"Saved dream consolidation {consolidation_id}")
+            return consolidation_id
+
+        except Exception as e:
+            logger.error(f"Failed to save dream consolidation: {e}")
+            return -1
+
+    async def get_recent_dream_consolidations(
+        self, limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Get recent dream-cycle consolidation records."""
+        try:
+            conn = sqlite3.connect(self.interactions_db)
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM dream_consolidations
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """,
+                (limit,),
+            )
+            columns = [desc[0] for desc in cursor.description]
+            rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+            conn.close()
+            return rows
+        except Exception as e:
+            logger.error(f"Failed to get recent dream consolidations: {e}")
+            return []
 
     async def save_agent_state(self, state: Dict[str, Any]):
         """Save current agent state."""

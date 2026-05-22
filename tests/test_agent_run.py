@@ -64,6 +64,7 @@ def _make_config(
     cfg.enable_self_modification = enable_self_modification
     cfg.discord_status_on_knowledge_update = discord_status_on_knowledge_update
     cfg.reflexion_interval = 50  # prevent MagicMock arithmetic in _post_response_work
+    cfg.dream_cycle_enabled = False
     return cfg
 
 
@@ -132,6 +133,8 @@ def agent():
     a._handle_self_edit_request = AsyncMock(return_value="Self-edit response")
     a._consider_self_modification = AsyncMock()
     a._notify_status = AsyncMock()
+    a.dream_cycle = None
+    a._dream_cycle_task = None
 
     return a
 

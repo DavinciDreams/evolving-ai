@@ -93,6 +93,46 @@ class Config:
         return int(os.getenv("MAX_MEMORY_ENTRIES", "10000"))
 
     @property
+    def dream_cycle_enabled(self) -> bool:
+        """Enable idle/background memory consolidation."""
+        return os.getenv("DREAM_CYCLE_ENABLED", "true").lower() == "true"
+
+    @property
+    def dream_cycle_interval_seconds(self) -> int:
+        """Minimum seconds between dream consolidation runs."""
+        return int(os.getenv("DREAM_CYCLE_INTERVAL_SECONDS", "21600"))
+
+    @property
+    def dream_cycle_min_interactions(self) -> int:
+        """Minimum total interactions before dream consolidation runs."""
+        return int(os.getenv("DREAM_CYCLE_MIN_INTERACTIONS", "5"))
+
+    @property
+    def dream_cycle_batch_size(self) -> int:
+        """Recent interaction count to consider in each dream cycle."""
+        return int(os.getenv("DREAM_CYCLE_BATCH_SIZE", "50"))
+
+    @property
+    def dream_cycle_max_insights(self) -> int:
+        """Maximum synthesized insights stored per dream cycle."""
+        return int(os.getenv("DREAM_CYCLE_MAX_INSIGHTS", "8"))
+
+    @property
+    def dream_cycle_max_tokens(self) -> int:
+        """Maximum tokens for dream synthesis."""
+        return int(os.getenv("DREAM_CYCLE_MAX_TOKENS", "700"))
+
+    @property
+    def dream_cycle_llm_timeout_seconds(self) -> float:
+        """Timeout for the dream synthesis model call."""
+        return float(os.getenv("DREAM_CYCLE_LLM_TIMEOUT_SECONDS", "45"))
+
+    @property
+    def dream_cycle_prompt_max_chars(self) -> int:
+        """Maximum prompt characters from recent interactions."""
+        return int(os.getenv("DREAM_CYCLE_PROMPT_MAX_CHARS", "12000"))
+
+    @property
     def default_llm_provider(self) -> str:
         """Get default LLM provider."""
         return os.getenv("DEFAULT_LLM_PROVIDER", "anthropic")
@@ -381,6 +421,11 @@ class Config:
             "persistent_data_dir": self.persistent_data_dir,
             "memory_collection_name": self.memory_collection_name,
             "max_memory_entries": self.max_memory_entries,
+            "dream_cycle_enabled": self.dream_cycle_enabled,
+            "dream_cycle_interval_seconds": self.dream_cycle_interval_seconds,
+            "dream_cycle_min_interactions": self.dream_cycle_min_interactions,
+            "dream_cycle_batch_size": self.dream_cycle_batch_size,
+            "dream_cycle_max_insights": self.dream_cycle_max_insights,
             "default_llm_provider": self.default_llm_provider,
             "default_model": self.default_model,
             "evaluation_model": self.evaluation_model,
