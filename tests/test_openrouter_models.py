@@ -17,7 +17,7 @@ async def test_openrouter_models():
 
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
-        raise ValueError("OPENROUTER_API_KEY environment variable not set.")
+        pytest.skip("OPENROUTER_API_KEY is not configured for this live provider test")
 
     # Test different model names
     models = [

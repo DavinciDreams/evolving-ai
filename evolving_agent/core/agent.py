@@ -182,15 +182,26 @@ class SelfImprovingAgent:
                     self.component_health["web_search"] = False
                     self._handle_component_failure("web_search", str(e))
 
-            # Initialize TPMJS client if API key is configured
-            if config.tpmjs_api_key:
+            # TPMJS is optional and must pass a live probe before its tools are
+            # advertised. Built-in web search/E2B remain the maintained fallback.
+            if config.tpmjs_enabled and config.tpmjs_api_key:
                 try:
-                    self.tpmjs_client = TPMJSClient(api_key=config.tpmjs_api_key)
-                    self.component_health["tpmjs"] = True
-                    self.logger.info("TPMJS integration initialized")
+                    candidate = TPMJSClient(api_key=config.tpmjs_api_key)
+                    health = await candidate.health_check()
+                    if health.get("available"):
+                        self.tpmjs_client = candidate
+                        self.component_health["tpmjs"] = True
+                        self.logger.info("TPMJS integration initialized")
+                    else:
+                        self.component_health["tpmjs"] = False
+                        self.logger.warning(
+                            "TPMJS degraded; using search_web/execute_code replacements"
+                        )
                 except Exception as e:
                     self.logger.error(f"Failed to initialize TPMJS: {e}")
                     self.component_health["tpmjs"] = False
+            else:
+                self.component_health["tpmjs"] = False
 
             # Initialize E2B sandbox if API key is configured
             if config.e2b_api_key:
@@ -762,6 +773,17 @@ You have active self-modification capabilities.
 When users ask you to improve yourself, edit your code, or self-modify,
 the system will automatically trigger your self-improvement pipeline."""
 
+        optional_tool_prompt = ""
+        if self.tpmjs_client is not None:
+            optional_tool_prompt = """
+- search_tpmjs: Find specialized AI tools on tpmjs.com.
+- execute_tpmjs_tool: Run a tool from tpmjs.com.
+- create_tpmjs_tool: Create a new tool scaffold when none exists."""
+        else:
+            optional_tool_prompt = """
+TPMJS is unavailable or disabled. Use the maintained built-in search_web and
+execute_code tools instead, and state clearly when no equivalent can complete a task."""
+
         system_prompt = f"""\
 You are Katbot, a self-improving AI with the ability to analyze and modify your own code.
 KAT stands for Knowledge Adaptive Transformer, indicating you have long term knowledge and the ability to adapt.
@@ -780,9 +802,7 @@ You have access to tools. USE THEM to perform real actions:
 - scratchpad_write: Save notes, drafts, or working files to your persistent scratchpad.
 - scratchpad_read: Read a file from your scratchpad.
 - scratchpad_list: List files in your scratchpad.
-- search_tpmjs: Find specialized AI tools on tpmjs.com.
-- execute_tpmjs_tool: Run a tool from tpmjs.com.
-- create_tpmjs_tool: Create a new tool on tpmjs.com when none exists.
+{optional_tool_prompt}
 
 When a user asks you to check something, look something up, or perform an action,
 use the appropriate tool instead of generating hypothetical commands as text.
@@ -1529,6 +1549,12 @@ Memory Types:
                     await self.memory.add_memory(session_end_memory)
             except Exception as e:
                 self.logger.error(f"Failed to store session end: {e}")
+
+            try:
+                if self.memory:
+                    await self.memory.close()
+            except Exception as e:
+                self.logger.error(f"Failed to close memory transport: {e}")
             
             # Clean up checkpoints
             error_recovery_manager.cleanup_old_checkpoints()

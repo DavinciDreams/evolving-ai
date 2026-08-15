@@ -5,6 +5,7 @@ This is the thin entry point. Route handlers live in evolving_agent/api/routes/.
 """
 
 import asyncio
+import hmac
 import os
 import signal
 from contextlib import asynccontextmanager
@@ -20,7 +21,12 @@ from evolving_agent.core.agent import SelfImprovingAgent
 from evolving_agent.integrations.discord_integration import DiscordIntegration
 from evolving_agent.self_modification.github_enhanced_modifier import GitHubEnabledSelfModifier
 from evolving_agent.utils.config import config
-from evolving_agent.utils.deps import API_KEY_HEADER, get_agent, verify_api_key  # noqa: F401 — re-exported for tests and routers
+from evolving_agent.utils.deps import (  # noqa: F401 — re-exported for tests and routers
+    API_KEY_HEADER,
+    authenticate_request,
+    get_agent,
+    verify_api_key,
+)
 from evolving_agent.utils.error_recovery import error_recovery_manager
 from evolving_agent.utils.logging import setup_logger
 
@@ -39,9 +45,26 @@ logger = setup_logger(__name__)
 graceful_shutdown_timeout = 30
 
 
+def _validate_separate_service_credentials() -> None:
+    """Fail closed when unrelated capabilities share one bearer credential."""
+    credentials = {
+        "HAM_API_KEY": config.ham_api_key,
+        "PROJECT_API_KEY": config.api_key,
+        "GITHUB_TOKEN": os.getenv("GITHUB_TOKEN", ""),
+    }
+    configured = [(name, value) for name, value in credentials.items() if value]
+    for index, (left_name, left_value) in enumerate(configured):
+        for right_name, right_value in configured[index + 1 :]:
+            if hmac.compare_digest(left_value, right_value):
+                raise RuntimeError(
+                    f"{left_name} and {right_name} must be distinct least-privilege credentials"
+                )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup the agent with graceful shutdown."""
+    _validate_separate_service_credentials()
 
     async def initialize_agent():
         """Initialize the core Self-Improving Agent."""
@@ -191,6 +214,41 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+_PUBLIC_API_PATHS = frozenset({
+    "/",
+    "/health",
+    "/openapi.json",
+    "/docs",
+    "/docs/oauth2-redirect",
+    "/redoc",
+    "/public/memories",
+})
+
+
+@app.middleware("http")
+async def project_authorization_middleware(request: Request, call_next):
+    """Enforce project auth centrally so newly added routes are private by default."""
+    is_public = request.method == "OPTIONS" or request.url.path in _PUBLIC_API_PATHS
+    if not is_public:
+        try:
+            authenticate_request(request)
+        except Exception as exc:
+            from fastapi import HTTPException
+
+            if isinstance(exc, HTTPException):
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content={"detail": exc.detail},
+                    headers={"Cache-Control": "no-store"},
+                )
+            raise
+
+    response = await call_next(request)
+    if not is_public:
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 # Error recovery middleware

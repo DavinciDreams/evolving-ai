@@ -1,27 +1,49 @@
 """Shared FastAPI dependencies — import from here to avoid circular imports."""
 
-import os
+import hmac
 
 import evolving_agent.utils.app_state as state
 from evolving_agent.core.agent import SelfImprovingAgent
-from fastapi import HTTPException, Security
-from fastapi.security import APIKeyHeader
+from fastapi import HTTPException, Request, Security
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
 # Optional API key authentication
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+BEARER_HEADER = HTTPBearer(auto_error=False)
 
 
-async def verify_api_key(api_key: str = Security(API_KEY_HEADER)):
-    """Validate the X-API-Key header on protected endpoints.
+def _validate_project_key(supplied_key: str | None) -> None:
+    """Validate project-steward credentials with secure production defaults."""
+    from evolving_agent.utils.config import config
 
-    Auth is disabled when the API_KEY environment variable is not set or empty,
-    preserving backward compatibility for deployments that do not set the key.
-    """
-    configured_key = os.getenv("API_KEY", "")
+    if not config.api_auth_required:
+        return
+    configured_key = config.api_key
     if not configured_key:
-        return  # Auth disabled — no key configured
-    if api_key != configured_key:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+        raise HTTPException(
+            status_code=503,
+            detail="Project authentication is required but not configured",
+        )
+    if not supplied_key or not hmac.compare_digest(supplied_key, configured_key):
+        raise HTTPException(status_code=401, detail="Invalid or missing project credential")
+
+
+def authenticate_request(request: Request) -> None:
+    """Authenticate a raw request for central middleware enforcement."""
+    supplied_key = request.headers.get("X-API-Key")
+    authorization = request.headers.get("Authorization", "")
+    if not supplied_key and authorization.lower().startswith("bearer "):
+        supplied_key = authorization[7:].strip()
+    _validate_project_key(supplied_key)
+
+
+async def verify_api_key(
+    api_key: str = Security(API_KEY_HEADER),
+    bearer: HTTPAuthorizationCredentials | None = Security(BEARER_HEADER),
+):
+    """Validate project access for explicitly protected route dependencies."""
+    supplied_key = api_key or (bearer.credentials if bearer else None)
+    _validate_project_key(supplied_key)
 
 
 def get_agent() -> SelfImprovingAgent:

@@ -1,0 +1,234 @@
+"""Transport-neutral HAM REST client for Katbot's authoritative memory.
+
+The service credential determines tenant, AgentPrincipal, and allowed scopes.
+This client deliberately never sends an agent identity header or payload field.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+import httpx
+
+
+class HAMMemoryError(RuntimeError):
+    """Raised when HAM rejects or cannot complete a memory operation."""
+
+    def __init__(self, message: str, *, status_code: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class HAMMemoryClient:
+    """Small async adapter over HAM's authenticated REST API."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        project: str,
+        scope: str,
+        repo: str,
+        expected_agent_id: str,
+        timeout: float = 30.0,
+        transport: Optional[httpx.AsyncBaseTransport] = None,
+    ) -> None:
+        if not api_key:
+            raise HAMMemoryError("HAM_API_KEY is required when MEMORY_BACKEND=ham")
+        if not project or not scope:
+            raise HAMMemoryError("HAM_PROJECT and HAM_SCOPE are required")
+        if not expected_agent_id:
+            raise HAMMemoryError(
+                "HAM_EXPECTED_AGENT_ID is required for credential attribution checks"
+            )
+
+        self.project = project
+        self.scope = scope
+        self.repo = repo
+        self.expected_agent_id = expected_agent_id
+        self._client = httpx.AsyncClient(
+            base_url=base_url.rstrip("/"),
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=timeout,
+            transport=transport,
+        )
+
+    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        try:
+            response = await self._client.request(method, path, **kwargs)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            raise HAMMemoryError(
+                f"HAM request failed with status {status}", status_code=status
+            ) from exc
+        except (httpx.HTTPError, ValueError) as exc:
+            raise HAMMemoryError(f"HAM request failed: {type(exc).__name__}") from exc
+
+    async def initialize(self) -> None:
+        """Verify the credential can see the configured project."""
+        projects = await self._request("GET", "/projects")
+        visible = {
+            str(item.get("slug")): item for item in projects if isinstance(item, dict)
+        }
+        configured = visible.get(self.project)
+        if configured is None:
+            raise HAMMemoryError(
+                f"HAM credential cannot access configured project {self.project!r}"
+            )
+        if configured.get("scope") != self.scope:
+            raise HAMMemoryError(
+                "HAM project scope does not match the configured least-privilege scope"
+            )
+        if self.repo and configured.get("repo") not in {None, self.repo}:
+            raise HAMMemoryError("HAM project repository attribution does not match")
+
+    async def _assert_write_identity(
+        self, result: Dict[str, Any], memory_id: int
+    ) -> None:
+        """Verify server-side attribution, including idempotent retry responses."""
+        attributed_agent = result.get("agent_id")
+        if not attributed_agent:
+            stored = await self.get(memory_id)
+            attributed_agent = (stored or {}).get("metadata", {}).get("agent_id")
+        if attributed_agent != self.expected_agent_id:
+            raise HAMMemoryError(
+                "HAM write identity mismatch: the credential is not bound to the "
+                f"expected principal {self.expected_agent_id!r}"
+            )
+
+    async def add(
+        self,
+        *,
+        content: str,
+        source_id: str,
+        timestamp: str,
+        memory_type: str,
+        metadata: Dict[str, Any],
+        idempotency_key: Optional[str] = None,
+    ) -> int:
+        payload = {
+            "content": content,
+            "timestamp": timestamp,
+            "metadata": {
+                **metadata,
+                "source_memory_id": source_id,
+                "audience": metadata.get("audience", "project"),
+            },
+            "type": memory_type,
+            "title": f"Katbot {memory_type}",
+            "scopes": [self.scope],
+            "project": self.project,
+            "repo": self.repo,
+            "task": "katbot-runtime-memory",
+            "durability": "project",
+            "visibility": "shared",
+            "idempotency_key": idempotency_key or f"evolving-ai:{source_id}",
+            "cues": [f"katbot {memory_type}", f"source memory {source_id}"],
+        }
+        result = await self._request("POST", "/ingest", json=payload)
+        memory_id = int(result["id"])
+        await self._assert_write_identity(result, memory_id)
+        return memory_id
+
+    async def search(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        memory_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        payload: Dict[str, Any] = {
+            "query": query,
+            "top_k": min(max(top_k, 1), 100),
+            "scopes": [self.scope],
+            "project": self.project,
+            "repo": self.repo,
+        }
+        if memory_type:
+            payload["types"] = [memory_type]
+        result = await self._request("POST", "/search", json=payload)
+        return result if isinstance(result, list) else []
+
+    async def recent(
+        self,
+        *,
+        limit: int,
+        memory_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        payload: Dict[str, Any] = {
+            "limit": min(max(limit, 1), 100),
+            "scopes": [self.scope],
+            "project": self.project,
+            "repo": self.repo,
+        }
+        if memory_type:
+            payload["types"] = [memory_type]
+        result = await self._request("POST", "/memories/recent", json=payload)
+        return result if isinstance(result, list) else []
+
+    async def get(self, memory_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            result = await self._request("GET", f"/memories/{memory_id}")
+        except HAMMemoryError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        return result if isinstance(result, dict) else None
+
+    async def stats(self) -> Dict[str, Any]:
+        result = await self._request("GET", "/stats")
+        return result if isinstance(result, dict) else {}
+
+    async def supersede(
+        self,
+        memory_id: int,
+        *,
+        expected_version: int,
+        content: str,
+        source_id: str,
+        timestamp: str,
+        memory_type: str,
+        metadata: Dict[str, Any],
+    ) -> int:
+        payload = {
+            "content": content,
+            "timestamp": timestamp,
+            "metadata": {
+                **metadata,
+                "source_memory_id": source_id,
+                "audience": metadata.get("audience", "project"),
+            },
+            "type": memory_type,
+            "scopes": [self.scope],
+            "project": self.project,
+            "repo": self.repo,
+            "task": "katbot-runtime-memory",
+            "durability": "project",
+            "visibility": "shared",
+            "expected_version": expected_version,
+            "idempotency_key": f"evolving-ai:supersede:{memory_id}:{source_id}",
+            "reason": "Katbot memory update",
+        }
+        result = await self._request(
+            "POST", f"/memories/{memory_id}/supersede", json=payload
+        )
+        replacement_id = int(result["id"])
+        await self._assert_write_identity(result, replacement_id)
+        return replacement_id
+
+    async def retract(self, memory_id: int, *, expected_version: int) -> bool:
+        await self._request(
+            "POST",
+            f"/memories/{memory_id}/retract",
+            json={
+                "expected_version": expected_version,
+                "reason": "Retracted by Katbot memory lifecycle",
+            },
+        )
+        return True
+
+    async def close(self) -> None:
+        await self._client.aclose()

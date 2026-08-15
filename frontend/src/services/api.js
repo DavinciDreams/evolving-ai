@@ -9,6 +9,35 @@ let isProcessingQueue = false;
 let isOnline = true;
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_BASE = 1000; // 1 second
+let projectApiKey = '';
+
+export const setProjectApiKey = (credential) => {
+  projectApiKey = credential;
+};
+
+export const clearProjectApiKey = () => {
+  projectApiKey = '';
+  for (const queued of requestQueue) {
+    queued.config?.headers?.delete?.('X-API-Key');
+    if (queued.config?.headers && typeof queued.config.headers.delete !== 'function') {
+      delete queued.config.headers['X-API-Key'];
+    }
+    queued.reject(new Error('Project access was cleared before the request was sent'));
+  }
+  requestQueue.length = 0;
+};
+
+const scrubAuthFromError = (error) => {
+  const headers = error.config?.headers;
+  if (headers?.delete) {
+    headers.delete('X-API-Key');
+    headers.delete('Authorization');
+  } else if (headers) {
+    delete headers['X-API-Key'];
+    delete headers.Authorization;
+  }
+  return error;
+};
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -22,11 +51,11 @@ export const api = axios.create({
 // Request interceptor with retry logic and offline mode
 api.interceptors.request.use(
   (config) => {
-    // Add auth token if available (future enhancement)
-    // const token = localStorage.getItem('token');
-    // if (token) {
-    //   config.headers.Authorization = `Bearer ${token}`;
-    // }
+    const hasExplicitCredential = config.headers?.has?.('X-API-Key')
+      || Boolean(config.headers?.['X-API-Key']);
+    if (projectApiKey && !hasExplicitCredential) {
+      config.headers['X-API-Key'] = projectApiKey;
+    }
     
     // Add request ID for tracking
     config.metadata = {
@@ -52,7 +81,7 @@ api.interceptors.request.use(
     return config;
   },
   (error) => {
-    return Promise.reject(error);
+    return Promise.reject(scrubAuthFromError(error));
   }
 );
 
@@ -72,6 +101,10 @@ api.interceptors.response.use(
   async (error) => {
     const config = error.config;
     const status = error.response?.status;
+
+    if (status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('evolving-ai:auth-required'));
+    }
     
     // Handle different error types
     if (error.code === 'ECONNABORTED') {
@@ -83,7 +116,7 @@ api.interceptors.response.use(
       // Request was made but no response received - network error
       isOnline = false;
       toast.error('Network error - server may be unavailable', { icon: '🔌' });
-      return Promise.reject(error);
+      return Promise.reject(scrubAuthFromError(error));
     }
     
     if (status === 503) {
@@ -100,7 +133,7 @@ api.interceptors.response.use(
           duration: 5000
         });
       }
-      return Promise.reject(error);
+      return Promise.reject(scrubAuthFromError(error));
     }
     
     if (status === 429) {
@@ -110,7 +143,7 @@ api.interceptors.response.use(
         icon: '⏳',
         duration: 4000
       });
-      return Promise.reject(error);
+      return Promise.reject(scrubAuthFromError(error));
     }
     
     if (status >= 500 && status < 600) {
@@ -131,9 +164,16 @@ api.interceptors.response.use(
     // Show toast notification
     toast.error(message);
     
-    return Promise.reject(error);
+    return Promise.reject(scrubAuthFromError(error));
   }
 );
+
+export const validateProjectApiKey = async (credential) => {
+  const response = await api.get('/status', {
+    headers: { 'X-API-Key': credential },
+  });
+  return response.data;
+};
 
 // Retry logic with exponential backoff
 async function handleRetry(config, errorType) {

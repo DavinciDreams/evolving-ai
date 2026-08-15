@@ -1,7 +1,12 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useCallback, useContext, useState, useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { Toaster } from 'react-hot-toast';
+import {
+  clearProjectApiKey,
+  setProjectApiKey,
+  validateProjectApiKey,
+} from '../services/api';
 
 // Create Query Client
 const queryClient = new QueryClient({
@@ -23,9 +28,26 @@ export const AppProvider = ({ children }) => {
   const [theme, setTheme] = useState(
     () => localStorage.getItem('evolving-ai-theme') || 'light'
   );
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   const toggleSidebar = () => setSidebarOpen((prev) => !prev);
   const toggleTheme = () => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
+
+  const authenticate = useCallback(async (credential) => {
+    const candidate = credential.trim();
+    if (!candidate) return false;
+    await validateProjectApiKey(candidate);
+    setProjectApiKey(candidate);
+    queryClient.clear();
+    setIsAuthenticated(true);
+    return true;
+  }, []);
+
+  const logout = useCallback(() => {
+    clearProjectApiKey();
+    queryClient.clear();
+    setIsAuthenticated(false);
+  }, []);
 
   useEffect(() => {
     if (theme === 'dark') {
@@ -36,6 +58,11 @@ export const AppProvider = ({ children }) => {
     localStorage.setItem('evolving-ai-theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    window.addEventListener('evolving-ai:auth-required', logout);
+    return () => window.removeEventListener('evolving-ai:auth-required', logout);
+  }, [logout]);
+
   const value = {
     sidebarOpen,
     setSidebarOpen,
@@ -43,6 +70,9 @@ export const AppProvider = ({ children }) => {
     theme,
     setTheme,
     toggleTheme,
+    isAuthenticated,
+    authenticate,
+    logout,
   };
 
   return (

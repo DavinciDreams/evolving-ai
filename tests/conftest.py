@@ -24,6 +24,9 @@ def pytest_configure(config):
 @pytest.fixture(autouse=True)
 def _isolate_memory_dir(tmp_path, monkeypatch):
     """Use a temporary directory for memory persistence during tests."""
+    monkeypatch.setenv("MEMORY_BACKEND", "chroma")
+    monkeypatch.setenv("LEGACY_MEMORY_READ_ONLY", "false")
+    monkeypatch.setenv("API_AUTH_REQUIRED", "false")
     monkeypatch.setenv("MEMORY_PERSIST_DIRECTORY", str(tmp_path / "memory_db"))
     monkeypatch.setenv("KNOWLEDGE_BASE_PATH", str(tmp_path / "knowledge_base"))
     monkeypatch.setenv("BACKUP_DIRECTORY", str(tmp_path / "backups"))

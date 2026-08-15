@@ -32,11 +32,10 @@ async def get_status(current_agent: SelfImprovingAgent = Depends(get_agent)):
     try:
         # Get memory count
         memory_count = 0
-        if hasattr(current_agent, "memory") and hasattr(
-            current_agent.memory, "collection"
-        ):
+        if hasattr(current_agent, "memory"):
             try:
-                memory_count = current_agent.memory.collection.count()
+                memory_stats = await current_agent.memory.get_memory_stats()
+                memory_count = int(memory_stats.get("total_memories", 0))
             except Exception:
                 memory_count = 0
 

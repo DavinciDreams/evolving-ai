@@ -6,7 +6,7 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
 
 ### 🧠 Advanced AI Capabilities
 
-- **Long-term Memory**: Persistent memory system using ChromaDB vector embeddings
+- **Long-term Memory**: Project-scoped HAM shared memory with explicit public/private audiences
 - **Dynamic Context Management**: Intelligent context retrieval and management
 - **Self-Evaluation**: Continuous output evaluation and improvement cycles
 - **Knowledge Base**: Automatic knowledge acquisition and updates
@@ -21,7 +21,7 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
 ### 🚀 Production Features
 
 - **FastAPI Web Server**: RESTful API with Swagger documentation
-- **Multiple LLM Providers**: Support for OpenAI, Anthropic, OpenRouter, Z AI (GLM-4.7 with coding endpoint), and more
+- **Multiple LLM Providers**: Support for OpenAI, Anthropic, OpenRouter, and Z AI (GLM-5.1 coding endpoint)
 - **Web Search Integration**: Real-time web search with multiple provider support (DuckDuckGo, Tavily, SerpAPI)
 - **Discord Bot**: Real-time chat integration with Discord
 - **Robust Error Handling**: Comprehensive error management and recovery
@@ -30,7 +30,7 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
 ## 📋 Requirements
 
 - Python 3.12+
-- ChromaDB for vector storage
+- HAM service access for production memory; ChromaDB only for controlled legacy migration
 - FastAPI for web server
 - Multiple LLM provider APIs
 

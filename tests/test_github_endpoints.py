@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 BASE_URL = "http://localhost:8000"
 
 
-async def test_endpoint(
+async def check_endpoint(
     session: aiohttp.ClientSession,
     method: str,
     endpoint: str,
@@ -66,7 +66,7 @@ async def test_endpoint(
         return {"status": "error", "error": str(e)}
 
 
-async def test_github_endpoints():
+async def check_github_endpoints():
     """Test all GitHub-related endpoints."""
 
     logger.info("🚀 Starting GitHub endpoints test...")
@@ -76,33 +76,33 @@ async def test_github_endpoints():
 
         # Test health check first
         logger.info("Testing health check...")
-        results["health"] = await test_endpoint(session, "GET", "/health")
+        results["health"] = await check_endpoint(session, "GET", "/health")
 
         # Test GitHub status
         logger.info("Testing GitHub status...")
-        results["github_status"] = await test_endpoint(session, "GET", "/github/status")
+        results["github_status"] = await check_endpoint(session, "GET", "/github/status")
 
         # Test repository info (might fail if not connected)
         logger.info("Testing repository info...")
-        results["repository_info"] = await test_endpoint(
+        results["repository_info"] = await check_endpoint(
             session, "GET", "/github/repository"
         )
 
         # Test pull requests list
         logger.info("Testing pull requests list...")
-        results["pull_requests"] = await test_endpoint(
+        results["pull_requests"] = await check_endpoint(
             session, "GET", "/github/pull-requests"
         )
 
         # Test recent commits
         logger.info("Testing recent commits...")
-        results["recent_commits"] = await test_endpoint(
+        results["recent_commits"] = await check_endpoint(
             session, "GET", "/github/commits?limit=5"
         )
 
         # Test improvement history
         logger.info("Testing improvement history...")
-        results["improvement_history"] = await test_endpoint(
+        results["improvement_history"] = await check_endpoint(
             session, "GET", "/github/improvement-history"
         )
 
@@ -113,7 +113,7 @@ async def test_github_endpoints():
             "evaluation_insights": ["Test improvement insight"],
             "knowledge_suggestions": ["Test knowledge suggestion"],
         }
-        results["code_improvements"] = await test_endpoint(
+        results["code_improvements"] = await check_endpoint(
             session, "POST", "/self-improve", improvement_request
         )
 
@@ -123,7 +123,7 @@ async def test_github_endpoints():
         ]["data"].get("github_connected", False):
 
             logger.info("GitHub is connected - testing demo PR creation...")
-            results["demo_pr"] = await test_endpoint(session, "POST", "/github/demo-pr")
+            results["demo_pr"] = await check_endpoint(session, "POST", "/github/demo-pr")
         else:
             logger.info("GitHub not connected - skipping demo PR test")
             results["demo_pr"] = {"status": "skipped", "reason": "GitHub not connected"}
@@ -197,7 +197,7 @@ async def main():
         return
 
     # Run tests
-    results = await test_github_endpoints()
+    results = await check_github_endpoints()
 
     # Print results
     print_results(results)

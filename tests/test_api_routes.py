@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 import evolving_agent.utils.api_server as api_server_module
 from evolving_agent.utils.api_server import app, get_agent
+from evolving_agent.core.memory import MemoryEntry
 
 
 @pytest.fixture(scope="module")
@@ -18,15 +19,11 @@ def client():
     mock_agent.interaction_count = 0
     mock_agent.last_evaluation_score = 0.9
     mock_agent.memory = MagicMock()
-    mock_agent.memory.collection = MagicMock()
-    mock_agent.memory.collection.count.return_value = 0
-    mock_agent.memory.collection.get.return_value = {
-        "documents": [],
-        "ids": [],
-        "metadatas": [],
-    }
+    mock_agent.memory.get_memory_stats = AsyncMock(return_value={"total_memories": 0})
+    mock_agent.memory.list_recent_memories = AsyncMock(return_value=[])
+    mock_agent.memory.search_memories = AsyncMock(return_value=[])
     mock_agent.knowledge_base = MagicMock()
-    mock_agent.knowledge_base.knowledge = []
+    mock_agent.knowledge_base.knowledge = {}
 
     @asynccontextmanager
     async def noop_lifespan(application):
@@ -40,7 +37,7 @@ def client():
     app.router.lifespan_context = noop_lifespan
     app.dependency_overrides[get_agent] = lambda: mock_agent
 
-    # API_KEY is intentionally unset so auth is disabled in all tests below.
+    # Auth is disabled by tests/conftest.py for compatibility tests below.
     # A separate TestApiKeyAuth class tests the enforcement path with a key configured.
     with patch.dict("os.environ", {"API_KEY": ""}, clear=False):
         with TestClient(app, raise_server_exceptions=False) as c:
@@ -221,31 +218,125 @@ class TestOpenAICompatEndpoints:
 class TestApiKeyAuth:
     """Tests verifying that API key enforcement works when API_KEY env var is set."""
 
-    def test_chat_blocked_without_key_when_api_key_configured(self):
-        with patch.dict("os.environ", {"API_KEY": "secret-key"}, clear=False):
-            with TestClient(app, raise_server_exceptions=False) as c:
-                response = c.post("/chat", json={"query": "Hello"})
+    def test_chat_blocked_without_key_when_api_key_configured(self, client):
+        with patch.dict(
+            "os.environ",
+            {"API_KEY": "secret-key", "API_AUTH_REQUIRED": "true"},
+            clear=False,
+        ):
+            response = client.post("/chat", json={"query": "Hello"})
             assert response.status_code == 401
 
-    def test_chat_allowed_with_correct_key(self):
-        mock_agent = app.dependency_overrides.get(get_agent, lambda: None)()
-        with patch.dict("os.environ", {"API_KEY": "secret-key"}, clear=False):
+    def test_chat_allowed_with_correct_key(self, client):
+        with patch.dict(
+            "os.environ",
+            {"API_KEY": "secret-key", "API_AUTH_REQUIRED": "true"},
+            clear=False,
+        ):
             with patch.object(
                 api_server_module.agent,
                 "run",
                 new_callable=AsyncMock,
                 return_value="Authenticated response",
             ):
-                with TestClient(app, raise_server_exceptions=False) as c:
-                    response = c.post(
-                        "/chat",
-                        json={"query": "Hello"},
-                        headers={"X-API-Key": "secret-key"},
-                    )
+                response = client.post(
+                    "/chat",
+                    json={"query": "Hello"},
+                    headers={"X-API-Key": "secret-key"},
+                )
             assert response.status_code == 200
 
-    def test_health_accessible_without_key_even_when_configured(self):
-        with patch.dict("os.environ", {"API_KEY": "secret-key"}, clear=False):
-            with TestClient(app, raise_server_exceptions=False) as c:
-                response = c.get("/health")
+    def test_bearer_project_credential_is_supported(self, client):
+        with patch.dict(
+            "os.environ",
+            {"PROJECT_API_KEY": "project-key", "API_AUTH_REQUIRED": "true"},
+            clear=False,
+        ):
+            response = client.get(
+                "/status", headers={"Authorization": "Bearer project-key"}
+            )
+        assert response.status_code == 200
+
+    def test_wrong_project_credential_is_rejected(self, client):
+        with patch.dict(
+            "os.environ",
+            {"PROJECT_API_KEY": "project-key", "API_AUTH_REQUIRED": "true"},
+            clear=False,
+        ):
+            response = client.get(
+                "/status", headers={"X-API-Key": "different-key"}
+            )
+        assert response.status_code == 401
+
+    def test_health_accessible_without_key_even_when_configured(self, client):
+        with patch.dict(
+            "os.environ",
+            {"API_KEY": "secret-key", "API_AUTH_REQUIRED": "true"},
+            clear=False,
+        ):
+            response = client.get("/health")
             assert response.status_code == 200
+
+    def test_private_memory_blocked_without_key(self, client):
+        with patch.dict(
+            "os.environ",
+            {"API_KEY": "secret-key", "API_AUTH_REQUIRED": "true"},
+            clear=False,
+        ):
+            response = client.get("/memories")
+            assert response.status_code == 401
+
+    def test_public_memory_route_remains_public_and_filters_private_rows(self, client):
+        memory = api_server_module.agent.memory
+        memory.list_recent_memories.return_value = [
+            MemoryEntry("published", metadata={"audience": "public"}),
+            MemoryEntry(
+                "TELLUS_TOKEN=sk-" + "redacted-test-value-12345",
+                metadata={"audience": "public"},
+            ),
+            MemoryEntry("private", metadata={"audience": "project"}),
+            MemoryEntry("legacy-default-private", metadata={}),
+        ]
+        with patch.dict(
+            "os.environ",
+            {"API_KEY": "secret-key", "API_AUTH_REQUIRED": "true"},
+            clear=False,
+        ):
+            response = client.get("/public/memories")
+            assert response.status_code == 200
+            assert [row["content"] for row in response.json()] == ["published"]
+            memory.search_memories.assert_not_awaited()
+        memory.list_recent_memories.return_value = []
+
+    def test_missing_server_key_fails_closed(self, client):
+        with patch.dict(
+            "os.environ",
+            {"API_KEY": "", "PROJECT_API_KEY": "", "API_AUTH_REQUIRED": "true"},
+            clear=False,
+        ):
+            response = client.get("/memories")
+            assert response.status_code == 503
+
+    @pytest.mark.parametrize("path", ["/knowledge", "/github/status", "/analysis-history"])
+    def test_other_data_routes_are_private_by_default(self, client, path):
+        with patch.dict(
+            "os.environ",
+            {"API_KEY": "secret-key", "API_AUTH_REQUIRED": "true"},
+            clear=False,
+        ):
+            response = client.get(path)
+        assert response.status_code == 401
+
+
+def test_service_credentials_must_be_distinct():
+    with patch.dict(
+        "os.environ",
+        {
+            "HAM_API_KEY": "reused-service-key",
+            "PROJECT_API_KEY": "reused-service-key",
+            "GITHUB_TOKEN": "separate-github-key",
+        },
+        clear=False,
+    ):
+        with pytest.raises(RuntimeError, match="must be distinct"):
+            api_server_module._validate_separate_service_credentials()

@@ -8,8 +8,9 @@ services:
       - "${PORT:-8000}"
     environment:
       - PORT=${PORT:-8000}
-      - CORS_ORIGINS=${CORS_ORIGINS:-*}
-      - API_KEY=${API_KEY}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+      - API_AUTH_REQUIRED=${API_AUTH_REQUIRED:-true}
+      - PROJECT_API_KEY=${PROJECT_API_KEY}
       # LLM Provider Configuration
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-http://monumentals-mac-studio.local:12345}
@@ -17,9 +18,11 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - ZAI_API_KEY=${ZAI_API_KEY}
-      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-openai}
-      - DEFAULT_MODEL=${DEFAULT_MODEL:-mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4}
-      - EVALUATION_MODEL=${EVALUATION_MODEL:-mlx-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-mxfp4}
+      - ZAI_BASE_URL=${ZAI_BASE_URL:-https://api.z.ai/api/coding/paas/v4}
+      - ZAI_MODEL=${ZAI_MODEL:-glm-5.1}
+      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-zai}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-glm-5.1}
+      - EVALUATION_MODEL=${EVALUATION_MODEL:-glm-5.1}
       - TEMPERATURE=${TEMPERATURE:-0.7}
       - MAX_TOKENS=${MAX_TOKENS:-2048}
       - ENABLE_ENSEMBLE_JUDGE=${ENABLE_ENSEMBLE_JUDGE:-false}
@@ -29,6 +32,7 @@ services:
       - MAX_TOOL_ITERATIONS=${MAX_TOOL_ITERATIONS:-15}
       - TOOL_SANDBOX_DIR=/app
       - TPMJS_API_KEY=${TPMJS_API_KEY}
+      - TPMJS_ENABLED=${TPMJS_ENABLED:-false}
 
       # E2B Sandbox (remote code execution)
       - E2B_API_KEY=${E2B_API_KEY}
@@ -36,7 +40,15 @@ services:
       # Agent Scratchpad
       - SCRATCHPAD_DIR=/app/data/scratchpad
 
-      # Memory Configuration (ChromaDB)
+      # HAM is authoritative. Chroma remains mounted read-only for migration/rollback.
+      - MEMORY_BACKEND=${MEMORY_BACKEND:-ham}
+      - HAM_API_URL=${HAM_API_URL:-https://ham.flobots.xyz}
+      - HAM_API_KEY=${HAM_API_KEY}
+      - HAM_PROJECT=${HAM_PROJECT:-evolving-ai}
+      - HAM_SCOPE=${HAM_SCOPE:-project:evolving-ai}
+      - HAM_REPO=${HAM_REPO:-DavinciDreams/evolving-ai}
+      - HAM_EXPECTED_AGENT_ID=${HAM_EXPECTED_AGENT_ID:-katbot-evolving-ai}
+      - LEGACY_MEMORY_READ_ONLY=${LEGACY_MEMORY_READ_ONLY:-true}
       - MEMORY_PERSIST_DIRECTORY=/app/data/memory_db
       - PERSISTENT_DATA_DIR=/app/data/persistent_data
       - MEMORY_COLLECTION_NAME=${MEMORY_COLLECTION_NAME:-agent_memory}
@@ -68,6 +80,8 @@ services:
       - DISCORD_STATUS_CHANNEL_ID=${DISCORD_STATUS_CHANNEL_ID}
       - DISCORD_MENTION_REQUIRED=${DISCORD_MENTION_REQUIRED:-false}
       - DISCORD_MAX_MESSAGE_LENGTH=${DISCORD_MAX_MESSAGE_LENGTH:-2000}
+      - DISCORD_ATTACHMENT_THRESHOLD=${DISCORD_ATTACHMENT_THRESHOLD:-12000}
+      - DISCORD_MAX_ATTACHMENT_BYTES=${DISCORD_MAX_ATTACHMENT_BYTES:-7500000}
       - DISCORD_TYPING_INDICATOR=${DISCORD_TYPING_INDICATOR:-true}
       - DISCORD_EMBED_RESPONSES=${DISCORD_EMBED_RESPONSES:-true}
       - DISCORD_COMMAND_PREFIX=${DISCORD_COMMAND_PREFIX}
@@ -98,6 +112,7 @@ services:
       - type: volume
         source: memory-data
         target: /app/data/memory_db
+        read_only: true
       - type: volume
         source: knowledge-data
         target: /app/data/knowledge_base

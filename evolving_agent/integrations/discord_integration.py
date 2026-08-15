@@ -1,11 +1,13 @@
 """Core Discord integration for self-improving AI agent."""
 
 import asyncio
+import io
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
+
 import discord
 import httpx
-from typing import Optional, Dict, Any, List, Callable
 from loguru import logger
-from datetime import datetime
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .discord_formatter import DiscordFormatter
@@ -69,6 +71,15 @@ class DiscordIntegration:
         self.use_embeds = config.discord_embed_responses
         self.show_typing = config.discord_typing_indicator
         self.status_updates_enabled = config.discord_status_updates_enabled
+        self.max_message_length = min(
+            max(int(config.discord_max_message_length), 1),
+            DiscordFormatter.MAX_MESSAGE_LENGTH,
+        )
+        self.attachment_threshold = max(
+            int(config.discord_attachment_threshold),
+            DiscordFormatter.MAX_EMBED_DESCRIPTION + 1,
+        )
+        self.max_attachment_bytes = max(int(config.discord_max_attachment_bytes), 1)
 
         # API server configuration for GitHub integration
         self.api_server_url = getattr(config, 'api_server_url', 'http://localhost:8000')
@@ -324,26 +335,87 @@ class DiscordIntegration:
             evaluation_score: Optional evaluation score
             processing_time: Optional processing time in seconds
         """
-        try:
-            # Format response
-            messages = self.formatter.format_agent_response(
-                response=response,
-                query_id=query_id,
-                evaluation_score=evaluation_score,
-                processing_time=processing_time,
-                use_embed=self.use_embeds
-            )
+        response_bytes = response.encode("utf-8")
+        if (
+            len(response) >= self.attachment_threshold
+            and len(response_bytes) <= self.max_attachment_bytes
+        ):
+            try:
+                await self._send_attachment_with_retry(
+                    channel,
+                    response_bytes,
+                    "The complete response is attached because it exceeds Discord's message limits.",
+                )
+                return
+            except Exception as exc:
+                logger.warning(
+                    f"Discord attachment delivery failed; falling back to chunks: {type(exc).__name__}"
+                )
 
-            # Send all message parts
+        messages = self.formatter.format_agent_response(
+            response=response,
+            query_id=query_id,
+            evaluation_score=evaluation_score,
+            processing_time=processing_time,
+            use_embed=self.use_embeds,
+            max_message_length=self.max_message_length,
+        )
+
+        sent_count = 0
+        try:
             for msg in messages:
                 if isinstance(msg, discord.Embed):
                     await self._send_with_retry(channel, embed=msg)
                 else:
                     await self._send_with_retry(channel, content=msg)
+                sent_count += 1
+        except Exception as exc:
+            logger.error(
+                f"Discord chunk delivery stopped after {sent_count}/{len(messages)} parts: "
+                f"{type(exc).__name__}"
+            )
+            if len(response_bytes) <= self.max_attachment_bytes:
+                try:
+                    await self._send_attachment_with_retry(
+                        channel,
+                        response_bytes,
+                        f"Chunk delivery stopped after {sent_count}/{len(messages)} parts; "
+                        "the complete response is attached.",
+                    )
+                    return
+                except Exception as attachment_exc:
+                    raise RuntimeError(
+                        f"Discord delivery incomplete: {sent_count}/{len(messages)} parts "
+                        "sent and attachment fallback failed"
+                    ) from attachment_exc
+            raise RuntimeError(
+                f"Discord delivery failed after {sent_count}/{len(messages)} parts and "
+                "the response exceeds the configured attachment limit"
+            ) from exc
 
-        except Exception as e:
-            logger.error(f"Failed to send response: {e}", exc_info=True)
-            raise
+    async def _send_attachment_with_retry(
+        self,
+        channel: discord.TextChannel,
+        response_bytes: bytes,
+        notice: str,
+    ) -> discord.Message:
+        """Upload a fresh file object on each attempt so retries remain valid."""
+        last_error: Optional[Exception] = None
+        for attempt in range(1, 4):
+            buffer = io.BytesIO(response_bytes)
+            attachment = discord.File(buffer, filename="katbot-response.txt")
+            try:
+                return await channel.send(content=notice, file=attachment)
+            except discord.HTTPException as exc:
+                last_error = exc
+                logger.warning(
+                    f"Discord attachment attempt {attempt}/3 failed: {type(exc).__name__}"
+                )
+                if attempt < 3:
+                    await asyncio.sleep(2 ** (attempt - 1))
+            finally:
+                attachment.close()
+        raise RuntimeError("Discord attachment failed after 3 attempts") from last_error
 
     async def handle_status_update(self, event_type: str, data: Dict[str, Any]):
         """Handle status update from agent.
