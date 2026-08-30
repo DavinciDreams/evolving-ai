@@ -44,10 +44,36 @@ memories never enter the benchmark runner as executable instructions. The caller
 must redact rationale and rollback reasons before submitting them.
 
 The root runtime must include `lab.active_guidance` in its actual response path
-for promotion to have an effect. It must use the same fixed base prompt/model
-configuration during baseline/candidate evaluation. A dream may **propose** a
+for promotion to have an effect. Baseline and candidate use the same fixed base
+prompt/model configuration during evaluation. A dream may **propose** a
 strategy from this schema; it cannot define benchmark answers, modify the grader,
 assert that it passed, or authorize its own promotion.
+
+## Harness identity and limits
+
+The runtime runner shares `core.identity.BASE_STEWARD_PROMPT` (identity and safety)
+with chat, followed by a fixed experiment boundary and the candidate's bounded
+preferences. This is intentionally a **narrow text-guidance trial**, not a replica
+of production chat: there is no retrieval, conversation history, tool execution,
+connector state, or external action. Passing cannot establish retrieval quality,
+tool safety, multi-turn behavior, or end-to-end production equivalence.
+
+An immutable `HarnessDescriptor` records the provider label, SHA-256 digests of
+selected model/endpoint identifiers, adapter identity and fixed prompts, the
+no-tools/no-retrieval boundary, redaction transform version, temperature 0 and
+512-token output cap. Raw model/endpoint configuration and credentials are not
+stored. The descriptor and its digest are included in input fingerprints,
+evaluation reports and active-state artifacts. Configuration drift is rejected
+before another runtime provider call. A changed model, endpoint or base prompt
+requires fresh evaluation; restore rejects mismatched or legacy un-fingerprinted
+states instead of silently treating their evidence as current.
+
+The descriptor is trusted-adapter provenance, not a sandbox attestation. Generic
+injected runners default to `unspecified` metadata and must provide their own
+accurate descriptor; this module cannot introspect arbitrary callable behavior.
+Provider-side model aliases may change behind the same identifier, temperature
+zero does not guarantee determinism, and hashing does not establish model weights
+or service version. Pin versioned models and curate repeat trials when available.
 
 ## Evidence and gates
 

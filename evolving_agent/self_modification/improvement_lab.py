@@ -155,6 +155,68 @@ class ModelOutput:
 
 
 @dataclass(frozen=True)
+class HarnessDescriptor:
+    """Bounded provenance supplied by a trusted adapter, not model testimony.
+
+    Defaults deliberately make no claims about an arbitrary injected runner.
+    Model and endpoint identifiers are hashes, never raw configuration strings.
+    """
+
+    provider: str = "unspecified"
+    model_sha256: str = "unspecified"
+    endpoint_sha256: str = "unspecified"
+    adapter_sha256: str = "unspecified"
+    base_prompt_sha256: str = "unspecified"
+    experiment_prompt_sha256: str = "unspecified"
+    tooling: str = "unspecified"
+    context: str = "unspecified"
+    input_transform: str = "unspecified"
+    temperature: float | None = None
+    max_output_tokens: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.provider not in {
+            "unspecified",
+            "synthetic",
+            "anthropic",
+            "openai",
+            "openrouter",
+            "zai",
+        }:
+            raise ValueError("harness provider must be a known label")
+        for name in (
+            "model_sha256",
+            "endpoint_sha256",
+            "adapter_sha256",
+            "base_prompt_sha256",
+            "experiment_prompt_sha256",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, str) or (
+                value != "unspecified" and not re.fullmatch(r"[a-f0-9]{64}", value)
+            ):
+                raise ValueError("harness identifiers must be SHA-256 digests")
+        for name, allowed in (
+            ("tooling", {"unspecified", "none"}),
+            ("context", {"unspecified", "no_retrieval"}),
+            ("input_transform", {"unspecified", "secret_redaction_v1"}),
+        ):
+            if getattr(self, name) not in allowed:
+                raise ValueError("unsupported harness boundary")
+        if self.temperature is not None and (
+            type(self.temperature) not in (int, float)
+            or not math.isfinite(self.temperature)
+            or not 0 <= self.temperature <= 2
+        ):
+            raise ValueError("harness temperature must be finite in 0..2")
+        if self.max_output_tokens is not None and (
+            type(self.max_output_tokens) is not int
+            or not 1 <= self.max_output_tokens <= 4000
+        ):
+            raise ValueError("harness output limit must be in 1..4000")
+
+
+@dataclass(frozen=True)
 class ImprovementPolicy:
     max_cases: int = 24
     max_calls: int = 48
@@ -229,11 +291,19 @@ class ImprovementLab:
     """
 
     def __init__(
-        self, memory: Any, runner: Runner, policy: ImprovementPolicy | None = None
+        self,
+        memory: Any,
+        runner: Runner,
+        policy: ImprovementPolicy | None = None,
+        *,
+        harness: HarnessDescriptor | None = None,
     ):
+        if harness is not None and not isinstance(harness, HarnessDescriptor):
+            raise ValueError("harness must be a HarnessDescriptor")
         self.memory = memory
         self.runner = runner
         self.policy = policy or ImprovementPolicy()
+        self._harness = harness or HarnessDescriptor()
         self._active = GuidanceCandidate("baseline", GuidanceStrategy())
         self._revision = 0
         self._history: list[dict[str, Any]] = []
@@ -243,6 +313,10 @@ class ImprovementLab:
         self._busy = False
         self._unfinished: set[asyncio.Task] = set()
         self._state_memory_id: str | None = None
+
+    @property
+    def harness(self) -> HarnessDescriptor:
+        return self._harness
 
     @property
     def active_guidance(self) -> str:
@@ -263,6 +337,8 @@ class ImprovementLab:
             "rollback_depth": len(self._history),
             "distributed_lock": False,
             "adaptation_scope": "bounded_response_guidance",
+            "harness": asdict(self.harness),
+            "harness_digest": _digest(asdict(self.harness)),
             "unresolved_transition": self._pending_transition_digest is not None,
         }
 
@@ -270,6 +346,12 @@ class ImprovementLab:
         if self._busy or any(not task.done() for task in self._unfinished):
             raise ImprovementBusy("improvement operation already running")
         self._busy = True
+
+    def get_report(self, run_id: str) -> dict[str, Any] | None:
+        """Read-only bounded report; expired runs remain available by HAM ID."""
+        _identifier(run_id, "run_id")
+        report = self._reports.get(run_id)
+        return copy.deepcopy(report) if report is not None else None
 
     def _observe(self, task: asyncio.Task) -> None:
         self._unfinished.discard(task)
@@ -354,7 +436,11 @@ class ImprovementLab:
         self._enter()
         try:
             fingerprint = _digest(
-                {"candidate": asdict(candidate), "cases": [asdict(c) for c in cases]}
+                {
+                    "candidate": asdict(candidate),
+                    "cases": [asdict(c) for c in cases],
+                    "harness": asdict(self.harness),
+                }
             )
             prior = self._reports.get(run_id)
             if prior:
@@ -372,6 +458,8 @@ class ImprovementLab:
                 "baseline_revision": self._revision,
                 "suite_digest": _digest([asdict(c) for c in cases]),
                 "policy": asdict(self.policy),
+                "harness": asdict(self.harness),
+                "harness_digest": _digest(asdict(self.harness)),
                 "grader": "exact_match_v1",
                 "evidence_kind": "measured_fixture_outcomes",
                 "generalization_claim": "none; curated finite suite only",
@@ -528,6 +616,8 @@ class ImprovementLab:
                 raise ImprovementError("run is not eligible for promotion")
             if report["baseline_revision"] != self._revision:
                 raise ImprovementError("baseline changed; evaluate a fresh run")
+            if report["harness_digest"] != _digest(asdict(self.harness)):
+                raise ImprovementError("harness changed; evaluate a fresh run")
             await self._persist_report(report)
             active = self._candidate(report["candidate"])
             history = (self._history + [asdict(self._active)])[
@@ -581,6 +671,8 @@ class ImprovementLab:
             "active": asdict(active),
             "history": history,
             "evidence": evidence,
+            "harness": asdict(self.harness),
+            "harness_digest": _digest(asdict(self.harness)),
         }
         transition_digest = _digest(payload)
         if self._pending_transition_digest not in {None, transition_digest}:
@@ -632,6 +724,11 @@ class ImprovementLab:
                     or payload["kind"] != "state"
                 ):
                     raise ValueError("schema mismatch")
+                stored_harness = HarnessDescriptor(**payload["harness"])
+                if stored_harness != self.harness or payload[
+                    "harness_digest"
+                ] != _digest(asdict(self.harness)):
+                    raise ValueError("harness mismatch; fresh measurement required")
                 revision = payload["revision"]
                 if (
                     type(revision) is not int
@@ -700,7 +797,13 @@ async def _demo() -> None:
         async def add_memory(self, entry: _ArtifactEntry) -> str:
             return entry.id
 
-    lab = ImprovementLab(EphemeralMemory(), demo_runner)
+    lab = ImprovementLab(
+        EphemeralMemory(),
+        demo_runner,
+        harness=HarnessDescriptor(
+            provider="synthetic", tooling="none", context="no_retrieval"
+        ),
+    )
     report = await lab.evaluate(
         GuidanceCandidate("json-response", GuidanceStrategy(response_format="json")),
         demo_suite(),

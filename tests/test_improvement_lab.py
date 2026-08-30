@@ -3,6 +3,7 @@
 import asyncio
 import copy
 import json
+from dataclasses import FrozenInstanceError, asdict, replace
 
 import pytest
 
@@ -10,6 +11,7 @@ from evolving_agent.self_modification.improvement_lab import (
     BenchmarkCase,
     GuidanceCandidate,
     GuidanceStrategy,
+    HarnessDescriptor,
     ImprovementBusy,
     ImprovementError,
     ImprovementLab,
@@ -584,3 +586,95 @@ async def test_maximum_run_identifier_fits_ham_idempotency_and_cue_limits():
     entry = memory.entries[report["memory_id"]]
     assert len(f"evolving-ai:{entry.id}") <= 200
     assert len(f"source memory {entry.id}") <= 200
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"provider": "api_key=never-store"},
+        {"model_sha256": "raw-model"},
+        {"endpoint_sha256": "https://private.example"},
+        {"tooling": "shell"},
+        {"context": "live_memory"},
+        {"temperature": float("nan")},
+        {"temperature": True},
+        {"max_output_tokens": 0},
+        {"max_output_tokens": 4001},
+        {"input_transform": "arbitrary-code"},
+    ],
+)
+def test_harness_schema_rejects_raw_configuration_and_unbounded_claims(overrides):
+    with pytest.raises(ValueError):
+        HarnessDescriptor(**overrides)
+
+
+def test_harness_is_immutable_and_default_makes_no_runner_capability_claim():
+    lab = ImprovementLab(Memory(), demo_runner)
+    assert lab.harness.provider == "unspecified"
+    assert lab.harness.tooling == "unspecified"
+    with pytest.raises(FrozenInstanceError):
+        lab.harness.provider = "synthetic"
+    with pytest.raises(AttributeError):
+        lab.harness = HarnessDescriptor(provider="synthetic")
+    with pytest.raises(ValueError):
+        ImprovementLab(Memory(), demo_runner, harness={"provider": "synthetic"})
+
+
+@pytest.mark.asyncio
+async def test_harness_is_in_report_input_fingerprint_and_durable_state():
+    memory = Memory()
+    harness = HarnessDescriptor(
+        provider="synthetic",
+        model_sha256="a" * 64,
+        tooling="none",
+        context="no_retrieval",
+    )
+    first = ImprovementLab(memory, demo_runner, harness=harness)
+    report = await first.evaluate(candidate(), demo_suite(), "fingerprinted")
+    assert report["harness"] == asdict(harness)
+    assert report["harness_digest"] == first.status()["harness_digest"]
+    changed = ImprovementLab(
+        Memory(), demo_runner, harness=replace(harness, model_sha256="b" * 64)
+    )
+    other = await changed.evaluate(candidate(), demo_suite(), "fingerprinted")
+    assert report["input_digest"] != other["input_digest"]
+    assert report["harness_digest"] != other["harness_digest"]
+    state = await first.promote("fingerprinted", 0)
+    persisted = json.loads(memory.entries[state["state_memory_id"]].content)
+    assert persisted["harness"] == report["harness"]
+    restored = ImprovementLab(memory, demo_runner, harness=harness)
+    await restored.restore(state["state_memory_id"])
+    assert restored.revision == 1
+    changed.memory = memory
+    with pytest.raises(ImprovementError, match="state artifact"):
+        await changed.restore(state["state_memory_id"])
+    assert changed.revision == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_state_without_harness_cannot_silently_restore():
+    memory = Memory()
+    lab = ImprovementLab(memory, demo_runner)
+    await lab.evaluate(candidate(), demo_suite(), "legacy-state")
+    state = await lab.promote("legacy-state", 0)
+    entry = memory.entries[state["state_memory_id"]]
+    payload = json.loads(entry.content)
+    del payload["harness"]
+    entry.content = json.dumps(payload)
+    with pytest.raises(ImprovementError, match="state artifact"):
+        await ImprovementLab(memory, demo_runner).restore(state["state_memory_id"])
+
+
+@pytest.mark.asyncio
+async def test_report_reader_returns_copy_and_never_writes():
+    memory = Memory()
+    lab = ImprovementLab(memory, demo_runner)
+    assert lab.get_report("missing") is None
+    await lab.evaluate(candidate(), demo_suite(), "read-report")
+    writes = memory.calls
+    report = lab.get_report("read-report")
+    report["harness"]["tooling"] = "pretend-tools"
+    report["eligible"] = False
+    assert lab.get_report("read-report")["eligible"]
+    assert lab.get_report("read-report")["harness"]["tooling"] == "unspecified"
+    assert memory.calls == writes
