@@ -6,6 +6,7 @@ import { api } from '../services/api';
 import { getGitHubStatus } from '../services/githubService';
 import { getDiscordStatus } from '../services/discordService';
 import StewardPanel from '../components/status/StewardPanel';
+import LearningLabPanel from '../components/status/LearningLabPanel';
 
 const StatusPage = () => {
   const { data: agentStatus, isLoading: loadingStatus, error: statusError } = useQuery({
@@ -77,6 +78,7 @@ const StatusPage = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <StewardPanel />
+        <LearningLabPanel />
         {/* Agent Status */}
         <Card title="Agent Status">
           {loadingStatus && !agentStatus ? (

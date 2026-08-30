@@ -257,11 +257,11 @@ class SelfImprovingAgent:
             except Exception as e:
                 self.logger.warning(f"Could not load learned lessons: {e}")
 
-            self.initialized = True
             from .steward import StewardControl
             from ..integrations.bounded_llm import BoundedTextProvider
             self.steward = StewardControl(self, BoundedTextProvider(config))
             await self.steward.initialize()
+            self.initialized = True
             self.logger.info("Agent initialization completed successfully")
 
         except Exception as e:
@@ -464,13 +464,19 @@ class SelfImprovingAgent:
             self.runtime = AgentRuntime(timeout=bounded_seconds("CHAT_TIMEOUT_SECONDS", 60))
         if not isinstance(query, str) or not query.strip() or len(query) > 32000:
             raise ValueError("Query must contain 1 to 32000 characters")
+        query, _ = redact_text(query)
+        context_hints, _ = redact_value(context_hints)
+        conversation_history, _ = redact_value(conversation_history)
         if getattr(self, "dream_service", None):
             self.dream_service.note_activity()
             if self.dream_service.status()["running"]:
                 from .runtime import RuntimeBusyError
                 raise RuntimeBusyError("Dream cancellation is draining; retry shortly")
         steward = getattr(self, "steward", None)
-        if steward and (steward.busy or (steward.lab and steward.lab.status()["busy"])):
+        if steward and steward.learning:
+            steward.learning.note_activity()
+        if steward and (steward.busy or (steward.lab and steward.lab.status()["busy"])
+                        or (steward.learning and steward.learning.status()["running"])):
             from .runtime import RuntimeBusyError
             raise RuntimeBusyError("An improvement operation is running")
 
@@ -519,7 +525,7 @@ class SelfImprovingAgent:
 
             # Check if the user is requesting self-improvement
             if config.enable_self_modification and self._is_self_edit_request(query):
-                response = await self._handle_self_edit_request(query)
+                response = redact_text(await self._handle_self_edit_request(query))[0]
                 self.last_evaluation_score = None  # no evaluation for self-edit
                 # Still store the interaction for learning. This path returns
                 # before normal response generation, so it must persist both the
@@ -537,12 +543,13 @@ class SelfImprovingAgent:
                         },
                         conversation_id=conversation_id,
                     )
-                    await self._store_interaction(
+                    stored = await self._store_interaction(
                         query,
                         response,
                         {},
                         EvaluationResult.skipped("self_edit_interaction"),
                     )
+                    self.last_storage_status["memory_stored"] = stored is True
                 except Exception as e:
                     self.logger.error(f"Failed to store self-edit interaction: {e}")
                 return response
@@ -551,6 +558,7 @@ class SelfImprovingAgent:
             context = await self.context_manager.get_relevant_context(
                 query=query, context_types=context_hints
             )
+            context, _ = redact_value(context)
 
             # Step 1b: Retrieve conversation history for multi-turn context
             # Use pre-built history if provided, otherwise fetch from database
@@ -564,10 +572,14 @@ class SelfImprovingAgent:
                     except Exception as e:
                         self.logger.warning(f"Failed to retrieve conversation history: {e}")
 
+            conversation_history, _ = redact_value(conversation_history)
             # Step 2: Generate initial response
             initial_response = await self._generate_response(
                 query, context, conversation_history=conversation_history
             )
+            if not isinstance(initial_response, str) or not initial_response.strip():
+                raise RuntimeError("Provider returned no usable response")
+            initial_response, _ = redact_text(initial_response)
 
             # Step 3: Evaluate the response (if enabled)
             if config.enable_evaluation:
@@ -592,15 +604,15 @@ class SelfImprovingAgent:
                         f"generating {best_of_n_count - 1} additional candidate(s)"
                     )
                     try:
-                        alt_responses = await asyncio.gather(*[
-                            self._generate_response(query, context, conversation_history=conversation_history)
-                            for _ in range(best_of_n_count - 1)
-                        ])
-                        alt_evals = await asyncio.gather(*[
-                            self._evaluate_bounded(query=query, output=alt, context=context)
-                            for alt in alt_responses
-                        ])
-                        all_candidates = [(initial_response, evaluation)] + list(zip(alt_responses, alt_evals))
+                        # Alternative wording cannot re-run external tool effects.
+                        # Serial drafts cannot leave orphan sibling generations.
+                        all_candidates = [(initial_response, evaluation)]
+                        for _ in range(best_of_n_count - 1):
+                            alt = await self._generate_text_candidate(query, context, conversation_history)
+                            alt, _ = redact_text(alt)
+                            alt_eval = await self._evaluate_bounded(query=query, output=alt, context=context)
+                            if alt.strip() and alt_eval.measured_score is not None:
+                                all_candidates.append((alt, alt_eval))
                         best_response, best_evaluation = max(
                             all_candidates, key=lambda x: x[1].overall_score
                         )
@@ -623,9 +635,9 @@ class SelfImprovingAgent:
                 if final_response != best_response and config.enable_evaluation:
                     try:
                         await self.data_manager.save_preference_pair(
-                            query=query,
-                            original_response=best_response,
-                            improved_response=final_response,
+                            query=redact_text(query)[0],
+                            original_response=redact_text(best_response)[0],
+                            improved_response=redact_text(final_response)[0],
                             original_score=best_evaluation.overall_score,
                             improved_score=final_evaluation.overall_score,
                         )
@@ -683,12 +695,23 @@ class SelfImprovingAgent:
 
     async def _evaluate_bounded(self, **kwargs) -> EvaluationResult:
         try:
-            async with asyncio.timeout(bounded_seconds("EVALUATION_TIMEOUT_SECONDS", 8, 30)):
+            budget = bounded_seconds("EVALUATION_TIMEOUT_SECONDS", 8, 30)
+            if hasattr(self, "runtime"):
+                return await self.runtime._execute(lambda: self.evaluator.evaluate_output(**kwargs), timeout=budget)
+            async with asyncio.timeout(budget):
                 return await self.evaluator.evaluate_output(**kwargs)
         except TimeoutError:
             return EvaluationResult.skipped("evaluation_timeout")
         except Exception:
             return EvaluationResult.skipped("evaluation_unavailable")
+
+    async def _generate_text_candidate(self, query, context, conversation_history=None):
+        from ..integrations.bounded_llm import BoundedTextProvider
+        return await BoundedTextProvider(config).generate_response(
+            prompt=self._build_fallback_prompt(query, context, conversation_history),
+            system_prompt=self._build_system_prompt(), max_tokens=min(config.max_tokens, 4000),
+            temperature=config.temperature, timeout=10,
+        )
 
     _SELF_EDIT_KEYWORDS = [
         "improve yourself", "self-edit", "self edit", "self-improve",
@@ -713,42 +736,13 @@ class SelfImprovingAgent:
     # _perform_web_search removed — now handled by search_web tool
 
     async def _handle_self_edit_request(self, query: str) -> str:
-        """Handle a user request to self-edit by triggering the self-improvement pipeline."""
-        if not self.github_modifier:
-            return (
-                "Self-improvement is not available right now. "
-                "The GitHub integration is not configured. "
-                "Please ensure GITHUB_TOKEN and GITHUB_REPO are set."
-            )
-
-        self.logger.info("User requested self-improvement via chat — triggering pipeline")
-        result = await self.github_modifier.trigger_self_improvement()
-
-        status = result.get("status", "unknown")
-        if status == "already_running":
-            return "A self-improvement cycle is already running. Please wait for it to complete."
-
-        if status == "error":
-            return f"Self-improvement encountered an error: {result.get('message', 'Unknown error')}"
-
-        # Build a user-friendly summary
-        parts = ["I've completed a self-improvement analysis of my codebase."]
-        parts.append(f"- **Improvements generated**: {result.get('improvements_generated', 0)}")
-        parts.append(f"- **Improvements validated**: {result.get('improvements_validated', 0)}")
-        parts.append(f"- **Improvement potential**: {result.get('improvement_potential', 0):.2f}")
-
-        if result.get("pr_created"):
-            pr_url = result.get("pr_url", "")
-            pr_num = result.get("pr_number", "")
-            parts.append(f"\nI've created **Pull Request #{pr_num}** with the validated code changes.")
-            if pr_url:
-                parts.append(f"You can review it here: {pr_url}")
-        elif result.get("issue_created"):
-            parts.append(f"\nI've created **Issue #{result.get('issue_number')}** with improvement suggestions.")
-        else:
-            parts.append("\nNo significant code changes were identified this cycle.")
-
-        return "\n".join(parts)
+        """Legacy code evolution cannot bypass measured stewardship or repo review."""
+        return (
+            "Automatic code self-modification is retired in this steward runtime. "
+            "Use the measured learning lab to evaluate response strategies against "
+            "trusted fixtures, review the evidence, and activate or roll back guidance. "
+            "Repository changes require a separate reviewed development workflow."
+        )
 
     # _handle_self_analysis_request removed — now handled by read_file/list_files tools
 
@@ -805,12 +799,7 @@ class SelfImprovingAgent:
 
     def _build_system_prompt(self) -> str:
         """Build the system prompt for the AI SDK."""
-        self_mod_info = ""
-        if config.enable_self_modification and self.github_modifier:
-            self_mod_info = """
-You have active self-modification capabilities.
-When users ask you to improve yourself, edit your code, or self-modify,
-the system will automatically trigger your self-improvement pipeline."""
+        self_mod_info = "\nCode self-modification is disabled; use measured response-guidance experiments."
 
         optional_tool_prompt = ""
         if self.tpmjs_client is not None:
@@ -853,13 +842,11 @@ Interaction count: {self.interaction_count}
 Use the provided context to give a comprehensive, accurate, and helpful response.
 Be specific, actionable, and consider lessons learned from previous interactions."""
 
-        # Prepend Reflexion lessons when available
-        if self.learned_lessons:
-            lessons_text = "\n".join(f"- {lesson}" for lesson in self.learned_lessons[:5])
-            system_prompt = f"Previously learned lessons (apply these):\n{lessons_text}\n\n{system_prompt}"
+        # Legacy free-form Reflexion lessons are evidence, not trusted policy.
+        # Only the lab's closed vocabulary may become active instructions.
 
         lab = getattr(self, "improvement_lab", None)
-        if lab and lab.active_guidance:
+        if lab and lab.revision > 0 and lab.active_guidance:
             system_prompt += "\n\nMeasured, operator-activated response strategy:\n" + lab.active_guidance
 
         return system_prompt
@@ -1095,10 +1082,13 @@ Be specific, actionable, and consider lessons learned from previous interactions
                     conversation_id=conversation_id,
                 ),
                 self._store_interaction(query, final_response, context, evaluation),
+                return_exceptions=True,
             )
 
             # Save detailed evaluation (needs interaction_id from above)
             self.last_storage_status["memory_stored"] = memory_stored is True
+            if isinstance(interaction_id, BaseException):
+                raise RuntimeError("Conversation persistence failed") from None
             if evaluation.measured_score is not None:
                 await self.data_manager.save_evaluation(
                     interaction_id=interaction_id,
@@ -1107,6 +1097,7 @@ Be specific, actionable, and consider lessons learned from previous interactions
                     feedback=redact_text(evaluation.feedback)[0],
                     improvement_suggestions=redact_value(evaluation.improvement_suggestions)[0],
                     confidence=evaluation.confidence,
+                    evaluation_kind="llm_judgment_not_independent_benchmark",
                 )
 
             if run_maintenance:
@@ -1151,20 +1142,11 @@ Be specific, actionable, and consider lessons learned from previous interactions
                     )
 
             # Reflexion — extract lessons periodically
-            reflexion_interval = getattr(config, "reflexion_interval", 50)
-            if (
-                config.enable_evaluation
-                and reflexion_interval > 0
-                and self.interaction_count % reflexion_interval == 0
-            ):
-                try:
-                    await self._run_reflexion()
-                except Exception as e:
-                    self.logger.warning(f"Reflexion failed: {e}")
+            # Reflexion is replaced by provenance-preserving dreams and the
+            # measured closed-strategy lab; never auto-install free-form text.
 
-            # Consider self-modification every 10 interactions
-            if config.enable_self_modification and self.interaction_count % 10 == 0:
-                await self._consider_self_modification()
+            # Legacy periodic repository mutation is retired. The idle learning
+            # cycle owns bounded experiments and cannot execute generated code.
 
             # Save agent state every 5 interactions
             if self.interaction_count % 5 == 0:
@@ -1521,13 +1503,15 @@ Memory Types:
                     self.logger.warning("Revision returned empty response, stopping")
                     break
 
-                revised = revised.strip()
+                revised = redact_text(revised.strip())[0]
 
                 # Re-evaluate to check if quality improved
                 if config.enable_evaluation:
                     new_eval = await self._evaluate_bounded(
                         query=query, output=revised, context=context
                     )
+                    if new_eval.measured_score is None:
+                        break
                     new_score = new_eval.overall_score
 
                     if new_score <= current_score:
@@ -1559,13 +1543,41 @@ Memory Types:
             return initial_response, evaluation
 
     async def cleanup(self):
-        """Clean up agent resources with error recovery."""
+        """Bound shutdown; do not close resources beneath a surviving worker.
+
+        False requires process-supervisor termination after its grace period;
+        cancellation cannot undo a remote write or terminate a native SDK thread.
+        """
         if getattr(self, "steward", None):
             await self.steward.close()
         if getattr(self, "dream_service", None):
             await self.dream_service.stop()
-        if getattr(self, "runtime", None):
-            await self.runtime.close()
+        runtime = getattr(self, "runtime", None)
+        if runtime is None:
+            runtime = self.runtime = AgentRuntime()
+        drained = await runtime.close()
+        steward = getattr(self, "steward", None)
+        if steward:
+            state = steward.status()
+            drained = drained and not any((
+                steward.busy, state.get("dreams", {}).get("running"),
+                state.get("improvement", {}).get("busy"),
+                state.get("learning", {}).get("running"),
+            ))
+        if not drained:
+            self.logger.warning("Shutdown has pending dependencies; supervisor grace required")
+            return False
+        try:
+            await runtime._execute(self._cleanup_resources,
+                timeout=bounded_seconds("RESOURCE_SHUTDOWN_SECONDS", 5, 10))
+            self.initialized = False
+            return True
+        except TimeoutError:
+            self.logger.warning("Resource cleanup deadline exceeded; supervisor grace required")
+            return False
+
+    async def _cleanup_resources(self):
+        """Final persistence runs only once all work is drained, within a deadline."""
         try:
             self.logger.info("Cleaning up agent resources...")
             

@@ -1,9 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
-import { ImprovementStatus } from './ImprovementStatus';
+import { Link } from 'react-router-dom';
 import useChat from '../../hooks/useChat';
-import { useTriggerImprovement } from '../../hooks/useGitHub';
 import { SparklesIcon } from '@heroicons/react/24/outline';
 import MediaPanel from './MediaPanel';
 
@@ -33,14 +32,8 @@ export const ChatContainer = () => {
   const [isSending, setIsSending] = useState(false);
   const { sendMessageAsync } = useChat();
 
-  // Improvement state
-  const [improvementState, setImprovementState] = useState(null);
-  const improvementStartTimeRef = useRef(null);
-
   // Persistent conversation ID
   const conversationIdRef = useRef(getConversationId());
-
-  const { mutate: triggerImprovement, isPending: isImproving } = useTriggerImprovement();
 
   // Persist messages to localStorage on change
   useEffect(() => {
@@ -99,97 +92,6 @@ export const ChatContainer = () => {
     }
   };
 
-  const handleTriggerImprovement = useCallback(() => {
-    const startTime = new Date().toISOString();
-    improvementStartTimeRef.current = startTime;
-
-    setImprovementState({
-      isActive: true,
-      isComplete: false,
-      hasError: false,
-      errorMessage: '',
-      progressUpdates: [
-        {
-          event_type: 'analyzing',
-          data: { stage: 'analyzing', message: 'Starting self-improvement analysis...', progress: 10 },
-          timestamp: startTime,
-        },
-      ],
-      prCreated: false,
-      prNumber: null,
-      prUrl: null,
-      startTime,
-    });
-
-    triggerImprovement(
-      { create_pr: true },
-      {
-        onSuccess: (data) => {
-          setImprovementState((prev) => ({
-            ...prev,
-            isComplete: true,
-            hasError: false,
-            prCreated: data.pr_created || false,
-            prNumber: data.pr_number,
-            prUrl: data.pr_url,
-            progressUpdates: [
-              ...prev.progressUpdates,
-              {
-                event_type: 'validation',
-                data: {
-                  stage: 'validation',
-                  message: `Generated ${data.improvements_generated} improvements, ${data.improvements_validated} validated`,
-                  progress: 80,
-                },
-                timestamp: new Date().toISOString(),
-              },
-              {
-                event_type: 'complete',
-                data: {
-                  stage: 'complete',
-                  message: data.pr_created
-                    ? `Pull request #${data.pr_number} created successfully`
-                    : `${data.improvements_validated} improvements validated (potential: ${(data.improvement_potential * 100).toFixed(0)}%)`,
-                  progress: 100,
-                  details: {
-                    generated: data.improvements_generated,
-                    validated: data.improvements_validated,
-                    potential: data.improvement_potential,
-                  },
-                },
-                timestamp: new Date().toISOString(),
-              },
-            ],
-          }));
-        },
-        onError: (error) => {
-          setImprovementState((prev) => ({
-            ...prev,
-            isComplete: false,
-            hasError: true,
-            errorMessage: error.response?.data?.detail || error.message || 'Improvement failed',
-            progressUpdates: [
-              ...prev.progressUpdates,
-              {
-                event_type: 'error',
-                data: { stage: 'error', message: 'Improvement process failed', progress: 0 },
-                timestamp: new Date().toISOString(),
-              },
-            ],
-          }));
-        },
-      }
-    );
-  }, [triggerImprovement]);
-
-  const handleRetryImprovement = useCallback(() => {
-    handleTriggerImprovement();
-  }, [handleTriggerImprovement]);
-
-  const handleCancelImprovement = useCallback(() => {
-    setImprovementState(null);
-  }, []);
-
   const handleClearChat = useCallback(() => {
     setMessages([]);
     localStorage.removeItem(STORAGE_KEY);
@@ -204,25 +106,6 @@ export const ChatContainer = () => {
       <MediaPanel onUseText={handleSendMessage} disabled={isSending}
         latestResponse={[...messages].reverse().find(message => message.response && !message.isError)?.response || ''} />
 
-      {/* Improvement Status */}
-      {improvementState?.isActive && (
-        <div className="px-4 py-2">
-          <ImprovementStatus
-            improvementType="full_improvement_cycle"
-            progressUpdates={improvementState.progressUpdates}
-            isComplete={improvementState.isComplete}
-            hasError={improvementState.hasError}
-            errorMessage={improvementState.errorMessage}
-            prCreated={improvementState.prCreated}
-            prNumber={improvementState.prNumber}
-            prUrl={improvementState.prUrl}
-            startTime={improvementState.startTime}
-            onRetry={handleRetryImprovement}
-            onCancel={!improvementState.isComplete && !improvementState.hasError ? handleCancelImprovement : null}
-          />
-        </div>
-      )}
-
       <div className="border-t border-gray-200 p-4 bg-gray-50">
         <div className="flex items-end gap-2">
           <div className="flex-1">
@@ -232,16 +115,10 @@ export const ChatContainer = () => {
               disabled={false}
             />
           </div>
-          <button
-            onClick={handleTriggerImprovement}
-            disabled={isImproving || (improvementState?.isActive && !improvementState?.isComplete && !improvementState?.hasError)}
-            className="flex items-center gap-1 px-3 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors self-end mb-1"
-            title="Trigger self-improvement cycle"
-            aria-label="Trigger self-improvement cycle"
-          >
+          <Link to="/status" className="flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600 self-end mb-1">
             <SparklesIcon className="h-4 w-4" aria-hidden="true" />
-            <span className="hidden sm:inline">Improve</span>
-          </button>
+            <span>Learning lab</span>
+          </Link>
           {messages.length > 0 && (
             <button
               onClick={handleClearChat}

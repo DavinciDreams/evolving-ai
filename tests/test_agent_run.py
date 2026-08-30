@@ -290,9 +290,8 @@ async def test_run_detects_self_edit_request(agent):
     agent._store_interaction.assert_called_once()
 
 
-async def test_run_triggers_self_modification_every_10_interactions(agent):
-    """_consider_self_modification must be called when interaction_count becomes
-    a multiple of 10 after the increment inside run()."""
+async def test_legacy_flag_cannot_trigger_automatic_repository_mutation(agent):
+    """Periodic code mutation is retired even with a stale enabled deployment flag."""
     # Start at 9 so the increment brings it to 10.
     agent.interaction_count = 9
 
@@ -304,7 +303,7 @@ async def test_run_triggers_self_modification_every_10_interactions(agent):
         await _drain_tasks()  # drain inside patch so background task sees mocked config
 
     assert agent.interaction_count == 10
-    agent._consider_self_modification.assert_called_once()
+    agent._consider_self_modification.assert_not_called()
 
 
 async def test_run_does_not_trigger_self_modification_on_other_counts(agent):
@@ -394,3 +393,11 @@ async def test_storage_redacts_query_and_reports_failed_memory(agent):
         await agent.run("api_key=example-not-a-real-key", wait_for_storage=True)
     assert "example-not-a-real-key" not in agent.data_manager.save_interaction.call_args.kwargs["query"]
     assert agent.last_storage_status["memory_stored"] is False
+
+
+async def test_secret_redacted_before_retrieval_and_generation(agent):
+    with patch("evolving_agent.core.agent.config", _make_config()):
+        await agent.run("api_key=synthetic-secret-value", wait_for_storage=True)
+    assert "synthetic-secret-value" not in str(agent.context_manager.get_relevant_context.call_args)
+    assert "synthetic-secret-value" not in str(agent._generate_response.call_args)
+    assert "synthetic-secret-value" not in str(agent.data_manager.save_interaction.call_args)

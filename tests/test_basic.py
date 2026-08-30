@@ -13,6 +13,24 @@ from evolving_agent.knowledge.base import KnowledgeBase, KnowledgeEntry
 from evolving_agent.utils.config import Config
 
 
+@pytest.fixture(autouse=True)
+def offline_smoke_embeddings(monkeypatch):
+    """Exercise real Chroma plumbing without downloading an embedding model.
+
+    These smoke assertions are not retrieval-quality benchmarks. Their constant
+    test vectors intentionally say nothing about semantic ranking.
+    """
+    from types import SimpleNamespace
+    import numpy as np
+
+    async def initialize(memory):
+        memory.embedding_model = SimpleNamespace(
+            encode=lambda text: np.array([1.0, 0.0, 0.0], dtype=float)
+        )
+
+    monkeypatch.setattr(LongTermMemory, "_init_embedding_model", initialize)
+
+
 class TestMemorySystem:
     """Test the memory system."""
 

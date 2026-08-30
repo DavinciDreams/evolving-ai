@@ -95,6 +95,18 @@ class PromotionRequest(BaseModel):
     expected_revision: int = Field(ge=0)
 
 
+@router.get("/improvement/runs/{run_id}")
+async def improvement_report(run_id: str, agent=Depends(get_agent)):
+    current = lab_control(agent)
+    try:
+        report = current.lab.get_report(run_id)
+    except ValueError:
+        raise HTTPException(422, "Invalid run identifier") from None
+    if report is None:
+        raise HTTPException(404, "Run expired or not found; use its durable HAM artifact ID")
+    return report
+
+
 @router.post("/improvement/promote", status_code=202)
 async def promote(request: PromotionRequest, agent=Depends(get_agent)):
     current = lab_control(agent)
