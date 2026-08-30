@@ -309,6 +309,7 @@ class LearningCycle:
         state = lab.status()
         baseline = GuidanceStrategy(**state["active_strategy"])
         revision = state["revision"]
+        harness_digest = state["harness_digest"]
         selected = None
         for strategy in self._population(baseline):
             fingerprint = self._digest(
@@ -317,6 +318,7 @@ class LearningCycle:
                     "baseline": asdict(baseline),
                     "revision": revision,
                     "candidate": asdict(strategy),
+                    "harness_digest": harness_digest,
                 }
             )
             if fingerprint not in attempted:
@@ -344,6 +346,7 @@ class LearningCycle:
                 metadata={
                     "experiment_fingerprint": fingerprint,
                     "suite_digest": self._suite_digest,
+                    "harness_digest": harness_digest,
                     "baseline_revision": revision,
                     "candidate_id": candidate.candidate_id,
                     "source_memory_ids": [str(dream.id)],

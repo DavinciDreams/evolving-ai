@@ -79,7 +79,10 @@ answers never reach the response generator. Memory cannot supply grader code.
 ## Persistence, budgets, and promotion
 
 A `learning_attempt` HAM reservation is written before model evaluation. Its
-fingerprint identifies the suite digest, baseline strategy/revision, and candidate.
+fingerprint identifies the suite digest, baseline strategy/revision, candidate,
+and immutable lab harness digest. A new model, endpoint, or fixed prompt can
+therefore remeasure a population member rather than reusing an old attempt;
+changing harness does not reset the rolling daily attempt quota.
 Failure, timeout, invalid output, or restart does not refund the attempt. Restart
 skips attempted population members and proceeds to the next candidate; an exhausted
 population stops spending. Manual investigation/retry remains a separate operator

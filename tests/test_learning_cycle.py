@@ -12,6 +12,7 @@ from evolving_agent.core.learning_cycle import LearningConfig, LearningCycle, lo
 from evolving_agent.core.runtime import RuntimeBusyError
 from evolving_agent.self_modification.improvement_lab import (
     BenchmarkCase,
+    HarnessDescriptor,
     ImprovementLab,
     ModelOutput,
 )
@@ -67,7 +68,7 @@ class Memory:
 
 
 class Steward:
-    def __init__(self, memory=None, runner=None):
+    def __init__(self, memory=None, runner=None, harness=None):
         self.agent = SimpleNamespace(memory=memory or Memory())
         self.calls = []
 
@@ -80,7 +81,7 @@ class Steward:
             )
             return ModelOutput(answer, 2, "synthetic")
 
-        self.lab = ImprovementLab(self.agent.memory, runner or model)
+        self.lab = ImprovementLab(self.agent.memory, runner or model, harness=harness)
         self.busy = False
         self._task = None
         self.result = None
@@ -205,6 +206,36 @@ async def test_restart_moves_to_next_unattempted_population_member():
     assert first["run_id"] != second["run_id"]
     report = json.loads(memory.writes[-1].content)
     assert report["candidate"]["strategy"]["acknowledge_uncertainty"]
+
+
+async def test_changed_harness_remeasures_previously_attempted_population_member():
+    memory = Memory()
+    first = await execute(cycle(Steward(memory)))
+    updated = Steward(memory, harness=HarnessDescriptor(provider="synthetic"))
+    second = await execute(cycle(updated))
+    assert first["run_id"] != second["run_id"]
+    report = json.loads(memory.writes[-1].content)
+    assert report["candidate"]["strategy"]["separate_evidence"]
+    assert not report["candidate"]["strategy"]["acknowledge_uncertainty"]
+    assert len(updated.calls) == 8
+    attempts = [row for row in memory.writes if row.memory_type == "learning_attempt"]
+    assert (
+        attempts[0].metadata["harness_digest"] != attempts[1].metadata["harness_digest"]
+    )
+    assert (
+        attempts[1].metadata["harness_digest"] == updated.lab.status()["harness_digest"]
+    )
+
+
+async def test_changed_harness_does_not_reset_daily_spending_quota():
+    memory = Memory()
+    settings = LearningConfig(enabled=True, idle_seconds=0, max_daily_experiments=1)
+    await execute(cycle(Steward(memory), settings=settings))
+    updated = Steward(memory, harness=HarnessDescriptor(provider="synthetic"))
+    assert (await execute(cycle(updated, settings=settings)))[
+        "reason"
+    ] == "daily_budget_exhausted"
+    assert not updated.calls
 
 
 async def test_daily_quota_is_durable_across_restart_and_no_call_when_exhausted():
