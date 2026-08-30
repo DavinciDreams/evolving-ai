@@ -114,10 +114,19 @@ class PersistentDataManager:
                     feedback TEXT,
                     improvement_suggestions TEXT,
                     confidence REAL,
+                    evaluation_kind TEXT NOT NULL DEFAULT 'legacy_unverified',
                     FOREIGN KEY (interaction_id) REFERENCES interactions (id)
                 )
             """
             )
+
+            # Add provenance without relabeling historical neutral/fallback scores.
+            cursor.execute("PRAGMA table_info(evaluations)")
+            if "evaluation_kind" not in {column[1] for column in cursor.fetchall()}:
+                cursor.execute(
+                    "ALTER TABLE evaluations ADD COLUMN evaluation_kind TEXT "
+                    "NOT NULL DEFAULT 'legacy_unverified'"
+                )
 
             # Create modifications table
             cursor.execute(
@@ -257,8 +266,11 @@ class PersistentDataManager:
         feedback: str,
         improvement_suggestions: List[str],
         confidence: float,
+        evaluation_kind: str = "legacy_unverified",
     ):
-        """Save an evaluation to the database."""
+        """Save evaluation provenance explicitly; old callers remain unverified."""
+        if evaluation_kind not in {"legacy_unverified", "llm_judgment_not_independent_benchmark"}:
+            raise ValueError("Unsupported evaluation evidence kind")
         try:
             conn = sqlite3.connect(self.interactions_db)
             cursor = conn.cursor()
@@ -266,8 +278,8 @@ class PersistentDataManager:
             cursor.execute(
                 """
                 INSERT INTO evaluations 
-                (interaction_id, timestamp, overall_score, criteria_scores, feedback, improvement_suggestions, confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (interaction_id, timestamp, overall_score, criteria_scores, feedback, improvement_suggestions, confidence, evaluation_kind)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     interaction_id,
@@ -277,6 +289,7 @@ class PersistentDataManager:
                     feedback,
                     json.dumps(improvement_suggestions),
                     confidence,
+                    evaluation_kind,
                 ),
             )
 
@@ -539,14 +552,14 @@ class PersistentDataManager:
             cursor.execute("""
                 SELECT e.overall_score, e.criteria_scores, e.feedback,
                        e.improvement_suggestions, e.confidence, e.timestamp,
-                       i.query
+                       i.query, e.evaluation_kind
                 FROM evaluations e
                 LEFT JOIN interactions i ON e.interaction_id = i.id
                 ORDER BY e.timestamp DESC
                 LIMIT ?
             """, (limit,))
             columns = ["overall_score", "criteria_scores", "feedback",
-                       "improvement_suggestions", "confidence", "timestamp", "query"]
+                       "improvement_suggestions", "confidence", "timestamp", "query", "evaluation_kind"]
             rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
             conn.close()
             return rows

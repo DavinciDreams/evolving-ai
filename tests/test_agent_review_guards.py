@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from tests import test_agent_run as agent_tests
 from evolving_agent.core.agent import SelfImprovingAgent
+from evolving_agent.core.evaluator import OutputEvaluator
 
 
 agent = agent_tests.agent
@@ -130,3 +131,24 @@ async def test_optional_evaluation_deadline_survives_cancellation_resistance(
         released.set()
         if "task" in locals():
             await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_legacy_neutral_rows_without_measurement_provenance_are_not_evidence():
+    evaluator = OutputEvaluator()
+    legacy = {
+        "overall_score": 0.7,
+        "criteria_scores": '{"accuracy": 0.7}',
+        "improvement_suggestions": "[]",
+        "feedback": "Default evaluation",
+        "confidence": 0.95,
+        "timestamp": "2026-05-21T00:00:00Z",
+        "query": "legacy query",
+    }
+    with patch(
+        "evolving_agent.core.evaluator.persistent_data_manager.get_recent_evaluations",
+        AsyncMock(return_value=[legacy]),
+    ):
+        await evaluator._load_history_from_db()
+    assert not evaluator.evaluation_history
+    insights = await evaluator.get_evaluation_insights()
+    assert "recent_average_score" not in insights

@@ -172,6 +172,30 @@ async def test_full_content_checksum_not_prefix_controls_deduplication():
 
 
 @pytest.mark.asyncio
+async def test_oversized_full_sources_are_skipped_before_synchronous_redaction():
+    memory = Memory(
+        [entry("x" * 65537, entry_id="1"), entry("small source", entry_id="2")]
+    )
+    assert (await service(memory).run_once()).reason == "insufficient_new_sources"
+    assert not memory.writes
+
+
+@pytest.mark.asyncio
+async def test_oversized_or_invalid_receipt_manifest_fails_closed():
+    memory = Memory()
+    memory.rows.append(
+        entry(
+            "receipt",
+            "dream_consolidation",
+            {"dream_schema": "dream-v1", "source_checksums": ["not-a-sha256"]},
+            entry_id="3",
+        )
+    )
+    assert (await service(memory).run_once()).reason == "dependency_error"
+    assert not memory.writes
+
+
+@pytest.mark.asyncio
 async def test_extracts_without_model_and_never_claims_generated_insights():
     memory = Memory()
     result = await service(memory).run_once()

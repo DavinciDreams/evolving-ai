@@ -42,6 +42,8 @@ by HAM; deterministic receipts allow recovery after uncertain responses.
 1. Read at most 100 recent receipts, reservations, and source memories each.
 2. Select at most 12 distinct eligible source contents; exclude dreams,
    evaluations, quarantined/private records, and other derived memories.
+   Individual sources over 65,536 characters are skipped before synchronous
+   redaction/checksum processing, preserving the event-loop work bound.
 3. Redact known credential shapes and private keys **before** sending excerpts
    to a model. No source metadata or credentials are sent to the model.
 4. Append a `dream_attempt` quota reservation before spending model tokens.

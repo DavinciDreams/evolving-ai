@@ -24,6 +24,7 @@ from ..utils.secret_redaction import DETECTOR_VERSION, redact_text
 
 SCHEMA_VERSION = "dream-v1"
 SOURCE_TYPES = frozenset({"interaction", "fact", "knowledge", "preference", "general"})
+MAX_FULL_SOURCE_CHARS = 65536
 _ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _NSEC = re.compile(r"(?i)\bnsec1[ac-hj-np-z02-9]{20,}\b")
 _PRIVATE_KEY = re.compile(
@@ -352,7 +353,18 @@ class DreamConsolidationService:
         for receipt in receipts:
             metadata = receipt.metadata
             if metadata.get("dream_schema") == SCHEMA_VERSION:
-                covered.update(metadata.get("source_checksums", []))
+                checksums = metadata.get("source_checksums", [])
+                if (
+                    not isinstance(checksums, list)
+                    or len(checksums) > 50
+                    or any(
+                        not isinstance(checksum, str)
+                        or not re.fullmatch(r"[0-9a-f]{64}", checksum)
+                        for checksum in checksums
+                    )
+                ):
+                    raise ValueError("Invalid bounded dream receipt manifest")
+                covered.update(checksums)
         raw = await self.memory.list_recent_memories(limit=cfg.scan_limit)
         sources = self._select(raw, covered)
         if len(sources) < cfg.min_sources:
@@ -479,7 +491,14 @@ class DreamConsolidationService:
             source_id = str(entry.id)
             if not _ID_PATTERN.fullmatch(source_id):
                 continue
-            text, redacted = _redact(str(entry.content))
+            if (
+                not isinstance(entry.content, str)
+                or len(entry.content) > MAX_FULL_SOURCE_CHARS
+            ):
+                # Whole-content redaction/hash are synchronous. Bound them too,
+                # not merely the prompt excerpt, to protect event-loop latency.
+                continue
+            text, redacted = _redact(entry.content)
             text = text.strip()
             if not text:
                 continue
