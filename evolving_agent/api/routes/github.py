@@ -1,15 +1,11 @@
 """GitHub endpoints: /github/*."""
 
-import evolving_agent.utils.app_state as state
 from fastapi import APIRouter, Depends, HTTPException
 
-from evolving_agent.utils.config import config
+import evolving_agent.utils.app_state as state
 from evolving_agent.utils.deps import verify_api_key
-
 from evolving_agent.utils.logging import setup_logger
 from evolving_agent.utils.schemas import (
-    CreateIssueRequest,
-    CreateIssueResponse,
     GitHubStatus,
     RepositoryInfo,
 )
@@ -60,7 +56,10 @@ async def get_repository_info():
     Get information about the connected GitHub repository.
     """
     try:
-        if not state.github_modifier or not state.github_modifier.github_integration.repository:
+        if (
+            not state.github_modifier
+            or not state.github_modifier.github_integration.repository
+        ):
             raise HTTPException(
                 status_code=404, detail="GitHub repository not connected"
             )
@@ -95,7 +94,10 @@ async def get_pull_requests():
     Get list of open pull requests in the repository.
     """
     try:
-        if not state.github_modifier or not state.github_modifier.github_integration.repository:
+        if (
+            not state.github_modifier
+            or not state.github_modifier.github_integration.repository
+        ):
             raise HTTPException(
                 status_code=404, detail="GitHub repository not connected"
             )
@@ -121,7 +123,10 @@ async def get_recent_commits(limit: int = 10):
     - **limit**: Maximum number of commits to retrieve (default: 10)
     """
     try:
-        if not state.github_modifier or not state.github_modifier.github_integration.repository:
+        if (
+            not state.github_modifier
+            or not state.github_modifier.github_integration.repository
+        ):
             raise HTTPException(
                 status_code=404, detail="GitHub repository not connected"
             )
@@ -163,115 +168,33 @@ async def get_improvement_history():
         )
 
 
-@router.post("/github/demo-pr", tags=["GitHub"], dependencies=[Depends(verify_api_key)])
+@router.post(
+    "/github/demo-pr",
+    tags=["GitHub"],
+    deprecated=True,
+    dependencies=[Depends(verify_api_key)],
+    responses={410: {"description": "Legacy direct publication is retired"}},
+)
 async def create_demo_pr():
-    """
-    Create a demonstration pull request with documentation improvements.
-
-    This is a safe demo endpoint that creates a PR with README enhancements.
-    """
-    try:
-        if not config.enable_self_modification:
-            raise HTTPException(
-                status_code=403, detail="Self-modification is disabled"
-            )
-
-        if not state.github_modifier:
-            raise HTTPException(
-                status_code=503, detail="GitHub integration not available"
-            )
-
-        if not state.github_modifier.github_integration.repository:
-            raise HTTPException(
-                status_code=404, detail="GitHub repository not connected"
-            )
-
-        logger.info("Creating demonstration pull request...")
-
-        pr_result = await state.github_modifier.create_documentation_improvement_pr()
-
-        if "error" in pr_result:
-            raise HTTPException(status_code=500, detail=pr_result["error"])
-
-        return {
-            "message": "Demo pull request created successfully",
-            "pr_number": pr_result.get("pr_number"),
-            "pr_url": pr_result.get("pr_url"),
-            "branch_name": pr_result.get("branch_name"),
-            "files_updated": pr_result.get("files_updated", []),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating demo PR: {e}")
-        raise HTTPException(status_code=500, detail=f"Error creating demo PR: {str(e)}")
+    """Retired: demo labels do not authorize unbounded repository changes."""
+    raise HTTPException(
+        410,
+        "Legacy demo PR publication is retired. Review and publish repository "
+        "changes through a separately authorized workflow.",
+    )
 
 
-@router.post("/github/issue", response_model=CreateIssueResponse, tags=["GitHub"], dependencies=[Depends(verify_api_key)])
-async def create_github_issue(request: CreateIssueRequest):
-    """
-    Create a new GitHub issue.
-
-    This endpoint allows creating GitHub issues programmatically, useful for
-    integrating with Discord feature requests or other external systems.
-
-    The issue will be created in the configured GitHub repository with the
-    provided title, description, and optional labels.
-
-    Note: Assignees requires proper GitHub permissions and the users must
-    have write access to the repository.
-    """
-    try:
-        if not state.github_modifier or not state.github_modifier.github_integration.repository:
-            raise HTTPException(
-                status_code=503,
-                detail="GitHub integration not available or repository not connected"
-            )
-
-        logger.info(f"Creating GitHub issue: {request.title}")
-
-        # Create the issue using the GitHub integration
-        issue_result = await state.github_modifier.github_integration.create_issue(
-            title=request.title,
-            body=request.description,
-            labels=request.labels
-        )
-
-        # Check for errors in the result
-        if "error" in issue_result:
-            logger.error(f"Failed to create issue: {issue_result['error']}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to create issue: {issue_result['error']}"
-            )
-
-        # Handle assignees if provided
-        if request.assignees:
-            try:
-                issue_number = issue_result.get("issue_number")
-                if issue_number:
-                    repository = state.github_modifier.github_integration.repository
-                    issue = repository.get_issue(issue_number)
-                    # Add assignees to the issue
-                    issue.add_to_assignees(*request.assignees)
-                    logger.info(f"Added assignees {request.assignees} to issue #{issue_number}")
-            except Exception as e:
-                logger.warning(f"Failed to add assignees to issue: {e}")
-                # Don't fail the request if assignees fail, just log a warning
-
-        logger.info(f"Successfully created issue #{issue_result['issue_number']}")
-
-        return CreateIssueResponse(
-            issue_number=issue_result["issue_number"],
-            issue_url=issue_result["url"]
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating GitHub issue: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error creating GitHub issue: {str(e)}"
-        )
+@router.post(
+    "/github/issue",
+    tags=["GitHub"],
+    deprecated=True,
+    dependencies=[Depends(verify_api_key)],
+    responses={410: {"description": "Legacy direct issue publication is retired"}},
+)
+async def create_github_issue():
+    """Retired: receiving an app event is not permission to publish an issue."""
+    raise HTTPException(
+        410,
+        "Legacy direct issue publication is retired. Submit signed app events to "
+        "the connector review inbox; issue publication requires a separately authorized workflow.",
+    )

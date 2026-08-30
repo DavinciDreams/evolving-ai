@@ -23,6 +23,7 @@ import evolving_agent.utils.app_state as app_state
 from evolving_agent.core.runtime import RuntimeBusyError
 from evolving_agent.integrations.connectors import ConnectorService, ConnectorSettings
 from evolving_agent.integrations.media import MediaService, MediaSettings
+from evolving_agent.self_modification.improvement_lab import ImprovementLab
 from evolving_agent.utils.deps import get_agent
 
 PROJECT_SECRET = "synthetic-project-access-key"
@@ -169,6 +170,7 @@ def headers():
         ("GET", "/steward/jobs/test"),
         ("POST", "/steward/dream"),
         ("POST", "/steward/improvement/evaluate"),
+        ("GET", "/steward/improvement/runs/test-run"),
         ("POST", "/steward/improvement/promote"),
         ("POST", "/steward/improvement/rollback"),
         ("GET", "/media/status"),
@@ -320,6 +322,46 @@ def test_closed_strategy_rejects_injected_authority(registered_app):
     )
     assert response.status_code == 422
     assert "private-untrusted-instruction" not in response.text
+    assert registered_app.control.submitted == []
+
+
+def test_report_read_missing_and_invalid_identifiers(registered_app):
+    registered_app.control.lab = ImprovementLab(SimpleNamespace(), AsyncMock())
+    client = registered_app.client
+    assert (
+        client.get("/steward/improvement/runs/missing", headers=headers()).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            "/steward/improvement/runs/invalid%20identifier", headers=headers()
+        ).status_code
+        == 422
+    )
+    assert registered_app.control.submitted == []
+
+
+def test_report_read_uses_deep_copy_and_does_not_reexecute(registered_app):
+    runner = AsyncMock(side_effect=AssertionError("report read invoked model"))
+    lab = ImprovementLab(SimpleNamespace(), runner)
+    report = {
+        "run_id": "run-1",
+        "base_revision": 0,
+        "candidate": {"strategy": {"verify_calculations": True}},
+        "promotion_gate": {"passed": True},
+    }
+    lab._reports["run-1"] = report
+    registered_app.control.lab = lab
+    detached = lab.get_report("run-1")
+    detached["candidate"]["strategy"]["verify_calculations"] = False
+    response = registered_app.client.get(
+        "/steward/improvement/runs/run-1", headers=headers()
+    )
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["candidate"]["strategy"]["verify_calculations"] is True
+    assert report["candidate"]["strategy"]["verify_calculations"] is True
+    runner.assert_not_awaited()
     assert registered_app.control.submitted == []
 
 
