@@ -1,13 +1,14 @@
 """Private asynchronous controls; no request waits for an evaluation loop."""
 from dataclasses import fields
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from evolving_agent.core.runtime import RuntimeBusyError
 from evolving_agent.self_modification.improvement_lab import BenchmarkCase, GuidanceCandidate, GuidanceStrategy
 from evolving_agent.utils.deps import get_agent, verify_api_key
 from evolving_agent.utils.secret_redaction import redact_text
+from evolving_agent.api.routes.integration_requests import bounded_json, json_request_schema
 
 router = APIRouter(prefix="/steward", tags=["Steward"], dependencies=[Depends(verify_api_key)])
 
@@ -73,9 +74,10 @@ def lab_control(agent):
     return current
 
 
-@router.post("/improvement/evaluate", status_code=202)
-async def evaluate(request: EvaluationRequest, agent=Depends(get_agent)):
+@router.post("/improvement/evaluate", status_code=202, openapi_extra=json_request_schema(EvaluationRequest))
+async def evaluate(incoming: Request, agent=Depends(get_agent)):
     current = lab_control(agent)
+    request = await bounded_json(incoming, EvaluationRequest, 1_048_576)
     try:
         if set(request.strategy) - {item.name for item in fields(GuidanceStrategy)}:
             raise ValueError("Unknown strategy fields")
@@ -107,9 +109,10 @@ async def improvement_report(run_id: str, agent=Depends(get_agent)):
     return report
 
 
-@router.post("/improvement/promote", status_code=202)
-async def promote(request: PromotionRequest, agent=Depends(get_agent)):
+@router.post("/improvement/promote", status_code=202, openapi_extra=json_request_schema(PromotionRequest))
+async def promote(incoming: Request, agent=Depends(get_agent)):
     current = lab_control(agent)
+    request = await bounded_json(incoming, PromotionRequest, 4096)
     return enqueue(current, "improvement", lambda: current.lab.promote(request.run_id, request.expected_revision))
 
 
@@ -119,8 +122,9 @@ class RollbackRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=500)
 
 
-@router.post("/improvement/rollback", status_code=202)
-async def rollback(request: RollbackRequest, agent=Depends(get_agent)):
+@router.post("/improvement/rollback", status_code=202, openapi_extra=json_request_schema(RollbackRequest))
+async def rollback(incoming: Request, agent=Depends(get_agent)):
     current = lab_control(agent)
+    request = await bounded_json(incoming, RollbackRequest, 8192)
     return enqueue(current, "improvement", lambda: current.lab.rollback(
         request.expected_revision, redact_text(request.reason)[0]))

@@ -12,6 +12,7 @@ from evolving_agent.core.runtime import RuntimeBusyError
 from evolving_agent.utils.config import config
 from evolving_agent.utils.deps import get_agent, verify_api_key
 from evolving_agent.utils.logging import setup_logger
+from evolving_agent.api.routes.integration_requests import bounded_json, json_request_schema
 from evolving_agent.utils.schemas import (
     ChatCompletionChoice,
     ChatCompletionMessage,
@@ -46,9 +47,10 @@ def _estimate_token_count(text: str) -> int:
         return max(1, len(text) // 4)
 
 
-@router.post("/chat", response_model=QueryResponse, tags=["Interaction"], dependencies=[Depends(verify_api_key)])
+@router.post("/chat", response_model=QueryResponse, tags=["Interaction"], dependencies=[Depends(verify_api_key)],
+             openapi_extra=json_request_schema(QueryRequest))
 async def chat_with_agent(
-    request: QueryRequest,
+    incoming: Request,
     background_tasks: BackgroundTasks,
     current_agent: SelfImprovingAgent = Depends(get_agent),
 ):
@@ -62,6 +64,7 @@ async def chat_with_agent(
     - Store the interaction for future learning
     - Update its knowledge base if new insights are discovered
     """
+    request = await bounded_json(incoming, QueryRequest, 262_144)
     try:
         query_id = str(uuid.uuid4())
         timestamp = datetime.now()
@@ -97,9 +100,10 @@ async def chat_with_agent(
     tags=["OpenAI Compatible"],
     summary="OpenAI-compatible chat completions",
     dependencies=[Depends(verify_api_key)],
+    openapi_extra=json_request_schema(ChatCompletionRequest),
 )
 async def openai_chat_completions(
-    request: ChatCompletionRequest,
+    incoming: Request,
     background_tasks: BackgroundTasks,
     current_agent: SelfImprovingAgent = Depends(get_agent),
 ):
@@ -110,6 +114,7 @@ async def openai_chat_completions(
     a compatible response. The agent uses its configured LLM provider
     regardless of the `model` field value.
     """
+    request = await bounded_json(incoming, ChatCompletionRequest, 1_048_576)
     try:
         # Extract system messages as context hints
         system_messages = [
@@ -289,10 +294,10 @@ async def chat_stream(
     import json as _json
 
     try:
-        body = await request.json()
-        query = body.get("query", "")
-        context_hints = body.get("context_hints")
-        conversation_id = body.get("conversation_id")
+        body = await bounded_json(request, QueryRequest, 262_144)
+        query = body.query
+        context_hints = body.context_hints
+        conversation_id = body.conversation_id
 
         if not query:
             raise HTTPException(status_code=400, detail="query is required")

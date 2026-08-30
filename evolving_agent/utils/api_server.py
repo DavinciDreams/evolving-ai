@@ -134,8 +134,11 @@ async def lifespan(app: FastAPI):
         if app_state.agent:
             logger.info("Cleaning up agent...")
             try:
-                await app_state.agent.cleanup()
-                logger.info("Agent cleanup completed")
+                drained = await app_state.agent.cleanup()
+                if drained is False:
+                    logger.warning("Agent still has pending cleanup; supervisor grace required")
+                else:
+                    logger.info("Agent cleanup completed")
             except Exception as e:
                 logger.error(f"Error during agent cleanup: {e}")
 
@@ -180,10 +183,12 @@ app = FastAPI(
     * **Interactive Chat**: Send queries and receive intelligent responses
     * **Memory System**: Persistent long-term memory using vector embeddings
     * **Web Search**: Real-time web search with multiple provider support
-    * **Self-Analysis**: Code analysis and improvement recommendations
-    * **Knowledge Management**: Automatic knowledge extraction and organization
+    * **Dream Consolidation**: Source-preserving evidence and labeled hypotheses
+    * **Measured Learning**: Bounded fixture experiments, explicit promotion, and rollback
+    * **Knowledge Management**: Explicitly configured knowledge extraction
     * **Multi-LLM Support**: OpenAI, Anthropic, and OpenRouter integration
-    * **GitHub Integration**: Automated code improvements via pull requests
+    * **GitHub Integration**: Read-only repository activity; legacy direct mutations retired
+    * **Media and Connectors**: Opt-in audio, vision, and signed review-only webhook intake
     * **Discord Integration**: Real-time chat bot interface
     * **OpenAI Compatible**: Drop-in `/v1/chat/completions` endpoint for standard tooling
 
@@ -193,7 +198,7 @@ app = FastAPI(
     2. Send a query using `/chat`
     3. Search the web with `/web-search`
     4. Explore memories with `/memories`
-    5. Trigger code analysis with `/analyze`
+    5. Inspect `/steward/status`; configure measured experiments before activation
     """,
     version="1.0.0",
     contact={
