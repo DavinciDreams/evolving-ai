@@ -3,40 +3,37 @@ import toast from 'react-hot-toast';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
-// Request queue for offline mode
-const requestQueue = [];
-let isProcessingQueue = false;
+// Connectivity is telemetry only. Every explicit request can test recovery;
+// no request bodies or credentials are retained in an offline replay queue.
 let isOnline = true;
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_BASE = 1000; // 1 second
 let projectApiKey = '';
+let credentialEpoch = 0;
 
 export const setProjectApiKey = (credential) => {
   projectApiKey = credential;
+  credentialEpoch += 1;
 };
 
 export const clearProjectApiKey = () => {
   projectApiKey = '';
-  for (const queued of requestQueue) {
-    queued.config?.headers?.delete?.('X-API-Key');
-    if (queued.config?.headers && typeof queued.config.headers.delete !== 'function') {
-      delete queued.config.headers['X-API-Key'];
-    }
-    queued.reject(new Error('Project access was cleared before the request was sent'));
-  }
-  requestQueue.length = 0;
+  credentialEpoch += 1;
 };
 
 const scrubAuthFromError = (error) => {
-  const headers = error.config?.headers;
-  if (headers?.delete) {
-    headers.delete('X-API-Key');
-    headers.delete('Authorization');
-  } else if (headers) {
-    delete headers['X-API-Key'];
-    delete headers.Authorization;
-  }
-  return error;
+  // Axios errors retain request.data, credentials, XHR, response.config, and
+  // occasionally a cause containing the same values. Return a fresh small error
+  // rather than trying to recursively redact an arbitrary transport object.
+  const status = Number.isInteger(error.response?.status) ? error.response.status : undefined;
+  const safe = new Error(formatErrorMessage(error.message, status));
+  safe.name = 'ApiError';
+  const safeCodes = ['ERR_NETWORK', 'ECONNABORTED', 'ETIMEDOUT', 'ERR_CANCELED', 'ERR_BAD_REQUEST', 'ERR_BAD_RESPONSE'];
+  if (safeCodes.includes(error.code)) safe.code = error.code;
+  if (error.code === 'ERR_CANCELED') safe.__CANCEL__ = true;
+  if (status !== undefined) safe.response = { status, data: { detail: safe.message } };
+  safe.isAxiosError = axios.isAxiosError(error);
+  return safe;
 };
 
 export const api = axios.create({
@@ -48,7 +45,7 @@ export const api = axios.create({
   timeout: 90000,
 });
 
-// Request interceptor with retry logic and offline mode
+// Retry bookkeeping only: failures never prevent a later explicit request.
 api.interceptors.request.use(
   (config) => {
     const hasExplicitCredential = config.headers?.has?.('X-API-Key')
@@ -63,20 +60,7 @@ api.interceptors.request.use(
       timestamp: Date.now(),
       retryAttempt: config.retryAttempt || 0
     };
-    
-    // Check if we're in offline mode
-    if (!isOnline) {
-      // Queue the request and keep the Promise pending until the queue is processed
-      return new Promise((resolve, reject) => {
-        requestQueue.push({
-          config,
-          resolve,
-          reject,
-          timestamp: Date.now()
-        });
-        toast('Request queued - offline mode', { icon: '📡' });
-      });
-    }
+    config.credentialEpoch ??= credentialEpoch;
     
     return config;
   },
@@ -91,16 +75,15 @@ api.interceptors.response.use(
     // Reset online state on success
     isOnline = true;
     
-    // Process any queued requests
-    if (!isProcessingQueue && requestQueue.length > 0) {
-      processRequestQueue();
-    }
-    
     return response;
   },
   async (error) => {
     const config = error.config;
     const status = error.response?.status;
+
+    if (axios.isCancel(error) || error.code === 'ERR_CANCELED') {
+      return Promise.reject(scrubAuthFromError(error));
+    }
 
     if (status === 401 && typeof window !== 'undefined') {
       window.dispatchEvent(new Event('evolving-ai:auth-required'));
@@ -108,6 +91,9 @@ api.interceptors.response.use(
     
     // Handle different error types
     if (error.code === 'ECONNABORTED') {
+      if (!config || config.noRetry || !['get', 'head'].includes((config.method || 'get').toLowerCase())) {
+        return Promise.reject(scrubAuthFromError(error));
+      }
       // Request timeout - retry with backoff
       return handleRetry(config, 'Request timeout');
     }
@@ -138,7 +124,8 @@ api.interceptors.response.use(
     
     if (status === 429) {
       // Rate limited
-      const retryAfter = error.response?.headers?.['retry-after'] || 5;
+      const retryValue = Number(error.response?.headers?.['retry-after']);
+      const retryAfter = Number.isFinite(retryValue) && retryValue > 0 && retryValue <= 3600 ? retryValue : 5;
       toast.error(`Rate limited. Please wait ${retryAfter} seconds before trying again.`, {
         icon: '⏳',
         duration: 4000
@@ -147,6 +134,9 @@ api.interceptors.response.use(
     }
     
     if (status >= 500 && status < 600) {
+      if (!config || config.noRetry || !['get', 'head'].includes((config.method || 'get').toLowerCase())) {
+        return Promise.reject(scrubAuthFromError(error));
+      }
       // Server error - retry with exponential backoff
       return handleRetry(config, 'Server error');
     }
@@ -198,6 +188,11 @@ async function handleRetry(config, errorType) {
   
   // Wait before retrying
   await new Promise(resolve => setTimeout(resolve, delay));
+
+  if (config.credentialEpoch !== credentialEpoch || config.signal?.aborted) {
+    // A read retry must not resurrect credentials after logout or key rotation.
+    return Promise.reject(new Error('Request cancelled before retry; retry explicitly if needed.'));
+  }
   
   // Retry the request
   return api({
@@ -206,39 +201,9 @@ async function handleRetry(config, errorType) {
   });
 }
 
-// Process queued requests when connection is restored
-async function processRequestQueue() {
-  if (isProcessingQueue || requestQueue.length === 0) {
-    return;
-  }
-  
-  isProcessingQueue = true;
-  toast(`Processing ${requestQueue.length} queued requests...`, { icon: '📤' });
-  
-  const failedRequests = [];
-  
-  for (const queued of requestQueue) {
-    try {
-      const response = await api(queued.config);
-      queued.resolve(response);
-    } catch (error) {
-      queued.reject(error);
-      failedRequests.push(queued);
-    }
-  }
-  
-  // Clear processed requests
-  requestQueue.length = 0;
-  isProcessingQueue = false;
-  
-  // Notify about results
-  if (failedRequests.length > 0) {
-    toast.error(`${failedRequests.length} requests failed after retry`, { icon: '⚠️' });
-  }
-}
-
 // Format error messages to be more user-friendly
 function formatErrorMessage(message, status) {
+  if (typeof message !== 'string') message = status === 422 ? 'Please check your input and try again.' : 'Request failed';
   // Common error patterns and their user-friendly versions
   const errorMap = {
     'timeout': 'The request took too long to complete. Please try again.',
@@ -273,8 +238,16 @@ function formatErrorMessage(message, status) {
   if (status === 422) {
     return 'Please check your input and try again.';
   }
-  
-  return message;
+  if (status === 409) {
+    return 'Another operation is active or this event was already handled. Check status before retrying.';
+  }
+  if (status === 413) {
+    return 'The request exceeds the size limit.';
+  }
+  if (status === 415) {
+    return 'This file or request format is not supported.';
+  }
+  return 'Request failed. Check service status and retry explicitly.';
 }
 
 // Agent Status API
@@ -348,19 +321,15 @@ export const disableDegradedMode = async () => {
 // Get request queue status
 export const getRequestQueueStatus = () => {
   return {
-    queueLength: requestQueue.length,
-    isProcessing: isProcessingQueue,
+    queueLength: 0,
+    isProcessing: false,
     isOnline
   };
 };
 
 // Manual retry of queued requests
 export const retryQueuedRequests = () => {
-  if (requestQueue.length > 0) {
-    processRequestQueue();
-  } else {
-    toast('No queued requests to retry', { icon: 'ℹ️' });
-  }
+  toast('Requests are not queued. Retry the action explicitly.', { icon: 'ℹ️' });
 };
 
 export default api;
