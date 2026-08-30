@@ -5,6 +5,7 @@ import { ImprovementStatus } from './ImprovementStatus';
 import useChat from '../../hooks/useChat';
 import { useTriggerImprovement } from '../../hooks/useGitHub';
 import { SparklesIcon } from '@heroicons/react/24/outline';
+import MediaPanel from './MediaPanel';
 
 const STORAGE_KEY = 'evolving-ai-chat-messages';
 const CONVERSATION_KEY = 'evolving-ai-conversation-id';
@@ -51,6 +52,7 @@ export const ChatContainer = () => {
   }, [messages]);
 
   const handleSendMessage = async (query) => {
+    if (isSending) return;
     const msgId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
 
     // Add user message immediately
@@ -199,6 +201,8 @@ export const ChatContainer = () => {
   return (
     <div className="flex flex-col h-full">
       <MessageList messages={messages} isLoading={isSending} />
+      <MediaPanel onUseText={handleSendMessage} disabled={isSending}
+        latestResponse={[...messages].reverse().find(message => message.response && !message.isError)?.response || ''} />
 
       {/* Improvement Status */}
       {improvementState?.isActive && (

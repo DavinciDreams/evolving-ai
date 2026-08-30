@@ -591,9 +591,6 @@ def get_all_tools(
         List of ai_sdk.Tool instances
     """
     tools = [
-        make_read_file_tool(),
-        make_list_files_tool(),
-        make_run_command_tool(),
         make_search_web_tool(web_search),
         make_search_memory_tool(memory),
         # Scratchpad — always available
@@ -601,6 +598,11 @@ def get_all_tools(
         make_scratchpad_read_tool(),
         make_scratchpad_list_tool(),
     ]
+
+    # A command blacklist is not a sandbox. Never expose host effects merely
+    # because a provider supports tool calling.
+    if os.getenv("ENABLE_HOST_TOOLS", "false").lower() == "true":
+        tools.extend([make_read_file_tool(), make_list_files_tool(), make_run_command_tool()])
 
     if e2b_sandbox is not None:
         tools.append(make_execute_code_tool(e2b_sandbox))

@@ -15,6 +15,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 
 import evolving_agent.utils.app_state as app_state
 from evolving_agent.core.agent import SelfImprovingAgent
@@ -65,6 +66,13 @@ def _validate_separate_service_credentials() -> None:
 async def lifespan(app: FastAPI):
     """Initialize and cleanup the agent with graceful shutdown."""
     _validate_separate_service_credentials()
+    if os.getenv("WEB_CONCURRENCY", "1") != "1":
+        raise RuntimeError("Steward runtime requires exactly one worker")
+    app_state.server_shutdown = False
+    from evolving_agent.integrations.media import MediaService
+    from evolving_agent.integrations.connectors import ConnectorService
+    app.state.media_service = MediaService.from_env(config)
+    app.state.connector_service = ConnectorService.from_env(config)
 
     async def initialize_agent():
         """Initialize the core Self-Improving Agent."""
@@ -157,6 +165,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await graceful_shutdown()
+        await app.state.media_service.close()
 
 
 # FastAPI app initialization
@@ -216,6 +225,13 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(RequestValidationError)
+async def safe_validation_error(request: Request, exc: RequestValidationError):
+    """Pydantic's default input field can echo uploaded media or secret values."""
+    return JSONResponse(status_code=422, content={"detail": "Invalid request fields; consult the endpoint schema"},
+                        headers={"Cache-Control": "no-store"})
+
+
 _PUBLIC_API_PATHS = frozenset({
     "/",
     "/health",
@@ -264,7 +280,7 @@ async def error_recovery_middleware(request: Request, call_next):
         # Let HTTP exceptions propagate normally
         raise e
     except Exception as e:
-        logger.error(f"Unhandled error in request {request.url}: {e}")
+        logger.error("Unhandled request error: {} {}", request.method, type(e).__name__)
 
         # Check if we should return a degraded response
         if error_recovery_manager.is_degraded_mode():
@@ -300,6 +316,9 @@ from evolving_agent.api.routes.memory import router as memory_router
 from evolving_agent.api.routes.self_improvement import router as self_improvement_router
 from evolving_agent.api.routes.system import router as system_router
 from evolving_agent.api.routes.web_search import router as web_search_router
+from evolving_agent.api.routes.steward import router as steward_router
+from evolving_agent.api.routes.media import router as media_router
+from evolving_agent.api.routes.connectors import router as connectors_router
 
 app.include_router(general_router)
 app.include_router(interaction_router)
@@ -311,6 +330,9 @@ app.include_router(discord_router)
 app.include_router(web_search_router)
 app.include_router(system_router)
 app.include_router(feedback_router)
+app.include_router(steward_router)
+app.include_router(media_router)
+app.include_router(connectors_router)
 
 
 # ---------------------------------------------------------------------------

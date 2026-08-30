@@ -5,7 +5,11 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-DETECTOR_VERSION = "credential-redaction-v1"
+DETECTOR_VERSION = "credential-redaction-v2"
+
+_SENSITIVE_KEY = re.compile(r"(?i)(?:^|[_-])(?:password|secret|token|api[_-]?key|authorization|nsec|private[_-]?key)(?:$|[_-])")
+_PRIVATE_KEY = re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----", re.DOTALL)
+_NSEC = re.compile(r"(?<![A-Za-z0-9])nsec1[023456789acdefghjklmnpqrstuvwxyz]{20,}")
 
 _CREDENTIAL_ASSIGNMENT = re.compile(
     r"(?i)\b(?P<name>"
@@ -28,6 +32,12 @@ _SECRET_PREFIXES = re.compile(
 def redact_text(value: str) -> tuple[str, List[str]]:
     """Redact credential-shaped values without returning or logging matches."""
     findings: set[str] = set()
+    value, count = _PRIVATE_KEY.subn("[REDACTED:private_key]", value)
+    if count:
+        findings.add("private_key")
+    value, count = _NSEC.subn("[REDACTED:nsec]", value)
+    if count:
+        findings.add("nsec")
 
     def redact_assignment(match: re.Match[str]) -> str:
         if match.group("value").startswith("[REDACTED:"):
@@ -56,6 +66,10 @@ def redact_value(value: Any) -> tuple[Any, List[str]]:
         findings: set[str] = set()
         sanitized: Dict[str, Any] = {}
         for key, item in value.items():
+            if _SENSITIVE_KEY.search(str(key)) and item:
+                sanitized[str(key)] = "[REDACTED:sensitive_field]"
+                findings.add("sensitive_field")
+                continue
             sanitized_item, item_findings = redact_value(item)
             sanitized[str(key)] = sanitized_item
             findings.update(item_findings)

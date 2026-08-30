@@ -4,6 +4,7 @@ Output evaluation system for self-improvement.
 
 import asyncio
 import json
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -42,6 +43,23 @@ class EvaluationResult:
     feedback: str
     confidence: float
     metadata: Dict[str, Any]
+
+    @property
+    def measured_score(self) -> Optional[float]:
+        """Never turn unavailable, disabled, or partially failed judging into evidence."""
+        import math
+
+        if (self.metadata.get("evaluation_disabled") or
+                self.metadata.get("evaluation_skipped") or
+                self.metadata.get("failed_criteria") or
+                not math.isfinite(self.overall_score)):
+            return None
+        return self.overall_score
+
+    @classmethod
+    def skipped(cls, reason: str) -> "EvaluationResult":
+        return cls(0.0, {}, [], [], [], reason, 0.0,
+                   {"evaluation_skipped": True, "reason": reason})
 
 
 class OutputEvaluator:
@@ -158,7 +176,8 @@ class OutputEvaluator:
                 },
             )
 
-            self.evaluation_history.append((query, output, evaluation_result))
+            if evaluation_result.measured_score is not None:
+                self.evaluation_history.append((query, output, evaluation_result))
 
             total_time = (datetime.now() - start_time).total_seconds()
             logger.info(f"Consolidated evaluation completed in {total_time:.2f} seconds. Overall score: {overall_score:.2f}")
@@ -277,9 +296,15 @@ Reply with ONLY this JSON, no other text:
             # Extract scores
             scores_data = data.get("scores", data)  # Handle both nested and flat formats
             criteria_scores = {}
+            failed = []
             for c in criteria:
-                score = scores_data.get(c, 0.7)
-                criteria_scores[c] = max(0.0, min(1.0, float(score)))
+                score = scores_data.get(c)
+                if (isinstance(score, bool) or not isinstance(score, (int, float))
+                        or not math.isfinite(score) or not 0 <= score <= 1):
+                    criteria_scores[c] = 0.0
+                    failed.append(c)
+                else:
+                    criteria_scores[c] = float(score)
 
             # Build feedback dict
             strengths = data.get("strengths", [])
@@ -295,7 +320,7 @@ Reply with ONLY this JSON, no other text:
                     "suggestions": suggestions,
                 }
 
-            return criteria_scores, all_feedback, []
+            return criteria_scores, all_feedback, failed
 
         except Exception as e:
             logger.warning(f"Failed to parse consolidated evaluation: {e}")

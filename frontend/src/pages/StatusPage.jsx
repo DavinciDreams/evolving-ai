@@ -5,6 +5,7 @@ import Spinner from '../components/common/Spinner';
 import { api } from '../services/api';
 import { getGitHubStatus } from '../services/githubService';
 import { getDiscordStatus } from '../services/discordService';
+import StewardPanel from '../components/status/StewardPanel';
 
 const StatusPage = () => {
   const { data: agentStatus, isLoading: loadingStatus, error: statusError } = useQuery({
@@ -75,6 +76,7 @@ const StatusPage = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <StewardPanel />
         {/* Agent Status */}
         <Card title="Agent Status">
           {loadingStatus && !agentStatus ? (

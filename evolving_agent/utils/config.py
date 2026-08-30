@@ -174,12 +174,12 @@ class Config:
     @property
     def enable_self_modification(self) -> bool:
         """Get self-modification setting."""
-        return os.getenv("ENABLE_SELF_MODIFICATION", "true").lower() == "true"
+        return os.getenv("ENABLE_SELF_MODIFICATION", "false").lower() == "true"
 
     @property
     def auto_pr_enabled(self) -> bool:
         """Get automatic PR/issue creation setting for self-improvement."""
-        return os.getenv("AUTO_PR_ENABLED", "true").lower() == "true"
+        return os.getenv("AUTO_PR_ENABLED", "false").lower() == "true"
 
     @property
     def backup_directory(self) -> str:
@@ -219,7 +219,7 @@ class Config:
     @property
     def auto_update_knowledge(self) -> bool:
         """Get auto update knowledge setting."""
-        return os.getenv("AUTO_UPDATE_KNOWLEDGE", "true").lower() == "true"
+        return os.getenv("AUTO_UPDATE_KNOWLEDGE", "false").lower() == "true"
 
     @property
     def knowledge_similarity_threshold(self) -> float:
@@ -386,7 +386,7 @@ class Config:
     @property
     def iterative_revision_max_rounds(self) -> int:
         """Max revision rounds in the CAI-style iterative improvement loop."""
-        return int(os.getenv("ITERATIVE_REVISION_MAX_ROUNDS", "3"))
+        return min(max(int(os.getenv("ITERATIVE_REVISION_MAX_ROUNDS", "1")), 0), 3)
 
     @property
     def iterative_revision_target_score(self) -> float:
@@ -401,7 +401,7 @@ class Config:
     @property
     def enable_best_of_n(self) -> bool:
         """Enable Best-of-N sampling for low-confidence responses."""
-        return os.getenv("ENABLE_BEST_OF_N", "true").lower() == "true"
+        return os.getenv("ENABLE_BEST_OF_N", "false").lower() == "true"
 
     @property
     def reflexion_interval(self) -> int:

@@ -8,14 +8,10 @@ from datetime import datetime
 # from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import chromadb
-# import numpy as np  # Removed unused import
-from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
-
 from ..integrations.ham_memory import HAMMemoryClient
 from ..utils.config import config
 from ..utils.logging import setup_logger
+from ..utils.secret_redaction import redact_text, redact_value
 
 logger = setup_logger(__name__)
 
@@ -304,11 +300,16 @@ class LongTermMemory:
 
     async def _init_embedding_model(self):
         """Initialize the embedding model."""
+        from sentence_transformers import SentenceTransformer
+
         self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
         logger.info("Embedding model loaded")
 
     async def _init_chroma_client(self):
         """Initialize ChromaDB client."""
+        import chromadb
+        from chromadb.config import Settings
+
         self.client = chromadb.PersistentClient(
             path=config.memory_persist_directory,
             settings=Settings(anonymized_telemetry=False, allow_reset=True),
@@ -355,6 +356,10 @@ class LongTermMemory:
     async def add_memory(self, entry: MemoryEntry) -> str:
         """Add a memory entry to the database."""
         self._ensure_initialized()
+        entry.content, content_findings = redact_text(entry.content)
+        entry.metadata, metadata_findings = redact_value(entry.metadata)
+        if content_findings or metadata_findings:
+            entry.metadata["redacted"] = True
         entry.metadata.setdefault("audience", "project")
         if self.backend == "ham":
             memory_id = await self.ham_client.add(
@@ -468,6 +473,8 @@ class LongTermMemory:
     async def update_memory(self, memory_id: str, entry: MemoryEntry) -> bool:
         """Update an existing memory entry."""
         self._ensure_initialized()
+        entry.content, _ = redact_text(entry.content)
+        entry.metadata, _ = redact_value(entry.metadata)
         if self.backend == "ham":
             current = await self.ham_client.get(int(memory_id))
             if not current:

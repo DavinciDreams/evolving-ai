@@ -8,7 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from starlette.responses import StreamingResponse
 
 from evolving_agent.core.agent import SelfImprovingAgent
-from evolving_agent.core.evaluator import EvaluationResult
+from evolving_agent.core.runtime import RuntimeBusyError
 from evolving_agent.utils.config import config
 from evolving_agent.utils.deps import get_agent, verify_api_key
 from evolving_agent.utils.logging import setup_logger
@@ -25,6 +25,14 @@ from evolving_agent.utils.schemas import (
 logger = setup_logger(__name__)
 
 router = APIRouter()
+
+
+def _public_error(exc: Exception) -> str:
+    if isinstance(exc, RuntimeBusyError):
+        return "Katbot is busy; retry after the current operation finishes"
+    if isinstance(exc, TimeoutError):
+        return "Katbot reached its response deadline; check runtime status before retrying"
+    return "Katbot could not complete this response; inspect value-free runtime telemetry"
 
 
 def _estimate_token_count(text: str) -> int:
@@ -58,7 +66,7 @@ async def chat_with_agent(
         query_id = str(uuid.uuid4())
         timestamp = datetime.now()
 
-        logger.info(f"Processing query {query_id}: {request.query[:100]}...")
+        logger.info("Processing query {}", query_id)
 
         # Process the query
         response = await current_agent.run(
@@ -73,13 +81,14 @@ async def chat_with_agent(
             query_id=query_id,
             timestamp=timestamp,
             evaluation_score=current_agent.last_evaluation_score,
-            memory_stored=True,
-            knowledge_updated=True,
+            memory_stored=getattr(current_agent, "last_storage_status", {}).get("memory_stored", False),
+            knowledge_updated=getattr(current_agent, "last_storage_status", {}).get("knowledge_updated", False),
         )
 
     except Exception as e:
-        logger.error(f"Error processing query: {e}")
-        raise HTTPException(status_code=500, detail=f"Error processing query: {str(e)}")
+        logger.error("Chat failed: {}", type(e).__name__)
+        status = 409 if isinstance(e, RuntimeBusyError) else 504 if isinstance(e, TimeoutError) else 500
+        raise HTTPException(status_code=status, detail=_public_error(e)) from None
 
 
 @router.post(
@@ -151,7 +160,7 @@ async def openai_chat_completions(
             else:
                 i += 1
 
-        logger.info(f"OpenAI-compat request {completion_id}: {query[:100]}... ({len(conversation_history)} prior turns)")
+        logger.info("OpenAI-compatible request {}", completion_id)
 
         # Handle streaming
         if request.stream:
@@ -200,7 +209,7 @@ async def openai_chat_completions(
                     yield "data: [DONE]\n\n"
                 except Exception as e:
                     error_chunk = {
-                        "error": {"message": str(e), "type": "internal_error"}
+                        "error": {"message": _public_error(e), "type": "internal_error"}
                     }
                     yield f"data: {_json.dumps(error_chunk)}\n\n"
 
@@ -248,12 +257,12 @@ async def openai_chat_completions(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in OpenAI-compat completions: {e}")
+        logger.error("OpenAI-compatible request failed: {}", type(e).__name__)
         raise HTTPException(
             status_code=500,
             detail={
                 "error": {
-                    "message": str(e),
+                    "message": _public_error(e),
                     "type": "internal_error",
                     "param": None,
                     "code": None,
@@ -290,123 +299,28 @@ async def chat_stream(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid request body: {e}")
+        raise HTTPException(status_code=400, detail="Invalid request body") from None
 
     async def event_stream():
+        # Buffer through the same guarded, redacting path as normal chat.
+        # Raw provider/tool fragments may split a secret across chunks.
         try:
-            from ai_sdk import stream_text
-            from evolving_agent.core.tools import get_all_tools
-
-            # Build context (reusing agent internals)
-            current_agent.interaction_count += 1
-            context = await current_agent.context_manager.get_relevant_context(
-                query=query, context_types=context_hints
+            full_text = await current_agent.run(
+                query, context_hints=context_hints,
+                conversation_id=conversation_id, wait_for_storage=True,
             )
-
-            conversation_history = []
-            if conversation_id:
-                try:
-                    conversation_history = await current_agent.data_manager.get_conversation_history(
-                        conversation_id, limit=10
-                    )
-                except Exception:
-                    pass
-
-            # Use the same system prompt and messages format as _generate_response
-            system_prompt = current_agent._build_system_prompt()
-            messages = current_agent._build_messages(query, context, conversation_history)
-
-            tools = []
-            if config.enable_tool_use:
-                tools = get_all_tools(
-                    web_search=current_agent.web_search,
-                    memory=current_agent.memory,
-                    tpmjs_client=current_agent.tpmjs_client,
-                    enable_tpmjs=bool(current_agent.tpmjs_client),
-                    e2b_sandbox=current_agent.e2b_sandbox,
-                )
-
-            model = current_agent._get_ai_sdk_model()
-
-            def _run_stream():
-                return stream_text(
-                    model=model,
-                    system=system_prompt,
-                    messages=messages,
-                    tools=tools if tools else None,
-                    max_steps=config.max_tool_iterations,
-                    temperature=config.temperature,
-                    max_tokens=config.max_tokens,
-                    on_step=lambda step: None,
-                )
-
-            stream_result = await asyncio.to_thread(_run_stream)
-
-            # Stream text chunks
-            full_text = ""
-            async for chunk in stream_result.text_stream:
-                full_text += chunk
-                event_data = _json.dumps({"type": "chunk", "content": chunk})
+            for offset in range(0, len(full_text), 256):
+                event_data = _json.dumps({"type": "chunk", "content": full_text[offset:offset + 256]})
                 yield f"data: {event_data}\n\n"
-
-            # Send tool call/result info if available
-            if stream_result.tool_results:
-                for tr in stream_result.tool_results:
-                    tc_event = _json.dumps({
-                        "type": "tool_call",
-                        "tool_name": tr.tool_name,
-                        "tool_call_id": tr.tool_call_id,
-                    })
-                    yield f"data: {tc_event}\n\n"
-
-                    tr_event = _json.dumps({
-                        "type": "tool_result",
-                        "tool_name": tr.tool_name,
-                        "result": str(tr.result)[:1000],
-                        "is_error": tr.is_error,
-                    })
-                    yield f"data: {tr_event}\n\n"
-
-            # Final complete event
-            evaluation = EvaluationResult(
-                overall_score=0.8,
-                criteria_scores={},
-                strengths=[],
-                weaknesses=[],
-                improvement_suggestions=[],
-                feedback="Streaming interaction stored without evaluation",
-                confidence=1.0,
-                metadata={"streaming": True},
-            )
-            current_agent.last_evaluation_score = evaluation.overall_score
-            await current_agent._post_response_work(
-                query=query,
-                final_response=full_text,
-                initial_response=full_text,
-                context=context,
-                evaluation=evaluation,
-                conversation_id=conversation_id,
-                run_maintenance=False,
-            )
-            asyncio.create_task(
-                current_agent._run_post_response_maintenance(
-                    query=query,
-                    final_response=full_text,
-                    evaluation=evaluation,
-                )
-            )
-
-            complete_event = _json.dumps({
-                "type": "complete",
-                "text": full_text,
-                "tool_calls_count": len(stream_result.tool_results) if stream_result.tool_results else 0,
+            complete = _json.dumps({
+                "type": "complete", "text": full_text, "tool_calls_count": 0,
+                "buffered": True, "evaluation_score": current_agent.last_evaluation_score,
+                **getattr(current_agent, "last_storage_status", {}),
             })
-            yield f"data: {complete_event}\n\n"
-
-        except Exception as e:
-            logger.error(f"Stream error: {e}")
-            error_event = _json.dumps({"type": "error", "message": str(e)})
-            yield f"data: {error_event}\n\n"
+            yield f"data: {complete}\n\n"
+        except Exception as exc:
+            message = _public_error(exc)
+            yield f"data: {_json.dumps({'type': 'error', 'message': message})}\n\n"
 
     return StreamingResponse(
         event_stream(),
