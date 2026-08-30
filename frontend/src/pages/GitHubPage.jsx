@@ -1,34 +1,36 @@
 import Card from '../components/common/Card';
 import Badge from '../components/common/Badge';
-import Button from '../components/common/Button';
+import { Link } from 'react-router-dom';
 import Spinner from '../components/common/Spinner';
 import {
   useGitHubStatus,
   useGitHubRepository,
   useGitHubPullRequests,
   useGitHubCommits,
-  useTriggerImprovement,
 } from '../hooks/useGitHub';
 import { formatRelativeTime } from '../utils/formatting';
 
 const GitHubPage = () => {
-  const { data: status, isLoading: statusLoading } = useGitHubStatus();
-  const { data: repository, isLoading: repoLoading } = useGitHubRepository();
-  const { data: pullRequests, isLoading: prsLoading } = useGitHubPullRequests();
-  const { data: commits, isLoading: commitsLoading } = useGitHubCommits();
-  const { mutate: triggerImprovement, isPending: triggeringImprovement } = useTriggerImprovement();
+  const { data: status, isLoading: statusLoading, isError: statusError } = useGitHubStatus();
+  const { data: repository, isLoading: repoLoading, isError: repoError } = useGitHubRepository();
+  const { data: prData, isLoading: prsLoading, isError: prsError } = useGitHubPullRequests();
+  const { data: commitData, isLoading: commitsLoading, isError: commitsError } = useGitHubCommits();
+  const pullRequests = Array.isArray(prData) ? prData : prData?.open_pull_requests;
+  const commits = Array.isArray(commitData) ? commitData : commitData?.recent_commits;
 
   return (
     <div className="max-w-7xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">GitHub Integration</h1>
-        <p className="text-gray-600 mt-1">Monitor pull requests, commits, and improvements</p>
+        <p className="text-gray-600 mt-1">Read-only repository status, pull requests, and commits</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
         <Card title="Connection Status">
           {statusLoading ? (
             <Spinner size="sm" />
+          ) : statusError ? (
+            <p role="status" className="text-gray-600">Connection status unavailable. Check authentication and service status.</p>
           ) : status ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -52,6 +54,8 @@ const GitHubPage = () => {
         <Card title="Repository Info">
           {repoLoading ? (
             <Spinner size="sm" />
+          ) : repoError ? (
+            <p role="status" className="text-gray-600">Repository information unavailable. A failed read does not indicate an empty repository.</p>
           ) : repository ? (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -73,21 +77,14 @@ const GitHubPage = () => {
         </Card>
       </div>
 
-      <Card
-        title="Actions"
-        className="mb-6"
-        action={
-          <Button
-            onClick={() => triggerImprovement({})}
-            disabled={triggeringImprovement}
-            size="sm"
-          >
-            {triggeringImprovement ? 'Triggering...' : 'Trigger Improvement'}
-          </Button>
-        }
-      >
+      <Card title="Read-only integration" className="mb-6">
         <p className="text-gray-600">
-          Click the button above to analyze the codebase and create improvement pull requests.
+          Legacy code modification, demo pull requests, and direct issue publication are retired.
+          This page does not change your repository. Publishing changes requires a separately authorized workflow.
+        </p>
+        <p className="text-gray-600 mt-3">
+          The <Link to="/status" className="text-blue-700 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">measured steward controls</Link> evaluate
+          bounded response strategies with explicit promotion and rollback; they do not publish code or train model weights.
         </p>
       </Card>
 
@@ -95,7 +92,9 @@ const GitHubPage = () => {
         <Card title="Recent Pull Requests">
           {prsLoading ? (
             <Spinner size="sm" />
-          ) : pullRequests && pullRequests.length > 0 ? (
+          ) : prsError || !Array.isArray(pullRequests) ? (
+            <p role="status" className="text-gray-600">Pull request history unavailable. No conclusion about repository activity can be drawn.</p>
+          ) : pullRequests.length > 0 ? (
             <div className="space-y-3">
               {pullRequests.map((pr, index) => (
                 <div key={index} className="border-b border-gray-200 pb-3 last:border-0">
@@ -121,7 +120,9 @@ const GitHubPage = () => {
         <Card title="Recent Commits">
           {commitsLoading ? (
             <Spinner size="sm" />
-          ) : commits && commits.length > 0 ? (
+          ) : commitsError || !Array.isArray(commits) ? (
+            <p role="status" className="text-gray-600">Commit history unavailable. No conclusion about repository activity can be drawn.</p>
+          ) : commits.length > 0 ? (
             <div className="space-y-3">
               {commits.map((commit, index) => (
                 <div key={index} className="border-b border-gray-200 pb-3 last:border-0">

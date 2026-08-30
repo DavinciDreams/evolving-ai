@@ -203,6 +203,9 @@ async function handleRetry(config, errorType) {
 
 // Format error messages to be more user-friendly
 function formatErrorMessage(message, status) {
+  if (status === 410) {
+    return 'This legacy action is retired. Use measured steward controls or a separately authorized publishing workflow.';
+  }
   if (typeof message !== 'string') message = status === 422 ? 'Please check your input and try again.' : 'Request failed';
   // Common error patterns and their user-friendly versions
   const errorMap = {

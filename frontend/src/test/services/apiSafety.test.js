@@ -41,6 +41,21 @@ describe('bounded explicit API actions', () => {
     expect(adapter).toHaveBeenCalledTimes(1);
   });
 
+  it('explains retired actions without echoing response text or offering a retry', async () => {
+    const adapter = vi.fn(async config => {
+      const error = rejected(config, 410);
+      error.message = 'timeout opaque-error-secret';
+      error.response.data.detail = 'timeout opaque-response-secret';
+      throw error;
+    });
+    api.defaults.adapter = adapter;
+    const error = await api.post('/self-improve', {}).catch(value => value);
+    expect(error.message).toBe('This legacy action is retired. Use measured steward controls or a separately authorized publishing workflow.');
+    expect(error.response.data.detail).toBe(error.message);
+    expect(String(error) + JSON.stringify(error)).not.toMatch(/opaque|timeout|retry/i);
+    expect(adapter).toHaveBeenCalledTimes(1);
+  });
+
   it('honors noRetry for GET requests', async () => {
     const adapter = vi.fn(async config => { throw rejected(config, 500); });
     api.defaults.adapter = adapter;
