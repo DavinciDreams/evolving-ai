@@ -574,3 +574,13 @@ async def test_uncertain_write_keeps_state_inactive_and_retry_is_same_artifact()
 def test_source_ids_are_not_silently_split_into_characters():
     with pytest.raises(ValueError, match="list or tuple"):
         GuidanceCandidate("bad-provenance", GuidanceStrategy(), source_memory_ids="123")
+
+
+@pytest.mark.asyncio
+async def test_maximum_run_identifier_fits_ham_idempotency_and_cue_limits():
+    memory = Memory()
+    lab = ImprovementLab(memory, demo_runner)
+    report = await lab.evaluate(candidate(), demo_suite(), "r" * 128)
+    entry = memory.entries[report["memory_id"]]
+    assert len(f"evolving-ai:{entry.id}") <= 200
+    assert len(f"source memory {entry.id}") <= 200

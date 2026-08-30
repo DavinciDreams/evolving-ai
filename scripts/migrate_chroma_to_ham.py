@@ -13,6 +13,7 @@ import asyncio
 import hashlib
 import json
 import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
@@ -38,8 +39,25 @@ def _content_sha256(content: str) -> str:
 
 def _write_private(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    path.chmod(0o600)
+    # Exact UTF-8 bytes are essential: Windows newline translation otherwise
+    # invalidates the manifest immediately. Atomic replacement avoids partially
+    # written snapshots. Temporary files are private on POSIX; Windows operators
+    # must also place the snapshot directory under a private user ACL.
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
+        temporary_path = Path(handle.name)
+        try:
+            handle.write(text.encode("utf-8"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        except BaseException:
+            handle.close()
+            temporary_path.unlink(missing_ok=True)
+            raise
+    try:
+        temporary_path.chmod(0o600)
+        os.replace(temporary_path, path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def export_snapshot(
@@ -52,19 +70,35 @@ def export_snapshot(
     client = chromadb.PersistentClient(path=persist_directory)
     collection = client.get_collection(collection_name)
     result = collection.get(include=["documents", "metadatas"])
+    ids = result.get("ids") or []
+    documents = result.get("documents") or []
+    metadatas = result.get("metadatas") or []
+    if len(ids) != len(documents) or len(ids) != len(metadatas):
+        raise RuntimeError("Chroma export arrays have inconsistent cardinality")
+    if len(set(ids)) != len(ids):
+        raise RuntimeError("Chroma export contains duplicate source IDs")
+    for identifier in [collection_name, *ids]:
+        if (
+            not isinstance(identifier, str)
+            or not identifier
+            or redact_text(identifier)[1]
+        ):
+            raise RuntimeError(
+                "Chroma export contains an invalid or credential-shaped identifier"
+            )
 
     rows: List[Dict[str, Any]] = []
     quarantine_rows: List[Dict[str, Any]] = []
-    for source_id, content, metadata in zip(
-        result.get("ids") or [],
-        result.get("documents") or [],
-        result.get("metadatas") or [],
-    ):
+    for source_id, content, metadata in zip(ids, documents, metadatas):
         raw_content = str(content or "")
         raw_metadata = dict(metadata or {})
-        timestamp = raw_metadata.get("timestamp")
         redacted_content, content_findings = redact_text(raw_content)
         redacted_metadata, metadata_findings = redact_value(raw_metadata)
+        timestamp = redacted_metadata.get("timestamp")
+        try:
+            datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+        except ValueError:
+            timestamp = None
         findings = sorted(set(content_findings + metadata_findings))
         if findings:
             quarantine_rows.append(
@@ -125,7 +159,7 @@ def export_snapshot(
         "quarantined_record_count": len(quarantine_rows),
         "redaction_detector_version": DETECTOR_VERSION,
         "metadata_keys": metadata_keys,
-        "visibility_policy": "legacy rows import as project-private unless explicitly republished",
+        "visibility_policy": "legacy rows are shared only within the configured project scope; not agent-private",
         "security_policy": (
             "credential-shaped values are redacted before snapshot persistence; "
             "the quarantine manifest contains attribution and hashes, never matched values"
@@ -146,7 +180,14 @@ def load_snapshot(
     )
     if manifest.get("format") != "evolving-ai-chroma-snapshot-v2-redacted":
         raise RuntimeError("Only the redacted snapshot format may be imported")
+    if (
+        manifest.get("snapshot_file") != "chroma-memory.jsonl"
+        or manifest.get("quarantine_file") != "quarantine-manifest.jsonl"
+    ):
+        raise RuntimeError("Manifest artifact paths do not match the snapshot format")
     snapshot_path = snapshot_directory / manifest["snapshot_file"]
+    if not snapshot_path.resolve().is_relative_to(snapshot_directory.resolve()):
+        raise RuntimeError("Snapshot artifact escapes the snapshot directory")
     snapshot_bytes = snapshot_path.read_bytes()
     actual_sha256 = hashlib.sha256(snapshot_bytes).hexdigest()
     if actual_sha256 != manifest["snapshot_sha256"]:
@@ -161,7 +202,16 @@ def load_snapshot(
     _, snapshot_findings = redact_text(snapshot_bytes.decode("utf-8"))
     if snapshot_findings:
         raise RuntimeError("Snapshot still contains credential-shaped values")
+    for row in rows:
+        if not isinstance(row.get("content"), str) or _content_sha256(
+            row["content"]
+        ) != row.get("content_sha256"):
+            raise RuntimeError("Snapshot per-record content checksum does not match")
+        if row.get("source_collection") != manifest.get("source_collection"):
+            raise RuntimeError("Snapshot source collection does not match manifest")
     quarantine_path = snapshot_directory / manifest["quarantine_file"]
+    if not quarantine_path.resolve().is_relative_to(snapshot_directory.resolve()):
+        raise RuntimeError("Quarantine artifact escapes the snapshot directory")
     quarantine_bytes = quarantine_path.read_bytes()
     if hashlib.sha256(quarantine_bytes).hexdigest() != manifest["quarantine_sha256"]:
         raise RuntimeError("Quarantine manifest checksum does not match manifest")
@@ -172,6 +222,17 @@ def load_snapshot(
     ]
     if len(quarantine_rows) != manifest["quarantined_record_count"]:
         raise RuntimeError("Quarantine record count does not match manifest")
+    quarantine_ids = {row["source_id"] for row in quarantine_rows}
+    expected_quarantine_ids = {
+        row["source_id"]
+        for row in rows
+        if row.get("metadata", {}).get("security_quarantined")
+    }
+    if (
+        len(quarantine_ids) != len(quarantine_rows)
+        or quarantine_ids != expected_quarantine_ids
+    ):
+        raise RuntimeError("Quarantine attribution does not match snapshot")
     _, quarantine_findings = redact_text(quarantine_bytes.decode("utf-8"))
     if quarantine_findings:
         raise RuntimeError("Quarantine manifest contains credential-shaped values")
@@ -194,9 +255,9 @@ async def import_snapshot(snapshot_directory: Path) -> Dict[str, Any]:
     """Import the snapshot with stable per-source idempotency keys."""
     manifest, rows = load_snapshot(snapshot_directory)
     client = build_ham_client()
-    await client.initialize()
     imported: List[Dict[str, Any]] = []
     try:
+        await client.initialize()
         for row in rows:
             source_id = row["source_id"]
             metadata = {
@@ -210,8 +271,7 @@ async def import_snapshot(snapshot_directory: Path) -> Dict[str, Any]:
             ham_id = await client.add(
                 content=row["content"],
                 source_id=source_id,
-                timestamp=row.get("timestamp")
-                or datetime.now(timezone.utc).isoformat(),
+                timestamp=row.get("timestamp") or manifest["created_at"],
                 memory_type=metadata.get("memory_type", "general"),
                 metadata=metadata,
                 idempotency_key=(
@@ -237,6 +297,7 @@ async def import_snapshot(snapshot_directory: Path) -> Dict[str, Any]:
         "imported_count": len(imported),
         "mapping_file": mapping_path.name,
         "mapping_sha256": hashlib.sha256(mapping_text.encode("utf-8")).hexdigest(),
+        "source_snapshot_sha256": manifest["snapshot_sha256"],
     }
     _write_private(
         snapshot_directory / "import-result.json",
@@ -258,21 +319,42 @@ def _representative_rows(rows: List[Dict[str, Any]]) -> Iterable[Dict[str, Any]]
 
 
 async def verify_import(snapshot_directory: Path) -> Dict[str, Any]:
-    """Verify direct content checksums and representative semantic recall."""
-    _, rows = load_snapshot(snapshot_directory)
+    """Verify every imported row directly, then sample semantic recall separately."""
+    manifest, rows = load_snapshot(snapshot_directory)
+    import_result = json.loads(
+        (snapshot_directory / "import-result.json").read_text(encoding="utf-8")
+    )
+    mapping_bytes = (snapshot_directory / "ham-import-map.jsonl").read_bytes()
+    if (
+        hashlib.sha256(mapping_bytes).hexdigest() != import_result.get("mapping_sha256")
+        or import_result.get("source_snapshot_sha256") != manifest["snapshot_sha256"]
+    ):
+        raise RuntimeError("Import mapping checksum or source snapshot does not match")
     mapping_rows = [
-        json.loads(line)
-        for line in (snapshot_directory / "ham-import-map.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line
+        json.loads(line) for line in mapping_bytes.decode("utf-8").splitlines() if line
     ]
     mapping = {row["source_id"]: row for row in mapping_rows}
+    if (
+        len(mapping) != len(mapping_rows)
+        or set(mapping) != {row["source_id"] for row in rows}
+        or len({row["ham_id"] for row in mapping_rows}) != len(rows)
+        or import_result.get("imported_count") != len(rows)
+        or import_result.get("source_count") != len(rows)
+        or any(
+            type(row["ham_id"]) is not int or row["ham_id"] < 1 for row in mapping_rows
+        )
+        or any(
+            mapping[row["source_id"]].get("content_sha256") != row["content_sha256"]
+            for row in rows
+        )
+    ):
+        raise RuntimeError("Import mapping is not a one-to-one complete source mapping")
     client = build_ham_client()
-    await client.initialize()
     checks = []
+    recall_checks = []
     try:
-        for source in _representative_rows(rows):
+        await client.initialize()
+        for source in rows:
             mapped = mapping[source["source_id"]]
             direct = await client.get(int(mapped["ham_id"]))
             direct_ok = bool(
@@ -280,26 +362,48 @@ async def verify_import(snapshot_directory: Path) -> Dict[str, Any]:
                 and _content_sha256(str(direct.get("content") or ""))
                 == source["content_sha256"]
             )
-            query = source["content"][:500].strip() or source["source_id"]
-            recalled = await client.search(query, top_k=20)
-            recall_ok = any(int(row["id"]) == int(mapped["ham_id"]) for row in recalled)
+            provenance_ok = bool(
+                direct
+                and (direct.get("metadata") or {}).get("legacy_source_id")
+                == source["source_id"]
+                and (direct.get("metadata") or {}).get("legacy_collection")
+                == source["source_collection"]
+            )
             checks.append(
                 {
                     "source_id": source["source_id"],
                     "ham_id": mapped["ham_id"],
                     "direct_checksum_ok": direct_ok,
-                    "representative_recall_ok": recall_ok,
+                    "provenance_ok": provenance_ok,
+                }
+            )
+        for source in _representative_rows(rows):
+            mapped = mapping[source["source_id"]]
+            query = source["content"][:500].strip() or source["source_id"]
+            recalled = await client.search(query, top_k=20)
+            recall_checks.append(
+                {
+                    "source_id": source["source_id"],
+                    "ham_id": mapped["ham_id"],
+                    "representative_recall_ok": any(
+                        int(row["id"]) == int(mapped["ham_id"]) for row in recalled
+                    ),
                 }
             )
     finally:
         await client.close()
     result = {
         "checks": checks,
+        "recall_checks": recall_checks,
+        "source_count": len(rows),
+        "direct_checked_count": len(checks),
+        "source_snapshot_sha256": manifest["snapshot_sha256"],
+        "mapping_sha256": import_result["mapping_sha256"],
         "passed": bool(checks)
         and all(
-            check["direct_checksum_ok"] and check["representative_recall_ok"]
-            for check in checks
-        ),
+            check["direct_checksum_ok"] and check["provenance_ok"] for check in checks
+        )
+        and all(check["representative_recall_ok"] for check in recall_checks),
     }
     _write_private(
         snapshot_directory / "verification-result.json",
@@ -309,10 +413,20 @@ async def verify_import(snapshot_directory: Path) -> Dict[str, Any]:
 
 
 def mark_legacy_read_only(snapshot_directory: Path) -> Dict[str, Any]:
+    manifest, rows = load_snapshot(snapshot_directory)
     verification = json.loads(
         (snapshot_directory / "verification-result.json").read_text(encoding="utf-8")
     )
-    if not verification.get("passed"):
+    mapping_sha256 = hashlib.sha256(
+        (snapshot_directory / "ham-import-map.jsonl").read_bytes()
+    ).hexdigest()
+    if (
+        not verification.get("passed")
+        or verification.get("source_snapshot_sha256") != manifest["snapshot_sha256"]
+        or verification.get("mapping_sha256") != mapping_sha256
+        or verification.get("direct_checked_count") != len(rows)
+        or verification.get("source_count") != len(rows)
+    ):
         raise RuntimeError(
             "Cannot mark legacy memory read-only before verification passes"
         )

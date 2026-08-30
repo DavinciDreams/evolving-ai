@@ -1,6 +1,7 @@
 """Contract tests for Katbot's transport-neutral HAM REST adapter."""
 
 import json
+import copy
 
 import httpx
 import pytest
@@ -8,7 +9,37 @@ import pytest
 from evolving_agent.integrations.ham_memory import HAMMemoryClient, HAMMemoryError
 
 
-def _client(handler) -> HAMMemoryClient:
+IDENTITY = {
+    "agent_id": "katbot-evolving-ai",
+    "role": "agent",
+    "scope_boundary": {
+        "mode": "credential_allowlist",
+        "allowed_scopes": ["project:evolving-ai"],
+    },
+}
+PROJECTS = [
+    {
+        "slug": "evolving-ai",
+        "scope": "project:evolving-ai",
+        "repo": "DavinciDreams/evolving-ai",
+    }
+]
+
+
+def _client(
+    handler, *, identity=None, projects=None, preflight=True
+) -> HAMMemoryClient:
+    def routed(request):
+        if preflight and request.url.path == "/whoami":
+            return httpx.Response(
+                200, json=identity if identity is not None else IDENTITY
+            )
+        if preflight and request.url.path == "/projects":
+            return httpx.Response(
+                200, json=projects if projects is not None else PROJECTS
+            )
+        return handler(request)
+
     return HAMMemoryClient(
         base_url="https://ham.invalid",
         api_key="test-ham-credential",
@@ -16,14 +47,19 @@ def _client(handler) -> HAMMemoryClient:
         scope="project:evolving-ai",
         repo="DavinciDreams/evolving-ai",
         expected_agent_id="katbot-evolving-ai",
-        transport=httpx.MockTransport(handler),
+        transport=httpx.MockTransport(routed),
     )
 
 
 @pytest.mark.asyncio
 async def test_initialize_validates_project_scope_and_repository():
+    calls = []
+
     def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
         assert request.headers["Authorization"] == "Bearer test-ham-credential"
+        if request.url.path == "/whoami":
+            return httpx.Response(200, json=IDENTITY)
         return httpx.Response(
             200,
             json=[
@@ -35,11 +71,12 @@ async def test_initialize_validates_project_scope_and_repository():
             ],
         )
 
-    client = _client(handler)
+    client = _client(handler, preflight=False)
     try:
         await client.initialize()
     finally:
         await client.close()
+    assert calls == ["/whoami", "/projects"]
 
 
 @pytest.mark.asyncio
@@ -125,7 +162,7 @@ async def test_remote_error_body_is_not_reflected():
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(403, json={"detail": marker})
 
-    client = _client(handler)
+    client = _client(handler, preflight=False)
     try:
         with pytest.raises(HAMMemoryError) as raised:
             await client.initialize()
@@ -142,5 +179,158 @@ async def test_get_returns_none_for_not_found():
     client = _client(handler)
     try:
         assert await client.get(404) is None
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        {**IDENTITY, "agent_id": "human-user"},
+        {**IDENTITY, "role": "admin"},
+        {
+            **IDENTITY,
+            "scope_boundary": {"mode": "tenant_unrestricted", "allowed_scopes": None},
+        },
+        {
+            **IDENTITY,
+            "scope_boundary": {
+                "mode": "credential_allowlist",
+                "allowed_scopes": ["project:evolving-ai", "shared"],
+            },
+        },
+        {
+            **IDENTITY,
+            "scope_boundary": {
+                "mode": "credential_allowlist",
+                "allowed_scopes": ["project:other"],
+            },
+        },
+    ],
+)
+@pytest.mark.asyncio
+async def test_preflight_rejects_wrong_or_broad_credential_before_any_write(identity):
+    def no_mutations(request):
+        pytest.fail("No mutation is permitted before identity preflight passes")
+
+    client = _client(no_mutations, identity=identity)
+    try:
+        with pytest.raises(HAMMemoryError):
+            await client.add(
+                content="safe",
+                source_id="1",
+                timestamp="2026-08-30T00:00:00Z",
+                memory_type="note",
+                metadata={},
+            )
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize(
+    "projects",
+    [
+        [],
+        [{**PROJECTS[0], "scope": "shared"}],
+        [{**PROJECTS[0], "repo": "wrong/repo"}],
+    ],
+)
+@pytest.mark.asyncio
+async def test_project_preflight_fails_closed(projects):
+    client = _client(lambda request: pytest.fail("no write"), projects=projects)
+    try:
+        with pytest.raises(HAMMemoryError):
+            await client.initialize()
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_reserved_provenance_is_stripped_and_long_keys_fit_protocol():
+    payloads = []
+
+    def handler(request):
+        payload = json.loads(request.content)
+        payloads.append(payload)
+        assert not {"agent_id", "actor_type", "credential_id", "run_id"} & set(
+            payload["metadata"]
+        )
+        assert len(payload["idempotency_key"]) <= 200
+        assert all(len(cue) <= 200 for cue in payload.get("cues", []))
+        assert payload["metadata"]["source_memory_id"] == "x" * 250
+        return httpx.Response(
+            200, json={"id": 8, "metadata": {"agent_id": "katbot-evolving-ai"}}
+        )
+
+    client = _client(handler)
+    metadata = {
+        "agent_id": "spoof",
+        "actor_type": "human",
+        "credential_id": "spoof",
+        "run_id": "spoof",
+        "safe": True,
+    }
+    original = copy.deepcopy(metadata)
+    try:
+        for _ in range(2):
+            await client.add(
+                content="safe",
+                source_id="x" * 250,
+                timestamp="2026-08-30T00:00:00Z",
+                memory_type="note",
+                metadata=metadata,
+            )
+        await client.supersede(
+            7,
+            expected_version=1,
+            content="safe",
+            source_id="x" * 250,
+            timestamp="2026-08-30T00:00:00Z",
+            memory_type="note",
+            metadata=metadata,
+        )
+    finally:
+        await client.close()
+    assert payloads[0]["idempotency_key"] == payloads[1]["idempotency_key"]
+    assert payloads[2]["expected_version"] == 1
+    assert metadata == original
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://ham.example",
+        "https://user:password@ham.example",
+        "https://ham.example?token=bad",
+        "https://ham.example#bad",
+    ],
+)
+def test_credential_transport_rejects_unsafe_urls(url):
+    with pytest.raises(HAMMemoryError, match="HTTPS"):
+        HAMMemoryClient(
+            base_url=url,
+            api_key="fake",
+            project="evolving-ai",
+            scope="project:evolving-ai",
+            repo="repo",
+            expected_agent_id="katbot-evolving-ai",
+        )
+
+
+@pytest.mark.parametrize("operation", ["search", "recent", "get", "stats"])
+@pytest.mark.asyncio
+async def test_malformed_read_responses_are_errors_not_empty_memory(operation):
+    malformed = {} if operation in {"search", "recent"} else []
+    client = _client(lambda request: httpx.Response(200, json=malformed))
+    try:
+        with pytest.raises(HAMMemoryError, match="malformed"):
+            if operation == "search":
+                await client.search("query", top_k=5)
+            elif operation == "recent":
+                await client.recent(limit=5)
+            elif operation == "get":
+                await client.get(1)
+            else:
+                await client.stats()
     finally:
         await client.close()

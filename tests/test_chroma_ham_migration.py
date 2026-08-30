@@ -6,7 +6,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from scripts.migrate_chroma_to_ham import export_snapshot, load_snapshot
+from scripts.migrate_chroma_to_ham import (
+    export_snapshot,
+    load_snapshot,
+    import_snapshot,
+    verify_import,
+    mark_legacy_read_only,
+)
 
 
 def test_export_redacts_and_quarantines_credentials_without_storing_values(tmp_path):
@@ -108,7 +114,7 @@ def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
     tampered = "".join(
         f"{json.dumps(row, sort_keys=True, separators=(',', ':'))}\n" for row in rows
     )
-    snapshot_path.write_text(tampered)
+    snapshot_path.write_bytes(tampered.encode())
     manifest_path = tmp_path / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
     manifest["snapshot_sha256"] = hashlib.sha256(tampered.encode()).hexdigest()
@@ -116,3 +122,214 @@ def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
 
     with pytest.raises(RuntimeError, match="credential-shaped"):
         load_snapshot(tmp_path)
+
+
+def _export(tmp_path, count=3):
+    collection = MagicMock()
+    collection.get.return_value = {
+        "ids": [f"source-{i:03d}" for i in range(count)],
+        "documents": [f"Ordinary safe note {i}" for i in range(count)],
+        "metadatas": [{"memory_type": "note"} for _ in range(count)],
+    }
+    chroma = MagicMock()
+    chroma.get_collection.return_value = collection
+    with patch(
+        "scripts.migrate_chroma_to_ham.chromadb.PersistentClient", return_value=chroma
+    ):
+        return export_snapshot(
+            persist_directory="unused",
+            collection_name="agent_memory",
+            snapshot_directory=tmp_path,
+        )
+
+
+class FakeHAM:
+    def __init__(self):
+        self.entries = {}
+        self.keys = {}
+        self.add_calls = []
+        self.get_calls = []
+        self.closed = False
+
+    async def initialize(self):
+        pass
+
+    async def add(self, **kwargs):
+        self.add_calls.append(kwargs)
+        key = kwargs["idempotency_key"]
+        if key not in self.keys:
+            memory_id = len(self.entries) + 1
+            self.keys[key] = memory_id
+            self.entries[memory_id] = {
+                "id": memory_id,
+                "content": kwargs["content"],
+                "metadata": kwargs["metadata"],
+            }
+        return self.keys[key]
+
+    async def get(self, memory_id):
+        self.get_calls.append(memory_id)
+        return self.entries.get(memory_id)
+
+    async def search(self, query, *, top_k):
+        return [
+            entry
+            for entry in self.entries.values()
+            if entry["content"].startswith(query)
+        ]
+
+    async def close(self):
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_complete_import_verify_and_marker_with_no_live_services(tmp_path):
+    manifest = _export(tmp_path, 16)
+    client = FakeHAM()
+    with patch("scripts.migrate_chroma_to_ham.build_ham_client", return_value=client):
+        imported = await import_snapshot(tmp_path)
+        verified = await verify_import(tmp_path)
+    assert imported["source_snapshot_sha256"] == manifest["snapshot_sha256"]
+    assert verified["passed"]
+    assert verified["direct_checked_count"] == 16
+    assert len(client.get_calls) == 16
+    assert len(verified["recall_checks"]) < 16
+    assert mark_legacy_read_only(tmp_path)["state"] == "read-only"
+    assert client.closed
+
+
+@pytest.mark.asyncio
+async def test_unsampled_corruption_is_caught_by_full_direct_verification(tmp_path):
+    _export(tmp_path, 16)
+    client = FakeHAM()
+    with patch("scripts.migrate_chroma_to_ham.build_ham_client", return_value=client):
+        await import_snapshot(tmp_path)
+        client.entries[8]["content"] = "corrupted middle record"
+        verified = await verify_import(tmp_path)
+    assert not verified["passed"]
+    assert verified["direct_checked_count"] == 16
+    assert all(check["representative_recall_ok"] for check in verified["recall_checks"])
+    with pytest.raises(RuntimeError, match="before verification passes"):
+        mark_legacy_read_only(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_repeated_import_keeps_keys_timestamps_and_cardinality(tmp_path):
+    _export(tmp_path)
+    client = FakeHAM()
+    with patch("scripts.migrate_chroma_to_ham.build_ham_client", return_value=client):
+        await import_snapshot(tmp_path)
+        await import_snapshot(tmp_path)
+    assert len(client.entries) == 3
+    assert client.add_calls[:3] == client.add_calls[3:]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"ids": ["one", "two"], "documents": ["only one"], "metadatas": [{}, {}]},
+        {"ids": ["one", "one"], "documents": ["one", "two"], "metadatas": [{}, {}]},
+    ],
+)
+def test_export_fails_before_writing_on_truncation_or_duplicate_ids(tmp_path, result):
+    chroma = MagicMock()
+    chroma.get_collection.return_value.get.return_value = result
+    with patch(
+        "scripts.migrate_chroma_to_ham.chromadb.PersistentClient", return_value=chroma
+    ):
+        with pytest.raises(RuntimeError):
+            export_snapshot(
+                persist_directory="unused",
+                collection_name="agent_memory",
+                snapshot_directory=tmp_path,
+            )
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_per_record_checksum_is_verified_even_if_manifest_hash_matches(tmp_path):
+    _export(tmp_path)
+    snapshot = tmp_path / "chroma-memory.jsonl"
+    rows = [json.loads(line) for line in snapshot.read_text().splitlines()]
+    rows[1]["content"] = "tampered but safe content"
+    payload = "".join(json.dumps(row) + "\n" for row in rows).encode()
+    snapshot.write_bytes(payload)
+    manifest_path = tmp_path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["snapshot_sha256"] = hashlib.sha256(payload).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(RuntimeError, match="per-record"):
+        load_snapshot(tmp_path)
+
+
+def test_manifest_cannot_reference_files_outside_snapshot(tmp_path):
+    _export(tmp_path)
+    manifest_path = tmp_path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["snapshot_file"] = "../outside.jsonl"
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(RuntimeError, match="artifact paths"):
+        load_snapshot(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_mapping_tampering_rejected_before_network(tmp_path):
+    _export(tmp_path)
+    client = FakeHAM()
+    with patch("scripts.migrate_chroma_to_ham.build_ham_client", return_value=client):
+        await import_snapshot(tmp_path)
+    mapping = tmp_path / "ham-import-map.jsonl"
+    mapping.write_bytes(mapping.read_bytes() + b"\n")
+    with patch(
+        "scripts.migrate_chroma_to_ham.build_ham_client",
+        side_effect=AssertionError("no network"),
+    ):
+        with pytest.raises(RuntimeError, match="mapping checksum"):
+            await verify_import(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_stale_verification_cannot_mark_a_different_snapshot(tmp_path):
+    _export(tmp_path)
+    client = FakeHAM()
+    with patch("scripts.migrate_chroma_to_ham.build_ham_client", return_value=client):
+        await import_snapshot(tmp_path)
+        await verify_import(tmp_path)
+    _export(tmp_path, count=4)
+    with pytest.raises(RuntimeError, match="before verification passes"):
+        mark_legacy_read_only(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_client_is_closed_if_preflight_fails(tmp_path):
+    _export(tmp_path)
+    client = FakeHAM()
+
+    async def failed():
+        raise RuntimeError("preflight denied")
+
+    client.initialize = failed
+    with patch("scripts.migrate_chroma_to_ham.build_ham_client", return_value=client):
+        with pytest.raises(RuntimeError, match="preflight"):
+            await import_snapshot(tmp_path)
+    assert client.closed
+
+
+def test_timestamp_metadata_does_not_bypass_redaction(tmp_path):
+    credential = "sk-" + "synthetic-test-value-12345"
+    chroma = MagicMock()
+    chroma.get_collection.return_value.get.return_value = {
+        "ids": ["one"],
+        "documents": ["safe"],
+        "metadatas": [{"timestamp": credential}],
+    }
+    with patch(
+        "scripts.migrate_chroma_to_ham.chromadb.PersistentClient", return_value=chroma
+    ):
+        export_snapshot(
+            persist_directory="unused",
+            collection_name="agent_memory",
+            snapshot_directory=tmp_path,
+        )
+    assert credential not in "".join(path.read_text() for path in tmp_path.iterdir())
+    _, rows = load_snapshot(tmp_path)
+    assert rows[0]["timestamp"] is None

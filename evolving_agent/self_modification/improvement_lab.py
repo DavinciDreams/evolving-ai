@@ -468,7 +468,7 @@ class ImprovementLab:
     async def _persist_report(self, report: dict[str, Any]) -> dict[str, Any]:
         if "memory_id" not in report:
             report["memory_id"] = await self._persist(
-                f"improvement-eval:{report['run_id']}:{_digest(report)}",
+                f"improvement-eval:{_digest(report)}",
                 "improvement_evaluation",
                 report,
             )

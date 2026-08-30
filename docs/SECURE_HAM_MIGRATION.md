@@ -85,15 +85,26 @@ TPMJS_ENABLED=false
 The frontend holds `PROJECT_API_KEY` only in JavaScript memory after a successful
 `GET /status` check. It is not written to local storage or session storage.
 
+Before any mutation the HAM adapter calls `/whoami` and requires the expected
+agent, non-admin role, and exactly the project scope above, then validates the
+project catalog. Broad/admin or wrong-agent credentials are rejected before a
+write. HAM transport must use HTTPS. Identity/credential metadata supplied by
+callers is removed; only server-side attribution is authoritative.
+
 ## Gate 3: export a redacted, attributable snapshot
 
-Run inside the Coolify application container while the legacy volume is mounted.
+Take a consistent, quiesced backup/copy of the legacy volume first, then run the
+export against that copy inside the controlled maintenance environment. Chroma's
+`PersistentClient` may update internal database metadata on opening; do not point
+it at the only original volume or assume the client itself guarantees read-only
+access. Preserve the original volume unchanged and mounted read-only.
 The export scans content and metadata before persistence. Credential-shaped
 values are replaced with detector labels; the quarantine manifest contains only
 source IDs, timestamps, detector classes, and one-way hashes.
 
 ```bash
 python -m scripts.migrate_chroma_to_ham export \
+  --persist-directory /app/data/backups/legacy-chroma-copy \
   --snapshot-directory /app/data/backups/chroma-to-ham
 ```
 
@@ -104,6 +115,11 @@ chroma-memory.jsonl           redacted records with stable source IDs/timestamps
 quarantine-manifest.jsonl     value-free attribution for redacted records
 manifest.json                 counts, filenames, checksums, detector version
 ```
+
+Artifacts use atomic, canonical UTF-8 byte writes so checksums agree on Windows
+and Linux. On Windows, `0600` does not establish a private ACL: use an
+operator-controlled directory with a private Windows ACL. The export fails rather
+than silently dropping records if Chroma result arrays differ in length.
 
 Review counts and checksums only. Never paste record content into an operator
 terminal, issue, PR, chat, or HAM memory.
@@ -121,9 +137,16 @@ python -m scripts.migrate_chroma_to_ham verify \
 ```
 
 Each import uses an idempotency key derived from the collection, stable source
-ID, and redacted content checksum. Verification checks direct content checksums
-and representative semantic recall. It also verifies that the server attributed
+ID, and redacted content checksum. Verification checks the mapping's checksum and
+complete one-to-one source coverage, then checks **every** imported record's
+content checksum and legacy source attribution. Semantic recall is sampled and
+reported separately. It also verifies that the server attributed
 writes to `katbot-evolving-ai`; callers cannot assert that identity themselves.
+
+Legacy records are `visibility=shared` within `project:evolving-ai`, not globally
+public and not agent-private. The application keeps their `audience=project` so
+public memory routes do not expose them. Quarantine labels remain attached;
+successful transport is not authority to use quarantined content as guidance.
 
 If verification fails, stop. Keep `MEMORY_BACKEND=chroma` only in an isolated
 maintenance environment with writes disabled. Do not delete or alter the source
@@ -138,7 +161,9 @@ python -m scripts.migrate_chroma_to_ham mark-read-only \
   --snapshot-directory /app/data/backups/chroma-to-ham
 ```
 
-The command writes an auditable marker; it does not delete data. Keep the
+The command checks that verification is bound to the current snapshot and mapping
+before writing an auditable marker; it does not delete data or itself remount a
+volume/change deployment configuration. Keep the
 `evolving-ai-memory` volume mounted read-only for the rollback window. Rollback
 requires an explicit operator decision and must never be triggered automatically.
 

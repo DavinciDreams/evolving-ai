@@ -6,7 +6,9 @@ This client deliberately never sends an agent identity header or payload field.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -42,11 +44,24 @@ class HAMMemoryClient:
             raise HAMMemoryError(
                 "HAM_EXPECTED_AGENT_ID is required for credential attribution checks"
             )
+        parsed_url = urlsplit(base_url)
+        if (
+            parsed_url.scheme != "https"
+            or not parsed_url.hostname
+            or parsed_url.username
+            or parsed_url.password
+            or parsed_url.query
+            or parsed_url.fragment
+        ):
+            raise HAMMemoryError(
+                "HAM_API_URL must be an HTTPS service URL without credentials, query, or fragment"
+            )
 
         self.project = project
         self.scope = scope
         self.repo = repo
         self.expected_agent_id = expected_agent_id
+        self._initialized = False
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {api_key}"},
@@ -68,8 +83,29 @@ class HAMMemoryClient:
             raise HAMMemoryError(f"HAM request failed: {type(exc).__name__}") from exc
 
     async def initialize(self) -> None:
-        """Verify the credential can see the configured project."""
+        """Verify principal and least authority before the first memory mutation."""
+        self._initialized = False
+        identity = await self._request("GET", "/whoami")
+        if (
+            not isinstance(identity, dict)
+            or identity.get("agent_id") != self.expected_agent_id
+        ):
+            raise HAMMemoryError(
+                "HAM credential identity does not match expected agent"
+            )
+        boundary = identity.get("scope_boundary") or {}
+        if (
+            identity.get("role") != "agent"
+            or not isinstance(boundary, dict)
+            or boundary.get("mode") != "credential_allowlist"
+            or boundary.get("allowed_scopes") != [self.scope]
+        ):
+            raise HAMMemoryError(
+                "HAM credential must be a non-admin agent restricted to exactly the configured project scope"
+            )
         projects = await self._request("GET", "/projects")
+        if not isinstance(projects, list):
+            raise HAMMemoryError("HAM project response was malformed")
         visible = {
             str(item.get("slug")): item for item in projects if isinstance(item, dict)
         }
@@ -84,12 +120,33 @@ class HAMMemoryClient:
             )
         if self.repo and configured.get("repo") not in {None, self.repo}:
             raise HAMMemoryError("HAM project repository attribution does not match")
+        self._initialized = True
+
+    async def _ensure_initialized(self) -> None:
+        if not self._initialized:
+            await self.initialize()
+
+    @staticmethod
+    def _metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+        reserved = {"agent_id", "actor_type", "credential_id", "run_id"}
+        return {key: value for key, value in metadata.items() if key not in reserved}
+
+    @staticmethod
+    def _bounded_key(value: str) -> str:
+        """HAM keys and cues have a 200-character protocol limit."""
+        return (
+            value
+            if len(value) <= 200
+            else "sha256:" + hashlib.sha256(value.encode()).hexdigest()
+        )
 
     async def _assert_write_identity(
         self, result: Dict[str, Any], memory_id: int
     ) -> None:
         """Verify server-side attribution, including idempotent retry responses."""
-        attributed_agent = result.get("agent_id")
+        attributed_agent = result.get("agent_id") or (result.get("metadata") or {}).get(
+            "agent_id"
+        )
         if not attributed_agent:
             stored = await self.get(memory_id)
             attributed_agent = (stored or {}).get("metadata", {}).get("agent_id")
@@ -109,11 +166,12 @@ class HAMMemoryClient:
         metadata: Dict[str, Any],
         idempotency_key: Optional[str] = None,
     ) -> int:
+        await self._ensure_initialized()
         payload = {
             "content": content,
             "timestamp": timestamp,
             "metadata": {
-                **metadata,
+                **self._metadata(metadata),
                 "source_memory_id": source_id,
                 "audience": metadata.get("audience", "project"),
             },
@@ -125,8 +183,13 @@ class HAMMemoryClient:
             "task": "katbot-runtime-memory",
             "durability": "project",
             "visibility": "shared",
-            "idempotency_key": idempotency_key or f"evolving-ai:{source_id}",
-            "cues": [f"katbot {memory_type}", f"source memory {source_id}"],
+            "idempotency_key": self._bounded_key(
+                idempotency_key or f"evolving-ai:{source_id}"
+            ),
+            "cues": [
+                self._bounded_key(f"katbot {memory_type}"),
+                self._bounded_key(f"source memory {source_id}"),
+            ],
         }
         result = await self._request("POST", "/ingest", json=payload)
         memory_id = int(result["id"])
@@ -150,7 +213,9 @@ class HAMMemoryClient:
         if memory_type:
             payload["types"] = [memory_type]
         result = await self._request("POST", "/search", json=payload)
-        return result if isinstance(result, list) else []
+        if not isinstance(result, list):
+            raise HAMMemoryError("HAM search response was malformed")
+        return result
 
     async def recent(
         self,
@@ -167,7 +232,9 @@ class HAMMemoryClient:
         if memory_type:
             payload["types"] = [memory_type]
         result = await self._request("POST", "/memories/recent", json=payload)
-        return result if isinstance(result, list) else []
+        if not isinstance(result, list):
+            raise HAMMemoryError("HAM recent response was malformed")
+        return result
 
     async def get(self, memory_id: int) -> Optional[Dict[str, Any]]:
         try:
@@ -176,11 +243,15 @@ class HAMMemoryClient:
             if exc.status_code == 404:
                 return None
             raise
-        return result if isinstance(result, dict) else None
+        if not isinstance(result, dict):
+            raise HAMMemoryError("HAM memory response was malformed")
+        return result
 
     async def stats(self) -> Dict[str, Any]:
         result = await self._request("GET", "/stats")
-        return result if isinstance(result, dict) else {}
+        if not isinstance(result, dict):
+            raise HAMMemoryError("HAM stats response was malformed")
+        return result
 
     async def supersede(
         self,
@@ -193,11 +264,12 @@ class HAMMemoryClient:
         memory_type: str,
         metadata: Dict[str, Any],
     ) -> int:
+        await self._ensure_initialized()
         payload = {
             "content": content,
             "timestamp": timestamp,
             "metadata": {
-                **metadata,
+                **self._metadata(metadata),
                 "source_memory_id": source_id,
                 "audience": metadata.get("audience", "project"),
             },
@@ -209,7 +281,9 @@ class HAMMemoryClient:
             "durability": "project",
             "visibility": "shared",
             "expected_version": expected_version,
-            "idempotency_key": f"evolving-ai:supersede:{memory_id}:{source_id}",
+            "idempotency_key": self._bounded_key(
+                f"evolving-ai:supersede:{memory_id}:{source_id}"
+            ),
             "reason": "Katbot memory update",
         }
         result = await self._request(
@@ -220,6 +294,7 @@ class HAMMemoryClient:
         return replacement_id
 
     async def retract(self, memory_id: int, *, expected_version: int) -> bool:
+        await self._ensure_initialized()
         await self._request(
             "POST",
             f"/memories/{memory_id}/retract",
