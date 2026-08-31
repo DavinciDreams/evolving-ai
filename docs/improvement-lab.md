@@ -75,6 +75,19 @@ Provider-side model aliases may change behind the same identifier, temperature
 zero does not guarantee determinism, and hashing does not establish model weights
 or service version. Pin versioned models and curate repeat trials when available.
 
+Chat and the bounded runner use the same credential-free selected-provider
+resolver. An explicitly configured, nonempty `DEFAULT_MODEL` takes precedence
+over `OPENAI_MODEL`/`ZAI_MODEL`; without that override, those providers use their
+provider-specific model. Anthropic/OpenRouter use `DEFAULT_MODEL` (set a model
+appropriate to that provider; the legacy baked-in default is ZAI-specific).
+Only the selected provider's credentials are used, never a different provider
+as an implicit fallback. For OpenAI-compatible endpoints, a bare HTTPS host gains
+`/v1`; explicit versioned or proxy paths are preserved. HTTPS on port 443 without
+URL credentials, query strings or fragments is required. This intentionally
+rejects legacy HTTP local endpoints; configure an approved HTTPS endpoint rather
+than weakening the learning transport. These resolution rules do not remove the
+intentional differences in tools, retrieval, temperature and output cap.
+
 ## Evidence and gates
 
 - Deterministic exact-match grading after outer whitespace removal; no LLM's

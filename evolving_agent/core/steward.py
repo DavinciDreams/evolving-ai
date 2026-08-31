@@ -18,6 +18,7 @@ from ..self_modification.improvement_lab import (
     ModelOutput,
 )
 from ..utils.secret_redaction import redact_text
+from ..integrations.provider_config import resolve_provider
 
 
 EXPERIMENT_BOUNDARY_PROMPT = (
@@ -34,25 +35,11 @@ def _sha256(value: str) -> str:
 def _harness_for(llm) -> HarnessDescriptor:
     """Inspect only non-secret selected-provider configuration; never credentials."""
     cfg = getattr(llm, "config", None)
-    provider = getattr(cfg, "default_llm_provider", "unspecified")
+    provider = "unspecified"
     model, endpoint = "unspecified", "unspecified"
-    if provider == "anthropic":
-        model, endpoint = cfg.default_model, "https://api.anthropic.com/v1/messages"
-    elif provider == "openrouter":
-        model, endpoint = (
-            cfg.default_model,
-            "https://openrouter.ai/api/v1/chat/completions",
-        )
-    elif provider == "zai":
-        model, endpoint = (
-            cfg.zai_model,
-            cfg.zai_base_url.rstrip("/") + "/chat/completions",
-        )
-    elif provider == "openai":
-        model = cfg.openai_model
-        endpoint = (cfg.openai_base_url or "https://api.openai.com/v1").rstrip(
-            "/"
-        ) + "/chat/completions"
+    if cfg is not None:
+        selected = resolve_provider(cfg)
+        provider, model, endpoint = selected.provider, selected.model, selected.endpoint
     return HarnessDescriptor(
         provider=provider,
         model_sha256=_sha256(model),

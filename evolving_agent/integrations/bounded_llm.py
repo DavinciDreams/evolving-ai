@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-from urllib.parse import urlsplit
 
 import httpx
+
+from .provider_config import resolve_provider
 
 
 class BoundedTextProvider:
@@ -50,15 +51,12 @@ class BoundedTextProvider:
         if len(prompt) + len(system_prompt or "") > 72000:
             raise ValueError("Learning input limit exceeded")
         cfg = self.config
-        provider = cfg.default_llm_provider
+        selected = resolve_provider(cfg)
+        provider, model, url = selected.provider, selected.model, selected.endpoint
         if provider == "anthropic":
             if temperature > 1:
                 raise ValueError("Anthropic learning temperature must not exceed one")
-            url, key, model = (
-                "https://api.anthropic.com/v1/messages",
-                cfg.anthropic_api_key,
-                cfg.default_model,
-            )
+            key = cfg.anthropic_api_key
             headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
             body = {
                 "model": model,
@@ -70,24 +68,11 @@ class BoundedTextProvider:
         else:
             # Resolve only the selected provider, never unrelated credentials/config.
             if provider == "zai":
-                url, key, model = (
-                    cfg.zai_base_url.rstrip("/") + "/chat/completions",
-                    cfg.zai_api_key,
-                    cfg.zai_model,
-                )
+                key = cfg.zai_api_key
             elif provider == "openrouter":
-                url, key, model = (
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    cfg.openrouter_api_key,
-                    cfg.default_model,
-                )
+                key = cfg.openrouter_api_key
             elif provider == "openai":
-                url, key, model = (
-                    (cfg.openai_base_url or "https://api.openai.com/v1").rstrip("/")
-                    + "/chat/completions",
-                    cfg.openai_api_key,
-                    cfg.openai_model,
-                )
+                key = cfg.openai_api_key
             else:
                 raise RuntimeError("Unsupported budgeted learning provider")
             headers = {"Authorization": f"Bearer {key}"}
@@ -105,20 +90,7 @@ class BoundedTextProvider:
             }
             if official_openai:
                 body["store"] = False
-        try:
-            parsed = urlsplit(url)
-            valid_url = (
-                parsed.scheme == "https"
-                and parsed.hostname
-                and not parsed.username
-                and not parsed.password
-                and not parsed.query
-                and not parsed.fragment
-                and parsed.port in (None, 443)
-            )
-        except (ValueError, TypeError):
-            valid_url = False
-        if not key or not valid_url:
+        if not key:
             raise RuntimeError("Budgeted learning requires a configured HTTPS provider")
         try:
             async with asyncio.timeout(timeout):

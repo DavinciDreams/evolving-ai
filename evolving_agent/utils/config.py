@@ -152,6 +152,18 @@ class Config:
         return os.getenv("DEFAULT_MODEL", "glm-5.1")
 
     @property
+    def default_model_override(self) -> str:
+        """Explicit cross-provider model override; empty means provider default."""
+        return os.getenv("DEFAULT_MODEL", "")
+
+    @property
+    def selected_model(self) -> str:
+        """Resolve the exact model shared by chat and bounded learning."""
+        from ..integrations.provider_config import resolve_provider
+
+        return resolve_provider(self).model
+
+    @property
     def evaluation_model(self) -> str:
         """Get evaluation model."""
         return os.getenv("EVALUATION_MODEL", "glm-5.1")

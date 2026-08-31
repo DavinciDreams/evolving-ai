@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from evolving_agent.integrations.bounded_llm import BoundedTextProvider
+from evolving_agent.integrations.provider_config import resolve_provider
 
 
 def cfg(provider="openai", **changes):
@@ -39,6 +40,9 @@ async def test_only_selected_config_and_exact_provider_request(provider):
     def handler(request):
         requests.append(request)
         body = json.loads(request.content)
+        selected = resolve_provider(cfg(provider))
+        assert body["model"] == selected.model
+        assert str(request.url) == selected.endpoint
         assert "tools" not in body and "tool_choice" not in body
         assert body["messages"][-1]["content"] == "question"
         if provider == "anthropic":
@@ -87,6 +91,53 @@ async def test_openai_compatible_endpoint_retains_legacy_shape():
 
     provider = BoundedTextProvider(
         cfg(openai_base_url="https://example.test/v1/"),
+        transport=httpx.MockTransport(handler),
+    )
+    assert await provider.generate_response(prompt="test") == "answer"
+
+
+@pytest.mark.parametrize(
+    "base,expected",
+    [
+        ("https://example.test", "https://example.test/v1/chat/completions"),
+        (
+            "https://example.test/proxy/v4",
+            "https://example.test/proxy/v4/chat/completions",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_shared_model_override_and_endpoint_reach_actual_transport(
+    base, expected
+):
+    def handler(request):
+        assert str(request.url) == expected
+        assert json.loads(request.content)["model"] == "explicit-shared-model"
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "answer"}}]}
+        )
+
+    provider = BoundedTextProvider(
+        cfg(openai_base_url=base, default_model_override="explicit-shared-model"),
+        transport=httpx.MockTransport(handler),
+    )
+    assert await provider.generate_response(prompt="test") == "answer"
+
+
+@pytest.mark.asyncio
+async def test_official_openai_default_port_is_canonical_for_token_shape():
+    def handler(request):
+        assert str(request.url) == "https://api.openai.com/v1/chat/completions"
+        body = json.loads(request.content)
+        assert body["max_completion_tokens"] == 900
+        assert body["store"] is False
+        assert "max_tokens" not in body
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "answer"}}]}
+        )
+
+    provider = BoundedTextProvider(
+        cfg(openai_base_url="https://API.OPENAI.COM:443/v1/"),
         transport=httpx.MockTransport(handler),
     )
     assert await provider.generate_response(prompt="test") == "answer"
