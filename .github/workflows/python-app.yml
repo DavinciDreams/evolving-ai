@@ -46,4 +46,4 @@ jobs:
         pytest tests/test_agent_run.py tests/test_agent_review_guards.py tests/test_agent_cleanup.py tests/test_generation_fallback.py tests/test_memory_safety.py -q
     - name: Test actual authenticated application with fake providers
       run: |
-        pytest tests/test_steward_app_routes.py tests/test_steward_auxiliary_routes.py tests/test_legacy_steward_routes.py tests/test_github_read_routes.py tests/test_status_evidence.py tests/test_media_service.py tests/test_connector_service.py tests/test_media_connector_routes.py tests/test_api_routes.py -q
+        pytest tests/test_steward_app_routes.py tests/test_steward_auxiliary_routes.py tests/test_service_lifecycle.py tests/test_legacy_steward_routes.py tests/test_github_read_routes.py tests/test_status_evidence.py tests/test_media_service.py tests/test_connector_service.py tests/test_media_connector_routes.py tests/test_api_routes.py -q
