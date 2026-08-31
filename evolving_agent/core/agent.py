@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import openai as _openai_lib
-from ai_sdk import generate_text, stream_text, openai as openai_model, anthropic as anthropic_model
+from ai_sdk import generate_text
 from ai_sdk.types import CoreUserMessage, CoreAssistantMessage
 from ai_sdk.providers.openai import OpenAIModel
 
@@ -397,6 +397,7 @@ class SelfImprovingAgent:
         Returns:
             Dictionary containing search results and metadata
         """
+        query = redact_text(query)[0]
         if not self.web_search:
             self.logger.warning("Web search not enabled")
             return {
@@ -406,7 +407,7 @@ class SelfImprovingAgent:
             }
 
         try:
-            self.logger.info(f"Searching web for: {query[:100]}")
+            self.logger.info("Starting authorized web search")
             results = await self.web_search.search_and_summarize(
                 query, max_results=max_results or config.web_search_max_results
             )
@@ -424,15 +425,11 @@ class SelfImprovingAgent:
             )
             await self.memory.add_memory(search_memory)
 
-            return results
+            return redact_value(results)[0]
 
         except Exception as e:
-            self.logger.error(f"Web search failed: {e}")
-            return {
-                "query": query,
-                "results": [],
-                "error": str(e),
-            }
+            self.logger.error("Web search failed: {}", type(e).__name__)
+            raise RuntimeError("Web search could not complete") from None
 
     async def _notify_status(self, event_type: str, data: Dict[str, Any]) -> None:
         """Notify all registered callbacks of a status event.
@@ -710,7 +707,10 @@ class SelfImprovingAgent:
         from ..integrations.bounded_llm import BoundedTextProvider
         return await BoundedTextProvider(config).generate_response(
             prompt=self._build_fallback_prompt(query, context, conversation_history),
-            system_prompt=self._build_system_prompt(), max_tokens=min(config.max_tokens, 4000),
+            system_prompt=self._build_system_prompt() + (
+                "\nFor this response tools are unavailable. Do not claim new actions "
+                "or retrieval; distinguish provided evidence from inference."
+            ), max_tokens=min(config.max_tokens, 4000),
             temperature=config.temperature, timeout=10,
         )
 
@@ -748,55 +748,26 @@ class SelfImprovingAgent:
     # _handle_self_analysis_request removed — now handled by read_file/list_files tools
 
     def _get_ai_sdk_model(self):
-        """Create an AI SDK model from the current provider config."""
-        provider = config.default_llm_provider
-        model_name = config.default_model
-
-        if provider == "anthropic" and config.anthropic_api_key:
-            return anthropic_model(model_name, api_key=config.anthropic_api_key)
-
-        if provider == "zai" and config.zai_api_key:
-            model = OpenAIModel(model_name, api_key=config.zai_api_key)
-            model._client = _openai_lib.OpenAI(
-                api_key=config.zai_api_key,
-                base_url=config.zai_base_url,
-            )
-            return model
-
-        if provider == "openrouter" and config.openrouter_api_key:
-            model = OpenAIModel(model_name, api_key=config.openrouter_api_key)
-            model._client = _openai_lib.OpenAI(
-                api_key=config.openrouter_api_key,
-                base_url="https://openrouter.ai/api/v1",
-            )
-            return model
-
-        if provider == "openai" and (config.openai_api_key or config.openai_base_url):
-            api_key = config.openai_api_key or "not-needed"
-            if config.openai_base_url:
-                model = OpenAIModel(model_name, api_key=api_key)
-                base_url = config.openai_base_url.rstrip("/")
-                if not base_url.endswith("/v1"):
-                    base_url = f"{base_url}/v1"
-                model._client = _openai_lib.OpenAI(api_key=api_key, base_url=base_url)
-                return model
-            return openai_model(model_name, api_key=api_key)
-
-        if config.openai_api_key:
-            return openai_model(model_name, api_key=config.openai_api_key)
-
-        # Fallback: try any available provider
-        if config.anthropic_api_key:
-            return anthropic_model("claude-3-5-sonnet-20241022", api_key=config.anthropic_api_key)
-        if config.zai_api_key:
-            model = OpenAIModel(config.zai_model, api_key=config.zai_api_key)
-            model._client = _openai_lib.OpenAI(
-                api_key=config.zai_api_key,
-                base_url=config.zai_base_url,
-            )
-            return model
-
-        raise RuntimeError("No LLM provider configured for AI SDK")
+        """Use only the selected provider/model; never borrow another credential."""
+        from ..integrations.provider_config import resolve_provider
+        selected = resolve_provider(config)
+        if selected.provider == "anthropic":
+            # Installed ai-sdk-python AnthropicModel uses the OpenAI wire schema.
+            # Native Anthropic is handled by our tested text-only adapter instead.
+            raise RuntimeError("Native Anthropic uses the bounded text adapter")
+        key = {
+            "openai": lambda: config.openai_api_key,
+            "zai": lambda: config.zai_api_key,
+            "openrouter": lambda: config.openrouter_api_key,
+        }[selected.provider]()
+        if not key:
+            raise RuntimeError("Selected provider credential is not configured")
+        model = OpenAIModel(selected.model, api_key=key)
+        model._client = _openai_lib.OpenAI(
+            api_key=key, base_url=selected.base_url,
+            timeout=bounded_seconds("CHAT_TIMEOUT_SECONDS", 60), max_retries=0,
+        )
+        return model
 
     def _build_system_prompt(self) -> str:
         """Build the system prompt for the AI SDK."""
@@ -883,6 +854,8 @@ Be specific, actionable, and consider lessons learned from previous interactions
         conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """Generate response using AI SDK with tool-use support."""
+        if config.default_llm_provider == "anthropic":
+            return await self._generate_text_candidate(query, context, conversation_history)
         try:
             system_prompt = self._build_system_prompt()
             messages = self._build_messages(query, context, conversation_history)
@@ -898,21 +871,7 @@ Be specific, actionable, and consider lessons learned from previous interactions
                     e2b_sandbox=self.e2b_sandbox,
                 )
 
-            # Get AI SDK model
-            try:
-                model = self._get_ai_sdk_model()
-            except RuntimeError:
-                # Fall back to LLMManager if AI SDK model can't be created
-                self.logger.warning("AI SDK model unavailable, falling back to LLMManager")
-                fallback_prompt = self._build_fallback_prompt(query, context, conversation_history)
-                response = await llm_manager.generate_response(
-                    prompt=fallback_prompt,
-                    system_prompt=system_prompt,
-                    temperature=config.temperature,
-                    max_tokens=config.max_tokens,
-                    provider=config.default_llm_provider,
-                )
-                return response.strip()
+            model = self._get_ai_sdk_model()
 
             # Call generate_text via thread pool (it's synchronous)
             def _run_generate():
@@ -944,23 +903,12 @@ Be specific, actionable, and consider lessons learned from previous interactions
 
         except Exception as e:
             self.logger.error("AI SDK generation failed: {}", type(e).__name__)
-            # Fallback to direct LLMManager call (no tools)
+            # One bounded, selected-provider fallback; never repeat side-effect tools.
             try:
-                fallback_prompt = self._build_fallback_prompt(query, context, conversation_history)
-                response = await llm_manager.generate_response(
-                    prompt=fallback_prompt,
-                    system_prompt=(
-                        "You are Katbot, a helpful AI assistant. "
-                        "Note: your tools are temporarily unavailable. "
-                        "Answer based on your knowledge and the conversation context provided."
-                    ),
-                    temperature=config.temperature,
-                    max_tokens=config.max_tokens,
-                    provider=config.default_llm_provider,
-                )
+                response = await self._generate_text_candidate(query, context, conversation_history)
                 return response.strip()
-            except Exception as e2:
-                self.logger.error(f"LLMManager fallback also failed: {e2}")
+            except Exception as fallback_error:
+                self.logger.error("Text-only fallback failed: {}", type(fallback_error).__name__)
                 raise
 
     def _build_fallback_prompt(

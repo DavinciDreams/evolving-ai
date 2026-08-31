@@ -248,6 +248,28 @@ termination policy. Reconcile uncertain durable outcomes before restarting work.
 
 ## Offline checks
 
+Chat and experiments use the same selected-provider resolver: explicit
+`DEFAULT_MODEL` wins, otherwise OpenAI/ZAI use their provider-specific model.
+Configured endpoints require HTTPS on the standard port; a bare OpenAI host is
+normalized to `/v1`, while explicit proxy paths are preserved. Legacy plaintext
+local HTTP configuration must be reviewed before enabling this branch. No
+credential from an unrelated provider is used as a fallback.
+
+The installed AI SDK's Anthropic class uses an OpenAI-compatible wire format,
+so native Anthropic chat intentionally uses the tested, bounded text adapter
+without tools. Other selected providers use the tool-capable SDK with retries
+disabled, then at most one text-only fallback retaining safety and active
+guidance. A model alias can still change upstream; pin provider versions for
+meaningful comparisons.
+
+For a synthetic browser preview, start `node frontend/scripts/preview-fixtures.mjs`
+from the repository root. In a second PowerShell terminal, set
+`VITE_API_BASE_URL=http://127.0.0.1:8079` and `VITE_PREVIEW_FIXTURES=true`, then run
+`node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5179 --strictPort`
+from `frontend`. Enter `synthetic-local-preview` in the local access form. The
+loopback fixture server never calls HAM, models, or external applications;
+its evidence is visibly synthetic. Stop both processes after inspection.
+
 From the repository root in the project's Python environment:
 
 ```powershell

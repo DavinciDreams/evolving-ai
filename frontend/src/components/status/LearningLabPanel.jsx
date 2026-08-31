@@ -93,7 +93,7 @@ export default function LearningLabPanel() {
       {jobId && <p>Job <code className="break-all">{jobId}</code>: {job?.status || (jobError ? 'unavailable; inspect HAM before retrying' : 'checking')}.</p>}
       {reportError && <p role="alert">Report unavailable or expired. Retrieve its durable HAM artifact before acting.</p>}
       {report && <section aria-label="Experiment evidence" className="space-y-2 rounded-lg border border-gray-200 p-3">
-        <p className="font-medium">{report.status === 'staged' && report.eligible ? 'Eligible for explicit activation' : 'Not eligible for activation'}</p>
+        <p className="font-medium">{report.baseline_revision !== lab?.revision ? 'Earlier revision — evaluate again before activation' : report.status === 'staged' && report.eligible ? 'Eligible for explicit activation' : 'Not eligible for activation'}</p>
         <p>Run: <code className="break-all">{report.run_id}</code></p>
         {report.scores && <table className="w-full text-left"><caption className="text-left">Exact-match fixture pass rates; not general intelligence scores</caption><thead><tr><th scope="col">Split</th><th scope="col">Baseline</th><th scope="col">Candidate</th></tr></thead><tbody>{['development', 'holdout'].map(split => <tr key={split}><th scope="row">{split}</th><td>{percentage(report.scores[split]?.baseline)}</td><td>{percentage(report.scores[split]?.candidate)}</td></tr>)}</tbody></table>}
         {!report.memory_id && <p role="alert">Durable evidence is not yet confirmed. Activation will require a successful HAM write before changing guidance.</p>}

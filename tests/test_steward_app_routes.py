@@ -265,6 +265,7 @@ def test_malformed_json_errors_never_echo_content(registered_app, path):
         ("identity", b"x" * 1_048_577, 413),
         ("gzip", b"private-compressed-payload", 415),
     ],
+    ids=["oversized", "compressed"],
 )
 def test_bounded_route_bodies_fail_before_execution(
     registered_app, path, encoding, body, status

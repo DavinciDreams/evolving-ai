@@ -37,13 +37,13 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with pytest
       run: |
-        pytest tests/test_basic.py tests/test_tools.py tests/test_web_search.py tests/test_discord_integration.py tests/test_parallel_evaluator_mock.py tests/test_persistent_storage.py -v
+        pytest tests/test_basic.py tests/test_tools.py tests/test_web_search.py tests/test_discord_integration.py tests/test_discord_retirement.py tests/test_parallel_evaluator_mock.py tests/test_persistent_storage.py -v
     - name: Test stewardship engines and migration without live services
       run: |
-        pytest tests/test_runtime.py tests/test_dream_cycle.py tests/test_learning_cycle.py tests/test_improvement_lab.py tests/test_ham_memory.py tests/test_chroma_ham_migration.py tests/test_bounded_llm.py tests/test_steward_control.py tests/test_steward_learning_integration.py tests/test_evaluation_provenance.py -q
+        pytest tests/test_runtime.py tests/test_dream_cycle.py tests/test_learning_cycle.py tests/test_improvement_lab.py tests/test_ham_memory.py tests/test_chroma_ham_migration.py tests/test_bounded_llm.py tests/test_provider_config.py tests/test_steward_control.py tests/test_steward_learning_integration.py tests/test_evaluation_provenance.py tests/test_github_reads.py -q
     - name: Test guarded agent with isolated SDK fixtures
       run: |
-        pytest tests/test_agent_run.py tests/test_agent_review_guards.py tests/test_agent_cleanup.py tests/test_memory_safety.py -q
+        pytest tests/test_agent_run.py tests/test_agent_review_guards.py tests/test_agent_cleanup.py tests/test_generation_fallback.py tests/test_memory_safety.py -q
     - name: Test actual authenticated application with fake providers
       run: |
-        pytest tests/test_steward_app_routes.py tests/test_legacy_steward_routes.py tests/test_media_service.py tests/test_connector_service.py tests/test_media_connector_routes.py -q
+        pytest tests/test_steward_app_routes.py tests/test_steward_auxiliary_routes.py tests/test_legacy_steward_routes.py tests/test_github_read_routes.py tests/test_status_evidence.py tests/test_media_service.py tests/test_connector_service.py tests/test_media_connector_routes.py tests/test_api_routes.py -q

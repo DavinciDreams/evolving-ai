@@ -31,21 +31,22 @@ async def get_status(current_agent: SelfImprovingAgent = Depends(get_agent)):
     """Get the current status of the agent."""
     try:
         # Get memory count
-        memory_count = 0
+        memory_count = None
         if hasattr(current_agent, "memory"):
             try:
                 memory_stats = await current_agent.memory.get_memory_stats()
-                memory_count = int(memory_stats.get("total_memories", 0))
+                value = memory_stats.get("total_memories")
+                memory_count = value if type(value) is int and value >= 0 else None
             except Exception:
-                memory_count = 0
+                memory_count = None
 
         # Get knowledge count
-        knowledge_count = 0
+        knowledge_count = None
         if hasattr(current_agent, "knowledge_base"):
             try:
                 knowledge_count = len(current_agent.knowledge_base.knowledge)
             except Exception:
-                knowledge_count = 0
+                knowledge_count = None
 
         return AgentStatus(
             is_initialized=current_agent.initialized,
@@ -56,9 +57,9 @@ async def get_status(current_agent: SelfImprovingAgent = Depends(get_agent)):
             uptime="Active",
         )
     except Exception as e:
-        logger.error(f"Error getting agent status: {e}")
+        logger.error("Agent status unavailable: {}", type(e).__name__)
         raise HTTPException(
-            status_code=500, detail=f"Error getting agent status: {str(e)}"
+            status_code=503, detail="Agent status is unavailable"
         )
 
 

@@ -341,7 +341,7 @@ async def chat_stream(
 @router.get("/v1/models", tags=["OpenAI Compatible"], summary="List available models")
 async def list_models():
     """List available models (OpenAI-compatible)."""
-    model_id = f"{config.default_llm_provider}/{config.default_model}"
+    model_id = f"{config.default_llm_provider}/{config.selected_model}"
     return {
         "object": "list",
         "data": [

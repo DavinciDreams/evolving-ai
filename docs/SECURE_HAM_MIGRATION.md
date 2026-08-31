@@ -39,7 +39,7 @@ HAM, GitHub, and project-access credentials reuse the same value.
 ```text
 PROJECT_API_KEY       project user access; sent as X-API-Key by the frontend
 HAM_API_KEY           HAM service credential bound to katbot-evolving-ai
-GITHUB_TOKEN          GitHub self-PR capability only
+GITHUB_TOKEN          optional read-only repository visibility; no PR/write capability needed
 ZAI_API_KEY           Z AI coding-plan capability only
 DISCORD_BOT_TOKEN     Discord bot capability only
 ```
@@ -51,7 +51,7 @@ slug:  evolving-ai
 scope: project:evolving-ai
 repo:  DavinciDreams/evolving-ai
 agent principal: katbot-evolving-ai
-actor type: service
+HAM credential role: agent (non-admin), used by the dedicated Katbot service
 allowed scopes: [project:evolving-ai]
 ```
 

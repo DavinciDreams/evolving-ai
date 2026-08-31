@@ -73,6 +73,20 @@ async def lifespan(app: FastAPI):
     from evolving_agent.integrations.connectors import ConnectorService
     app.state.media_service = MediaService.from_env(config)
     app.state.connector_service = ConnectorService.from_env(config)
+    app.state.service_tasks = set()
+    app.state.discord_task = None
+
+    def observe_service(task):
+        """Keep external listeners visible and consume failures without payloads."""
+        app.state.service_tasks.add(task)
+        def finished(done):
+            app.state.service_tasks.discard(done)
+            if not done.cancelled():
+                error = done.exception()
+                if error is not None:
+                    logger.warning("External listener failed: {}", type(error).__name__)
+        task.add_done_callback(finished)
+        return task
 
     async def initialize_agent():
         """Initialize the core Self-Improving Agent."""
@@ -92,9 +106,10 @@ async def lifespan(app: FastAPI):
             app_state.github_modifier = GitHubEnabledSelfModifier(
                 github_token=github_token, repo_name=github_repo, local_repo_path=local_repo_path
             )
-            await app_state.github_modifier.initialize()
+            # Read-only dashboard connects lazily in its bounded snapshot worker.
+            # Never invoke legacy synchronous SDK/retry initialization at startup.
             app_state.agent.github_modifier = app_state.github_modifier
-            logger.info("GitHub integration initialized successfully")
+            logger.info("Read-only GitHub integration configured; connection is lazy")
         else:
             logger.warning(
                 "GitHub credentials not found. GitHub features will be unavailable."
@@ -111,8 +126,9 @@ async def lifespan(app: FastAPI):
             )
             await app_state.discord_integration.initialize()
 
-            asyncio.create_task(app_state.discord_integration.start())
-            logger.info("Discord integration started successfully")
+            app.state.discord_task = observe_service(asyncio.create_task(
+                app_state.discord_integration.start(), name="katbot-discord-listener"))
+            logger.info("Discord listener scheduled; connection not yet confirmed")
         else:
             logger.info(
                 "Discord integration disabled or token not configured. "
@@ -124,10 +140,19 @@ async def lifespan(app: FastAPI):
         if app_state.discord_integration:
             logger.info("Shutting down Discord integration...")
             try:
-                await app_state.discord_integration.close()
-                logger.info("Discord integration shut down successfully")
+                closing = observe_service(asyncio.create_task(app_state.discord_integration.close()))
+                done, _ = await asyncio.wait({closing}, timeout=2)
+                if closing in done:
+                    closing.result()
+                else:
+                    closing.cancel()
+                    logger.warning("Discord close pending; supervisor grace required")
+                listener = app.state.discord_task
+                if listener is not None and not listener.done():
+                    listener.cancel()
+                    await asyncio.wait({listener}, timeout=2)
             except Exception as e:
-                logger.error(f"Error shutting down Discord: {e}")
+                logger.error("Discord cleanup failed: {}", type(e).__name__)
 
     async def cleanup_agent():
         """Safely clean up the agent."""
@@ -140,7 +165,7 @@ async def lifespan(app: FastAPI):
                 else:
                     logger.info("Agent cleanup completed")
             except Exception as e:
-                logger.error(f"Error during agent cleanup: {e}")
+                logger.error("Agent cleanup failed: {}", type(e).__name__)
 
     async def cleanup_error_recovery():
         """Clean up error recovery manager checkpoints."""
@@ -148,7 +173,7 @@ async def lifespan(app: FastAPI):
             error_recovery_manager.cleanup_old_checkpoints()
             logger.info("Error recovery resources cleaned up")
         except Exception as e:
-            logger.error(f"Error cleaning up error recovery: {e}")
+            logger.error("Recovery cleanup failed: {}", type(e).__name__)
 
     async def graceful_shutdown():
         """Execute all cleanup operations in order."""
@@ -157,6 +182,10 @@ async def lifespan(app: FastAPI):
 
         await cleanup_discord()
         await cleanup_agent()
+        if app_state.github_modifier is not None:
+            service = getattr(app_state.github_modifier, "read_service", None)
+            if service is not None:
+                await service.close()
         await cleanup_error_recovery()
 
         logger.info("Graceful shutdown completed")
