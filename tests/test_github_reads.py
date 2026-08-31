@@ -9,6 +9,7 @@ from unittest.mock import Mock
 import pytest
 
 from evolving_agent.core.runtime import RuntimeBusyError
+from evolving_agent.integrations.github_reads import _github_client
 from evolving_agent.integrations.github_reads import (
     GitHubNotConnectedError,
     GitHubReadError,
@@ -127,6 +128,109 @@ async def test_disconnected_status_is_explicit_and_history_returns_not_connected
         with pytest.raises(GitHubNotConnectedError):
             await operation()
     await reader.close()
+
+
+async def test_lazy_connection_is_first_read_only_and_client_is_scoped_to_worker():
+    repo = repository()
+    client = SimpleNamespace(get_repo=Mock(return_value=repo), close=Mock())
+    calls = []
+
+    def factory(token):
+        calls.append((token, threading.get_ident()))
+        return client
+
+    integration = SimpleNamespace(
+        repository=None,
+        local_repo=None,
+        github_token="synthetic-key",
+        repo_name="example/katbot",
+    )
+    reader = GitHubReadService(integration, client_factory=factory)
+    assert calls == []
+    assert (await reader.status())["github_connected"] is True
+    client.get_repo.assert_called_once_with("example/katbot")
+    client.close.assert_called_once()
+    assert calls[0][0] == "synthetic-key" and calls[0][1] != threading.get_ident()
+    assert integration.repository is None  # No legacy effect-capable object retained.
+    await reader.commits()
+    assert len(calls) == 1  # Cache does not reconnect.
+    await reader.close()
+
+
+@pytest.mark.parametrize(
+    "token,name", [(None, "example/katbot"), ("synthetic", None), ("", "")]
+)
+async def test_missing_lazy_connection_configuration_does_not_construct_sdk(
+    token, name
+):
+    factory = Mock(side_effect=AssertionError("missing credentials attempted SDK"))
+    reader = GitHubReadService(
+        SimpleNamespace(
+            repository=None, local_repo=None, github_token=token, repo_name=name
+        ),
+        client_factory=factory,
+    )
+    assert (await reader.status())["github_connected"] is False
+    factory.assert_not_called()
+    await reader.close()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "https://internal.example/repo",
+        "example/repo\n",
+        "../repo",
+        "owner/repo/more",
+        "owner/..",
+    ],
+)
+async def test_invalid_selected_repo_does_not_construct_sdk(name):
+    factory = Mock(side_effect=AssertionError("invalid repository attempted SDK"))
+    reader = GitHubReadService(
+        SimpleNamespace(
+            repository=None, local_repo=None, github_token="synthetic", repo_name=name
+        ),
+        client_factory=factory,
+    )
+    with pytest.raises(GitHubReadError):
+        await reader.status()
+    factory.assert_not_called()
+    await reader.close()
+
+
+async def test_bad_lazy_credentials_are_unavailable_not_disconnected_and_close_client():
+    client = SimpleNamespace(
+        get_repo=Mock(side_effect=RuntimeError("private-auth-body")), close=Mock()
+    )
+    reader = GitHubReadService(
+        SimpleNamespace(
+            repository=None,
+            local_repo=None,
+            github_token="synthetic",
+            repo_name="example/katbot",
+        ),
+        client_factory=lambda _: client,
+    )
+    with pytest.raises(GitHubReadError) as caught:
+        await reader.status()
+    assert "private-auth-body" not in str(caught.value)
+    client.close.assert_called_once()
+    assert reader._cache is None
+    await reader.close()
+
+
+def test_official_sdk_factory_disables_retries_and_bounds_each_request(monkeypatch):
+    github = pytest.importorskip("github")
+    constructor = Mock()
+    monkeypatch.setattr(github, "Github", constructor)
+    _github_client("synthetic-token")
+    kwargs = constructor.call_args.kwargs
+    assert kwargs["timeout"] == 10 and kwargs["retry"] == 0 and kwargs["per_page"] == 50
+    assert kwargs["auth"].token == "synthetic-token"
+    assert (
+        "base_url" not in kwargs
+    )  # SDK default official endpoint, never user supplied.
 
 
 @pytest.mark.parametrize("limit", [0, -1, 51, True, 1.5, "10"])

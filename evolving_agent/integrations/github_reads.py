@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import re
 import time
 from itertools import islice
 
@@ -36,11 +37,24 @@ def _date(value):
     return value.isoformat() if value is not None else None
 
 
+def _github_client(token):
+    # Import/construction happens only inside the snapshot worker, never startup.
+    from github import Auth, Github
+
+    return Github(auth=Auth.Token(token), timeout=10, retry=0, per_page=50)
+
+
 class GitHubReadService:
     MAX_ROWS = 50
 
     def __init__(
-        self, integration, *, timeout=15.0, cache_seconds=15.0, clock=time.monotonic
+        self,
+        integration,
+        *,
+        timeout=15.0,
+        cache_seconds=15.0,
+        clock=time.monotonic,
+        client_factory=_github_client,
     ):
         if not 0 <= cache_seconds <= 60:
             raise ValueError("Invalid GitHub read cache lifetime")
@@ -52,9 +66,37 @@ class GitHubReadService:
         self._expires = 0.0
         self._pending = None
         self._closed = False
+        self._client_factory = client_factory
 
     def _read_snapshot(self):
         repo = self.integration.repository
+        if repo is not None:
+            return self._project_snapshot(repo)
+        token = getattr(self.integration, "github_token", None)
+        name = getattr(self.integration, "repo_name", None)
+        if not token or not name:
+            return self._project_snapshot(None)
+        if (
+            not isinstance(token, str)
+            or not isinstance(name, str)
+            or not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/[A-Za-z0-9_.-]{1,100}", name
+            )
+            or name.split("/")[-1] in {".", ".."}
+        ):
+            raise GitHubReadError("Invalid GitHub repository configuration")
+        # Do not initialize legacy mutation adapters or retain authenticated SDK
+        # objects. One scoped client is closed in this same bounded worker.
+        client = self._client_factory(token)
+        try:
+            repo = client.get_repo(name)
+            if self._closed:
+                raise GitHubReadError("GitHub read service is closed")
+            return self._project_snapshot(repo)
+        finally:
+            client.close()
+
+    def _project_snapshot(self, repo):
         local = self.integration.local_repo is not None
         if repo is None:
             return {

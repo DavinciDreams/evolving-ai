@@ -1,5 +1,7 @@
 # Legacy write and unbounded analysis routes
 
+GitHub startup is configuration-only: it does not invoke the legacy initializer or contact GitHub. The first dashboard read lazily connects the operator-selected `owner/repository` inside the bounded snapshot worker, using the official PyGithub endpoint with a 10-second SDK timeout and zero SDK retries. The scoped SDK client closes in that same worker; only a sanitized read projection is cached. Missing credentials mean disconnected; credential/provider failures mean unavailable. Health checks never trigger connection or repository reads.
+
 The private steward baseline deliberately retires these authenticated POST routes with **HTTP 410 Gone**, even if legacy feature flags or GitHub credentials are configured:
 
 | Retired route | Reason / current workflow |
@@ -8,6 +10,14 @@ The private steward baseline deliberately retires these authenticated POST route
 | `/self-improve` | Direct modifier execution could bypass steward admission, deadlines, and evaluation gates, then publish a PR. Use the bounded evaluate/promote/rollback strategy workflow; repository changes remain separately reviewed work. |
 | `/github/demo-pr` | A demo label does not grant publication authority or make an unbounded modifier safe. Publish only through a separately authorized repository workflow. |
 | `/github/issue` | Direct external publication bypassed the review-only connector boundary. Signed app events may enter the connector inbox; acknowledging an event does not publish an issue. |
+| `/system/trigger-recovery` | Replaying the legacy pending-operation queue could create branches, commits, and PRs outside steward ownership. Reconcile any pending repository effect through a separately authorized workflow. |
+
+`/health/detailed` and `/health/recovery` now return cached, allowlisted status
+and counts only. They do not make model/GitHub probes or expose raw diagnostic
+history; `not_probed` is not a live availability claim. `/web-search` retains its
+synchronous response shape but now uses the shared runtime deadline/lease, rejects
+occupied chat/dream/learning/lab work with 409, redacts input/output, and bounds its
+request body. Mode changes cannot clear an occupied runtime lease.
 
 No request body, legacy analyzer, GitHub modifier, model, or background job is executed by these retired handlers. They remain authenticated and are marked deprecated in OpenAPI. No compatibility flag re-enables them. A future replacement must implement explicit effect authorization, bounded non-reentrant job ownership, durable idempotent evidence, and an operator-visible outcome before publication can return.
 

@@ -10,7 +10,7 @@ import hmac
 import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -23,6 +23,7 @@ import evolving_agent.utils.app_state as app_state
 from evolving_agent.core.runtime import RuntimeBusyError
 from evolving_agent.integrations.connectors import ConnectorService, ConnectorSettings
 from evolving_agent.integrations.media import MediaService, MediaSettings
+from evolving_agent.integrations.github_reads import GitHubReadService
 from evolving_agent.self_modification.improvement_lab import ImprovementLab
 from evolving_agent.utils.deps import get_agent
 
@@ -570,7 +571,10 @@ def test_connector_requires_signature_then_reviews_without_dispatch(registered_a
     registered_app.agent.run.assert_not_awaited()
 
 
-def test_real_lifespan_initializes_and_closes_fake_agent(monkeypatch):
+@pytest.mark.parametrize("github_configured", [False, True])
+def test_real_lifespan_initializes_and_closes_fake_agent(
+    monkeypatch, github_configured
+):
     """Exercise actual startup plumbing while replacing every external capability."""
     for name in (
         "GITHUB_TOKEN",
@@ -594,10 +598,34 @@ def test_real_lifespan_initializes_and_closes_fake_agent(monkeypatch):
     fake_agent = SimpleNamespace(
         initialize=AsyncMock(), cleanup=AsyncMock(), initialized=True
     )
+    provider_factory = Mock(
+        side_effect=AssertionError("startup/health attempted GitHub SDK")
+    )
+    legacy_initialize = AsyncMock(
+        side_effect=AssertionError("legacy initialization attempted")
+    )
+    fake_modifier = SimpleNamespace(
+        initialize=legacy_initialize,
+        read_service=GitHubReadService(
+            SimpleNamespace(
+                repository=None,
+                local_repo=None,
+                github_token="synthetic-github-key",
+                repo_name="example/katbot",
+            ),
+            client_factory=provider_factory,
+        ),
+    )
+    if github_configured:
+        monkeypatch.setenv("GITHUB_TOKEN", "synthetic-github-key")
+        monkeypatch.setenv("GITHUB_REPO", "example/katbot")
     # api_server replaces its module with a compatibility shim. Existing function
     # globals still point at the original module dictionary, not the shim's copy.
     lifespan_globals = api_server.lifespan.__wrapped__.__globals__
     monkeypatch.setitem(lifespan_globals, "SelfImprovingAgent", lambda: fake_agent)
+    monkeypatch.setitem(
+        lifespan_globals, "GitHubEnabledSelfModifier", lambda **_: fake_modifier
+    )
     monkeypatch.setattr(app_state, "agent", None)
     monkeypatch.setattr(app_state, "github_modifier", None)
     monkeypatch.setattr(app_state, "discord_integration", None)
@@ -618,5 +646,9 @@ def test_real_lifespan_initializes_and_closes_fake_agent(monkeypatch):
             is False
         )
         assert api_server.app.state.connector_service.status()["enabled"] is False
+        legacy_initialize.assert_not_awaited()
+        provider_factory.assert_not_called()
     fake_agent.cleanup.assert_awaited_once()
     assert app_state.server_shutdown is True
+    if github_configured:
+        assert fake_modifier.read_service.runtime.status()["closed"] is True
