@@ -1,5 +1,7 @@
 # Legacy write and unbounded analysis routes
 
+Discord `!feature` and `!request` are also retired before model work or repository publication. Case, empty-argument, and whitespace variants receive the same fixed notice, subject to existing message rate admission. No payload is converted, logged, submitted, or saved by these commands; the old private converter and issue-publisher helpers are inert. Normal Discord chat still delegates once to the guarded core agent. Adapter logs omit inbound content, names, channel names, raw event arguments, and provider exception bodies.
+
 GitHub startup is configuration-only: it does not invoke the legacy initializer or contact GitHub. The first dashboard read lazily connects the operator-selected `owner/repository` inside the bounded snapshot worker, using the official PyGithub endpoint with a 10-second SDK timeout and zero SDK retries. The scoped SDK client closes in that same worker; only a sanitized read projection is cached. Missing credentials mean disconnected; credential/provider failures mean unavailable. Health checks never trigger connection or repository reads.
 
 The private steward baseline deliberately retires these authenticated POST routes with **HTTP 410 Gone**, even if legacy feature flags or GitHub credentials are configured:
