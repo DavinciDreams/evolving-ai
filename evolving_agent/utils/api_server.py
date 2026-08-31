@@ -147,12 +147,14 @@ async def lifespan(app: FastAPI):
                 else:
                     closing.cancel()
                     logger.warning("Discord close pending; supervisor grace required")
+            except Exception as e:
+                logger.error("Discord cleanup failed: {}", type(e).__name__)
+            finally:
+                # A failed close must not skip stopping the listener.
                 listener = app.state.discord_task
                 if listener is not None and not listener.done():
                     listener.cancel()
                     await asyncio.wait({listener}, timeout=2)
-            except Exception as e:
-                logger.error("Discord cleanup failed: {}", type(e).__name__)
 
     async def cleanup_agent():
         """Safely clean up the agent."""
