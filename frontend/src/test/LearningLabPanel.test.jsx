@@ -50,6 +50,8 @@ describe('measured learning operator controls', () => {
     fireEvent.change(screen.getByLabelText('Trusted benchmark JSON'), { target: { value: JSON.stringify({ cases: fixtures }) } });
     fireEvent.click(screen.getByRole('button', { name: /Evaluate candidate/ }));
     await screen.findByText('Eligible for explicit activation');
+    expect(screen.getByText(/Job completed\. Inspect the outcome/)).toBeInTheDocument();
+    expect(screen.queryByText(/Request accepted, not yet completed/)).not.toBeInTheDocument();
     expect(api.post).toHaveBeenCalledTimes(1);
     expect(api.post.mock.calls[0]).toEqual(['/steward/improvement/evaluate', expect.objectContaining({ cases: fixtures,
       strategy: expect.objectContaining({ response_format: 'plain', separate_evidence: true }) }), { noRetry: true }]);
@@ -59,7 +61,7 @@ describe('measured learning operator controls', () => {
     await waitFor(() => expect(screen.getByRole('option', { name: 'run-1' })).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText('Inspect recent experiment'), { target: { value: 'run-1' } });
     fireEvent.click(await screen.findByRole('button', { name: 'Activate measured candidate' }));
-    await screen.findByText(/Request accepted, not yet completed/);
+    await screen.findByText(/Job completed\. Inspect the outcome/);
     expect(api.post).toHaveBeenCalledWith('/steward/improvement/promote', { run_id: 'run-1', expected_revision: 2 }, { noRetry: true });
   });
   it('disables promotion for stale evidence', async () => {
@@ -75,7 +77,7 @@ describe('measured learning operator controls', () => {
     await screen.findByText(/Latest state HAM ID/);
     fireEvent.change(screen.getByLabelText('Rollback reason'), { target: { value: 'Observed a regression' } });
     fireEvent.click(screen.getByRole('button', { name: 'Restore previous guidance' }));
-    await screen.findByText(/Request accepted, not yet completed/);
+    await screen.findByText(/Job completed\. Inspect the outcome/);
     expect(api.post).toHaveBeenCalledWith('/steward/improvement/rollback', { expected_revision: 2, reason: 'Observed a regression' }, { noRetry: true });
   });
 });

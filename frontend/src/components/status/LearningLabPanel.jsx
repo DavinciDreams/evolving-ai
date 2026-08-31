@@ -6,7 +6,8 @@ import Button from '../common/Button';
 
 const inputClass = 'block w-full rounded-md border-gray-300 text-sm focus:border-indigo-500 focus:ring-indigo-500';
 const terminal = ['completed', 'failed', 'cancelled'];
-const percentage = value => typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value * 100)}%` : 'Not measured';
+const acceptedNotice = 'Request accepted, not yet completed. Follow the job outcome below.';
+const percentage = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1 ? `${Math.round(value * 100)}%` : 'Not measured';
 
 export default function LearningLabPanel() {
   const cache = useQueryClient();
@@ -43,7 +44,7 @@ export default function LearningLabPanel() {
     try {
       const { data } = await api.post(path, payload, { noRetry: true });
       setJobId(data.job_id);
-      setNotice('Request accepted, not yet completed. Follow the job outcome below.');
+      setNotice(acceptedNotice);
       cache.invalidateQueries({ queryKey: ['steward-status'] });
     } catch { setNotice('Request was not confirmed. Check runtime status before explicitly retrying; no automatic replay occurred.'); }
     finally { setPending(false); }
@@ -89,7 +90,8 @@ export default function LearningLabPanel() {
         </form>
       </details>
       <label className="block">Inspect recent experiment<select className={inputClass} value={runId} onChange={e => setRunId(e.target.value)}><option value="">Most recent requested job</option>{lab?.staged_runs?.map(id => <option key={id} value={id}>{id}</option>)}</select></label>
-      <p role="status" aria-live="polite">{notice}</p>
+      <p role="status" aria-live="polite">{notice === acceptedNotice && terminal.includes(job?.status)
+        ? `Job ${job.status}. Inspect the outcome below; completion is not a quality verdict.` : notice}</p>
       {jobId && <p>Job <code className="break-all">{jobId}</code>: {job?.status || (jobError ? 'unavailable; inspect HAM before retrying' : 'checking')}.</p>}
       {reportError && <p role="alert">Report unavailable or expired. Retrieve its durable HAM artifact before acting.</p>}
       {report && <section aria-label="Experiment evidence" className="space-y-2 rounded-lg border border-gray-200 p-3">
