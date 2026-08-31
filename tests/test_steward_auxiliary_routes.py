@@ -8,11 +8,13 @@ import pytest
 
 pytest.importorskip("ai_sdk", reason="Full API runtime requires ai-sdk-python")
 
-import evolving_agent.api.routes.system as system
-import evolving_agent.utils.app_state as state
-from evolving_agent.core.runtime import AgentRuntime
-from tests.test_steward_app_routes import headers
-from tests.test_steward_app_routes import registered_app as registered_app  # noqa: F401
+import evolving_agent.api.routes.system as system  # noqa: E402
+import evolving_agent.utils.app_state as state  # noqa: E402
+from evolving_agent.core.runtime import AgentRuntime  # noqa: E402
+from tests.test_steward_app_routes import headers  # noqa: E402
+from tests.test_steward_app_routes import registered_app as _registered_app  # noqa: E402
+
+registered_app = _registered_app
 
 
 def search_agent(fixture):
