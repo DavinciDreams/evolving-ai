@@ -265,7 +265,7 @@ meaningful comparisons.
 For a synthetic browser preview, start `node frontend/scripts/preview-fixtures.mjs`
 from the repository root. In a second PowerShell terminal, set
 `VITE_API_BASE_URL=http://127.0.0.1:8079` and `VITE_PREVIEW_FIXTURES=true`, then run
-`node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5179 --strictPort`
+`node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5187 --strictPort`
 from `frontend`. Enter `synthetic-local-preview` in the local access form. The
 loopback fixture server never calls HAM, models, or external applications;
 its evidence is visibly synthetic. Stop both processes after inspection.

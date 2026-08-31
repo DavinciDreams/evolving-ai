@@ -17,7 +17,7 @@ const data = {
   '/media/status': { capabilities: { vision: { ready: false }, transcription: { ready: false }, speech: { ready: false } } },
 };
 createServer(async (request, response) => {
-  response.setHeader('Access-Control-Allow-Origin', 'http://127.0.0.1:5179');
+  response.setHeader('Access-Control-Allow-Origin', 'http://127.0.0.1:5187');
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key');
   response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   response.setHeader('Cache-Control', 'no-store');

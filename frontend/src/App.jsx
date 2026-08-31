@@ -3,6 +3,7 @@ import { lazy, Suspense } from 'react';
 import Layout from './components/common/Layout';
 import { ROUTES } from './utils/constants';
 import AuthGate from './components/common/AuthGate';
+import PageBoundary from './components/common/PageBoundary';
 
 const HomePage = lazy(() => import('./pages/HomePage'));
 const ChatPage = lazy(() => import('./pages/ChatPage'));
@@ -23,6 +24,7 @@ function App() {
               Synthetic UI preview — no HAM, provider calls, or external actions. Evidence below is test data.
             </p>
           )}
+          <PageBoundary>
           <Suspense fallback={<p role="status" className="p-6 text-gray-700">Loading page…</p>}>
           <Routes>
             <Route path={ROUTES.HOME} element={<HomePage />} />
@@ -36,6 +38,7 @@ function App() {
             <Route path="*" element={<Navigate to={ROUTES.HOME} replace />} />
           </Routes>
           </Suspense>
+          </PageBoundary>
         </Layout>
       </AuthGate>
     </BrowserRouter>
