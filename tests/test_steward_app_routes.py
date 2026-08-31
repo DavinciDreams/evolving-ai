@@ -248,6 +248,43 @@ def test_malformed_json_errors_never_echo_content(registered_app, path):
 
 
 @pytest.mark.parametrize(
+    "path",
+    [
+        "/chat",
+        "/chat/stream",
+        "/v1/chat/completions",
+        "/steward/improvement/evaluate",
+        "/steward/improvement/promote",
+        "/steward/improvement/rollback",
+    ],
+)
+@pytest.mark.parametrize(
+    "encoding,body,status",
+    [
+        ("identity", b"x" * 1_048_577, 413),
+        ("gzip", b"private-compressed-payload", 415),
+    ],
+)
+def test_bounded_route_bodies_fail_before_execution(
+    registered_app, path, encoding, body, status
+):
+    response = registered_app.client.post(
+        path,
+        headers={
+            **headers(),
+            "Content-Type": "application/json",
+            "Content-Encoding": encoding,
+        },
+        content=body,
+    )
+    assert response.status_code == status
+    assert "private-compressed-payload" not in response.text
+    registered_app.agent.run.assert_not_awaited()
+    assert registered_app.control.submitted == []
+    assert registered_app.provider_calls == []
+
+
+@pytest.mark.parametrize(
     "path,payload",
     [
         ("/steward/improvement/promote", {"run_id": "run-1", "expected_revision": 0}),

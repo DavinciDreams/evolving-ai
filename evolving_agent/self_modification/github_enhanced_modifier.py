@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from evolving_agent.self_modification.code_analyzer import CodeAnalyzer
 from evolving_agent.self_modification.validator import CodeValidator
 from evolving_agent.integrations.github_integration import GitHubIntegration
+from evolving_agent.integrations.github_reads import GitHubReadService
 from evolving_agent.utils.config import config
 from evolving_agent.utils.llm_interface import llm_manager
 from evolving_agent.utils.logging import setup_logger
@@ -49,6 +50,7 @@ class GitHubEnabledSelfModifier:
             repo_name=repo_name,
             local_repo_path=local_repo_path,
         )
+        self.read_service = GitHubReadService(self.github_integration)
 
         # State tracking
         self.improvement_history: List[Dict[str, Any]] = []
@@ -934,40 +936,13 @@ Improvement Guidelines:
         return validated
 
     async def get_repository_status(self) -> Dict[str, Any]:
-        """Get comprehensive repository status including GitHub and local repo info."""
-        try:
-            status = {}
-
-            # Check GitHub connection
-            status["github_connected"] = (
-                self.github_integration.github_client is not None
-                and self.github_integration.repository is not None
-            )
-
-            # Get repository info
-            if status["github_connected"]:
-                status["repository_info"] = (
-                    await self.github_integration.get_repository_info()
-                )
-
-                # Get open PRs
-                status["open_pull_requests"] = (
-                    await self.github_integration.get_open_pull_requests()
-                )
-
-            # Check local repo
-            status["local_repo_available"] = (
-                self.github_integration.local_repo is not None
-            )
-
-            # Configuration
-            status["auto_pr_enabled"] = self.auto_pr_enabled
-
-            return status
-
-        except Exception as e:
-            logger.error(f"Error getting repository status: {e}")
-            return {"error": str(e)}
+        """Bounded read snapshot; provider failures are not empty activity."""
+        snapshot = await self.read_service.snapshot()
+        return {
+            **snapshot["status"],
+            "repository_info": snapshot["repository"],
+            "open_pull_requests": snapshot["pull_requests"],
+        }
 
     async def create_documentation_improvement_pr(self) -> Dict[str, Any]:
         """Create a demonstration PR with documentation improvements."""
