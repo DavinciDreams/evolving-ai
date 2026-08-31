@@ -4,6 +4,9 @@ import asyncio
 import hashlib
 import hmac
 import json
+import sqlite3
+import threading
+import time
 
 import pytest
 
@@ -101,7 +104,8 @@ async def test_idempotency_survives_new_signature_and_ack(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_concurrent_duplicate_admission_is_atomic(tmp_path):
+@pytest.mark.parametrize("_attempt", range(20))
+async def test_concurrent_duplicate_admission_is_atomic(tmp_path, _attempt):
     inbox = service(tmp_path)
     results = await asyncio.gather(
         *[inbox.receive("app-webhook", *signed()) for _ in range(5)],
@@ -112,7 +116,53 @@ async def test_concurrent_duplicate_admission_is_atomic(tmp_path):
         isinstance(result, dict)
         or (isinstance(result, IntegrationError) and result.status_code == 409)
         for result in results
+    ), [
+        (type(result).__name__, getattr(result, "status_code", None))
+        for result in results
+    ]
+
+
+@pytest.mark.asyncio
+async def test_parallel_service_bootstrap_serializes_journal_transition(
+    tmp_path, monkeypatch
+):
+    # Deterministically reproduce SQLite's cold-start journal lock window. The
+    # old implementation entered PRAGMA WAL from several workers concurrently.
+    journal_transition = threading.Lock()
+    original_connect = sqlite3.connect
+
+    class Connection(sqlite3.Connection):
+        def execute(self, sql, *args, **kwargs):
+            if sql != "PRAGMA journal_mode=WAL":
+                return super().execute(sql, *args, **kwargs)
+            if not journal_transition.acquire(blocking=False):
+                raise sqlite3.OperationalError(
+                    "synthetic concurrent journal transition"
+                )
+            try:
+                time.sleep(0.02)
+                return super().execute(sql, *args, **kwargs)
+            finally:
+                journal_transition.release()
+
+    monkeypatch.setattr(
+        sqlite3,
+        "connect",
+        lambda *args, **kwargs: original_connect(*args, factory=Connection, **kwargs),
     )
+    inboxes = [service(tmp_path) for _ in range(5)]
+    results = await asyncio.gather(
+        *[inbox.receive("app-webhook", *signed()) for inbox in inboxes],
+        return_exceptions=True,
+    )
+    assert sum(isinstance(result, dict) for result in results) == 1
+    assert sorted(getattr(result, "status_code", 202) for result in results) == [
+        202,
+        409,
+        409,
+        409,
+        409,
+    ]
 
 
 @pytest.mark.parametrize(

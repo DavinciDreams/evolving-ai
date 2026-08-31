@@ -14,6 +14,7 @@ import math
 import os
 import re
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -27,6 +28,10 @@ WEBHOOK_LIMIT = 64 * 1024
 MAX_EVENTS = 500
 WINDOW_SECONDS = 300
 RETENTION_SECONDS = 7 * 24 * 3600
+# Journal-mode transitions are not ordinary transactional writes: SQLite can
+# reject concurrent cold-start PRAGMA WAL immediately despite busy_timeout.
+# Serialize bootstrap across service instances, off the event loop.
+_BOOTSTRAP_LOCK = threading.Lock()
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _SENSITIVE_KEY = re.compile(
     r"(?i)(?:secret|password|token|credential|authorization|api.?key|private.?key|nsec|cookie)"
@@ -148,6 +153,7 @@ class ConnectorService:
     ):
         self.settings = settings
         self._clock = clock
+        self._schema_ready = False
 
     @classmethod
     def from_env(cls, config: Any = None) -> "ConnectorService":
@@ -197,8 +203,22 @@ class ConnectorService:
         db = sqlite3.connect(path, timeout=2)
         try:
             db.row_factory = sqlite3.Row
-            db.execute("PRAGMA journal_mode=WAL")
+            self._initialize_schema(db)
             db.execute("PRAGMA secure_delete=ON")
+            with db:
+                yield db
+        finally:
+            db.close()
+
+    def _initialize_schema(self, db: sqlite3.Connection) -> None:
+        if self._schema_ready:
+            return
+        if not _BOOTSTRAP_LOCK.acquire(timeout=2):
+            raise sqlite3.OperationalError("Connector schema initialization busy")
+        try:
+            if self._schema_ready:
+                return
+            db.execute("PRAGMA journal_mode=WAL")
             db.executescript(
                 """
             CREATE TABLE IF NOT EXISTS connector_events (
@@ -217,10 +237,9 @@ class ConnectorService:
             );
             """
             )
-            with db:
-                yield db
+            self._schema_ready = True
         finally:
-            db.close()
+            _BOOTSTRAP_LOCK.release()
 
     def _verify(
         self, connector_id: str, body: bytes, timestamp: str, signature: str
