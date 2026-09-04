@@ -355,6 +355,32 @@ class TestApiKeyAuth:
         memory.page_recent_memories.side_effect = None
         memory.page_recent_memories.return_value = ([], None)
 
+    def test_public_memory_scan_budget_stops_unmatched_search(self, client):
+        memory = api_server_module.agent.memory
+        memory.page_recent_memories.reset_mock()
+        private_page = [
+            MemoryEntry(f"private-{index}", metadata={"audience": "project"})
+            for index in range(100)
+        ]
+        memory.page_recent_memories.side_effect = [
+            (private_page, "cursor-1"),
+            (private_page, "cursor-2"),
+            (private_page, "cursor-3"),
+        ]
+        response = client.get("/public/memories?search=absent")
+        assert response.status_code == 503
+        assert "scan budget exceeded" in response.text
+        assert memory.page_recent_memories.await_count == 3
+        memory.page_recent_memories.side_effect = None
+        memory.page_recent_memories.return_value = ([], None)
+
+    def test_public_memory_rejects_offset_beyond_scan_budget(self, client):
+        memory = api_server_module.agent.memory
+        memory.page_recent_memories.reset_mock()
+        response = client.get("/public/memories?offset=201")
+        assert response.status_code == 422
+        memory.page_recent_memories.assert_not_awaited()
+
     def test_missing_server_key_fails_closed(self, client):
         with patch.dict(
             "os.environ",

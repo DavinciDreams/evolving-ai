@@ -14,6 +14,13 @@ logger = setup_logger(__name__)
 
 router = APIRouter()
 
+_PUBLIC_MEMORY_PAGE_SIZE = 100
+_PUBLIC_MEMORY_MAX_SCAN_PAGES = 3
+_PUBLIC_MEMORY_MAX_OFFSET = (
+    _PUBLIC_MEMORY_PAGE_SIZE * (_PUBLIC_MEMORY_MAX_SCAN_PAGES - 1)
+)
+_PUBLIC_MEMORY_MAX_SEARCH_CHARS = 256
+
 
 async def _load_memories(
     current_agent: SelfImprovingAgent,
@@ -82,8 +89,11 @@ async def get_memories(
 @router.get("/public/memories", response_model=List[MemoryItem], tags=["Memory"])
 async def get_public_memories(
     limit: int = Query(default=10, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
-    search: Optional[str] = None,
+    offset: int = Query(default=0, ge=0, le=_PUBLIC_MEMORY_MAX_OFFSET),
+    search: Optional[str] = Query(
+        default=None,
+        max_length=_PUBLIC_MEMORY_MAX_SEARCH_CHARS,
+    ),
     current_agent: SelfImprovingAgent = Depends(get_agent),
 ):
     """Return only memories explicitly published with ``audience=public``."""
@@ -93,13 +103,19 @@ async def get_public_memories(
         seen_cursors = set()
         requested_count = offset + limit
         normalized_search = search.casefold() if search else None
-        while len(public) < requested_count:
+        storage_exhausted = False
+        pages_scanned = 0
+        while (
+            len(public) < requested_count
+            and pages_scanned < _PUBLIC_MEMORY_MAX_SCAN_PAGES
+        ):
             candidates, next_cursor = (
                 await current_agent.memory.page_recent_memories(
-                    limit=100,
+                    limit=_PUBLIC_MEMORY_PAGE_SIZE,
                     cursor=cursor,
                 )
             )
+            pages_scanned += 1
             for memory in candidates:
                 if memory.metadata.get("audience") != "public":
                     continue
@@ -133,12 +149,22 @@ async def get_public_memories(
             if len(public) >= requested_count:
                 break
             if next_cursor is None:
+                storage_exhausted = True
                 break
             if next_cursor == cursor or next_cursor in seen_cursors:
                 raise RuntimeError("Memory pagination cursor did not advance")
             seen_cursors.add(next_cursor)
             cursor = next_cursor
+        if len(public) < requested_count and not storage_exhausted:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Public memory scan budget exceeded; narrow the search or offset"
+                ),
+            )
         return public[offset : offset + limit]
+    except HTTPException:
+        raise
     except Exception:
         logger.exception("Error retrieving public memories")
         raise HTTPException(status_code=503, detail="Public memories are unavailable")
