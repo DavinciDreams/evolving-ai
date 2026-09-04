@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-DETECTOR_VERSION = "credential-redaction-v5"
+DETECTOR_VERSION = "credential-redaction-v6"
 
 _SENSITIVE_KEY = re.compile(r"(?i)(?:^|[_-])(?:password|secret|token|api[_-]?key|authorization|nsec|private[_-]?key)(?:$|[_-])")
 _PRIVATE_KEY = re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----", re.DOTALL)
@@ -20,6 +20,14 @@ _SENSITIVE_ASSIGNMENT_NAME = (
     r"(?:[_-][A-Za-z0-9]+)*"
     r")"
 )
+_MULTILINE_CREDENTIAL_ASSIGNMENT = re.compile(
+    rf"(?im)(?<![A-Za-z0-9_-])(?:"
+    rf"{_SENSITIVE_ASSIGNMENT_NAME}"
+    rf"|['\"]{_SENSITIVE_ASSIGNMENT_NAME}['\"](?:\s*\])?"
+    rf")(?![A-Za-z0-9_-])\s*(?:=|:)\s*"
+    rf"(?:[|>](?:[+-][1-9]?|[1-9][+-]?)?|[\\^`])"
+    rf"[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)"
+)
 _CREDENTIAL_ASSIGNMENT = re.compile(
     rf"(?i)(?<![A-Za-z0-9_-])(?:"
     rf"(?P<name>{_SENSITIVE_ASSIGNMENT_NAME})"
@@ -28,7 +36,7 @@ _CREDENTIAL_ASSIGNMENT = re.compile(
     rf")(?![A-Za-z0-9_-])(?P<separator>\s*(?:=|:)\s*)"
     rf"(?:"
     rf"(?P<value_quote>['\"])(?P<quoted_value>"
-    rf"(?:\\.|(?!(?P=value_quote)).)+)(?P=value_quote)"
+    rf"(?:\\[\s\S]|(?!(?P=value_quote))[\s\S])+)(?P=value_quote)"
     rf"|(?P<unquoted_value>[^\s,;'\"}}]+)"
     rf")"
 )
@@ -47,6 +55,9 @@ _SECRET_PREFIXES = re.compile(
 def redact_text(value: str) -> tuple[str, List[str]]:
     """Redact credential-shaped values without returning or logging matches."""
     findings: set[str] = set()
+    if _MULTILINE_CREDENTIAL_ASSIGNMENT.search(value):
+        findings.add("credential_multiline_assignment")
+        return "[REDACTED:credential_multiline_record]", sorted(findings)
     value, count = _PRIVATE_KEY.subn("[REDACTED:private_key]", value)
     if count:
         findings.add("private_key")

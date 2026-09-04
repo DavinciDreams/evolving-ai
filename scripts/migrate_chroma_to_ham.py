@@ -199,14 +199,18 @@ def load_snapshot(
         raise RuntimeError("Snapshot record count does not match manifest")
     if len({row["source_id"] for row in rows}) != len(rows):
         raise RuntimeError("Snapshot contains duplicate source IDs")
-    _, snapshot_findings = redact_text(snapshot_bytes.decode("utf-8"))
-    if snapshot_findings:
-        raise RuntimeError("Snapshot still contains credential-shaped values")
     for row in rows:
         if not isinstance(row.get("content"), str) or _content_sha256(
             row["content"]
         ) != row.get("content_sha256"):
             raise RuntimeError("Snapshot per-record content checksum does not match")
+        for field in ("source_id", "source_backend", "source_collection"):
+            field_value = str(row.get(field) or "")
+            redacted_field, field_findings = redact_text(field_value)
+            if field_findings and redacted_field != field_value:
+                raise RuntimeError(
+                    "Snapshot still contains credential-shaped values"
+                )
         redacted_content, content_findings = redact_text(row["content"])
         redacted_metadata, metadata_findings = redact_value(
             row.get("metadata", {})

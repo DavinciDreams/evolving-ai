@@ -1,6 +1,8 @@
 """HAM-only storage safety without local embedding model imports."""
 from unittest.mock import AsyncMock
 
+import pytest
+
 from evolving_agent.core.memory import LongTermMemory, MemoryEntry
 from evolving_agent.utils.secret_redaction import redact_text, redact_value
 
@@ -61,3 +63,19 @@ def test_prefixed_deployment_credentials_are_redacted_without_values():
     assert '"HAM_API_KEY":"[REDACTED:credential_assignment]"' in redacted
     assert "ordinary_field=ordinary-value" in redacted
     assert findings == ["credential_assignment"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "PASSWORD: |\n  synthetic secret phrase 13579\n",
+        "HAM_API_KEY: >-\n  synthetic,value,12345\n",
+        "PROJECT_API_KEY=\\\nsynthetic-shell-secret-24680\n",
+        'PASSWORD="synthetic\nquoted secret 97531"',
+    ],
+)
+def test_multiline_credential_assignments_are_value_free(text):
+    redacted, findings = redact_text(text)
+    assert "synthetic" not in redacted
+    assert "[REDACTED:" in redacted
+    assert findings

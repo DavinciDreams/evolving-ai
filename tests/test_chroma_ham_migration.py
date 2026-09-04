@@ -164,6 +164,43 @@ def test_export_redacts_quoted_values_with_spaces_or_commas(
     assert rows[0]["metadata"]["security_quarantined"] is True
 
 
+@pytest.mark.parametrize(
+    "credential_text",
+    [
+        "PASSWORD: |\n  synthetic secret phrase 13579\n",
+        "HAM_API_KEY: >-\n  synthetic,value,12345\n",
+        "PROJECT_API_KEY=\\\nsynthetic-shell-secret-24680\n",
+        'PASSWORD="synthetic\nquoted secret 97531"',
+    ],
+)
+def test_export_removes_and_quarantines_multiline_credential(
+    tmp_path, credential_text
+):
+    collection = MagicMock()
+    collection.get.return_value = {
+        "ids": ["legacy-multiline-credential"],
+        "documents": [credential_text],
+        "metadatas": [{}],
+    }
+    chroma = MagicMock()
+    chroma.get_collection.return_value = collection
+    with patch(
+        "scripts.migrate_chroma_to_ham.chromadb.PersistentClient", return_value=chroma
+    ):
+        manifest = export_snapshot(
+            persist_directory="/unused",
+            collection_name="agent_memory",
+            snapshot_directory=tmp_path,
+        )
+
+    persisted = "\n".join(path.read_text() for path in tmp_path.iterdir())
+    assert "synthetic" not in persisted
+    assert manifest["quarantined_record_count"] == 1
+    _, rows = load_snapshot(tmp_path)
+    assert "[REDACTED:" in rows[0]["content"]
+    assert rows[0]["metadata"]["security_quarantined"] is True
+
+
 def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
     collection = MagicMock()
     collection.get.return_value = {
@@ -186,6 +223,9 @@ def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
     snapshot_path = tmp_path / "chroma-memory.jsonl"
     rows = [json.loads(line) for line in snapshot_path.read_text().splitlines()]
     rows[0]["content"] = "API_KEY=sk-" + "reintroduced-test-value-12345"
+    rows[0]["content_sha256"] = hashlib.sha256(
+        rows[0]["content"].encode()
+    ).hexdigest()
     tampered = "".join(
         f"{json.dumps(row, sort_keys=True, separators=(',', ':'))}\n" for row in rows
     )
@@ -206,6 +246,10 @@ def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
         'os.environ["HAM_API_KEY"] = "synthetic-placeholder-00000000000000000000000000"',
         '{"PASSWORD":"synthetic secret phrase 13579"}',
         '{"HAM_API_KEY":"synthetic,value,12345"}',
+        "PASSWORD: |\n  synthetic secret phrase 13579\n",
+        "HAM_API_KEY: >-\n  synthetic,value,12345\n",
+        "PROJECT_API_KEY=\\\nsynthetic-shell-secret-24680\n",
+        'PASSWORD="synthetic\nquoted secret 97531"',
     ],
 )
 def test_load_rejects_quoted_credential_key_reintroduced(
