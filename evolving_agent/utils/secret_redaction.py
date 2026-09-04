@@ -18,28 +18,22 @@ _NON_KEY_CHARACTER = re.compile(r"[^A-Za-z0-9]+")
 _PRIVATE_KEY = re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----", re.DOTALL)
 _NSEC = re.compile(r"(?<![A-Za-z0-9])nsec1[023456789acdefghjklmnpqrstuvwxyz]{20,}")
 
-_SENSITIVE_ASSIGNMENT_NAME = (
-    r"(?:"
-    r"tellus(?:[_ -]?(?:api[_ -]?)?(?:key|token))?"
-    r"|api[ _-]?key|access[ _-]?token|auth[ _-]?token|secret|password"
-    r"|[A-Za-z][A-Za-z0-9]*(?:Password|Secret|Token|ApiKey|Authorization|Nsec|PrivateKey)"
-    r"|(?:[A-Za-z][A-Za-z0-9]*[_-])*"
-    r"(?:password|secret|token|api[_-]?key|authorization|nsec|private[_-]?key)"
-    r"(?:[_-][A-Za-z0-9]+)*"
-    r")"
+_ASSIGNMENT_NAME = (
+    r"[A-Za-z][A-Za-z0-9_-]*(?:[ ]+[A-Za-z][A-Za-z0-9_-]*)*"
 )
 _MULTILINE_CREDENTIAL_ASSIGNMENT = re.compile(
     rf"(?im)(?<![A-Za-z0-9_-])(?:"
-    rf"{_SENSITIVE_ASSIGNMENT_NAME}"
-    rf"|['\"]{_SENSITIVE_ASSIGNMENT_NAME}['\"](?:\s*\])?"
+    rf"(?P<multiline_name>{_ASSIGNMENT_NAME})"
+    rf"|(?P<multiline_key_quote>['\"])(?P<multiline_quoted_name>{_ASSIGNMENT_NAME})"
+    rf"(?P=multiline_key_quote)(?:\s*\])?"
     rf")(?![A-Za-z0-9_-])\s*(?:=|:)\s*"
     rf"(?:[|>](?:[+-][1-9]?|[1-9][+-]?)?|[\\^`])"
     rf"[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)"
 )
 _CREDENTIAL_ASSIGNMENT = re.compile(
     rf"(?i)(?<![A-Za-z0-9_-])(?:"
-    rf"(?P<name>{_SENSITIVE_ASSIGNMENT_NAME})"
-    rf"|(?P<key_quote>['\"])(?P<quoted_name>{_SENSITIVE_ASSIGNMENT_NAME})"
+    rf"(?P<name>{_ASSIGNMENT_NAME})"
+    rf"|(?P<key_quote>['\"])(?P<quoted_name>{_ASSIGNMENT_NAME})"
     rf"(?P=key_quote)(?:\s*\])?"
     rf")(?![A-Za-z0-9_-])(?P<separator>\s*(?:=|:)\s*)"
     rf"(?:"
@@ -84,6 +78,11 @@ def _is_sensitive_key(value: str) -> bool:
     return bool(_SENSITIVE_KEY.search(normalized))
 
 
+def _is_sensitive_assignment_name(value: str) -> bool:
+    normalized = _normalize_key(value)
+    return _is_sensitive_key(value) or normalized.startswith("tellus")
+
+
 def redact_text(value: str) -> tuple[str, List[str]]:
     """Redact credential-shaped values without returning or logging matches."""
     try:
@@ -99,9 +98,13 @@ def redact_text(value: str) -> tuple[str, List[str]]:
             )
 
     findings: set[str] = set()
-    if _MULTILINE_CREDENTIAL_ASSIGNMENT.search(value):
-        findings.add("credential_multiline_assignment")
-        return "[REDACTED:credential_multiline_record]", sorted(findings)
+    for multiline_match in _MULTILINE_CREDENTIAL_ASSIGNMENT.finditer(value):
+        multiline_name = multiline_match.group("multiline_name") or (
+            multiline_match.group("multiline_quoted_name")
+        )
+        if _is_sensitive_assignment_name(multiline_name):
+            findings.add("credential_multiline_assignment")
+            return "[REDACTED:credential_multiline_record]", sorted(findings)
     value, count = _PRIVATE_KEY.subn("[REDACTED:private_key]", value)
     if count:
         findings.add("private_key")
@@ -111,8 +114,7 @@ def redact_text(value: str) -> tuple[str, List[str]]:
 
     def redact_assignment(match: re.Match[str]) -> str:
         name = match.group("name") or match.group("quoted_name")
-        normalized_name = _normalize_key(name)
-        if not (_is_sensitive_key(name) or normalized_name.startswith("tellus")):
+        if not _is_sensitive_assignment_name(name):
             return match.group(0)
         value_group = (
             "quoted_value" if match.group("value_quote") else "unquoted_value"

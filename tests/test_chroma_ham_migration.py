@@ -249,6 +249,10 @@ def test_export_redacts_normalized_and_escaped_credential_keys(tmp_path):
     documents = [
         f"clientSecret={placeholder}",
         f"accessToken={placeholder}",
+        f"clientSecretValue={placeholder}",
+        f"accessTokenValue={placeholder}",
+        f"privateKeyPem={placeholder}",
+        f"oauthAccessTokenValue={placeholder}",
         json.dumps({"clientSecret": placeholder}, separators=(",", ":")),
         json.dumps({"accessToken": placeholder}, separators=(",", ":")),
         f'{{"P\\u0041SSWORD":"{placeholder}"}}',
@@ -334,6 +338,10 @@ def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
         "PASSWORD=[REDACTED:syntheticSecretTail24680]",
         "clientSecret=synthetic-secret-tail-24680",
         "accessToken=synthetic-secret-tail-24680",
+        "clientSecretValue=synthetic-secret-tail-24680",
+        "accessTokenValue=synthetic-secret-tail-24680",
+        "privateKeyPem=synthetic-secret-tail-24680",
+        "oauthAccessTokenValue=synthetic-secret-tail-24680",
         '{"P\\u0041SSWORD":"synthetic-secret-tail-24680"}',
     ],
 )

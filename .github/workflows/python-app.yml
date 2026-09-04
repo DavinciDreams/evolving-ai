@@ -47,3 +47,6 @@ jobs:
     - name: Test actual authenticated application with fake providers
       run: |
         pytest tests/test_steward_app_routes.py tests/test_steward_auxiliary_routes.py tests/test_service_lifecycle.py tests/test_legacy_steward_routes.py tests/test_github_read_routes.py tests/test_status_evidence.py tests/test_media_service.py tests/test_connector_service.py tests/test_media_connector_routes.py tests/test_api_routes.py -q
+    - name: Test remaining non-integration modules in isolation
+      run: |
+        pytest tests/test_code_analyzer.py tests/test_context_manager_simple.py tests/test_core_improvements.py tests/test_direct_openrouter.py tests/test_fallback_system.py tests/test_llm_config.py tests/test_llm_interface_unit.py tests/test_memories_api.py tests/test_memory_metadata.py tests/test_openrouter_endpoints.py tests/test_openrouter_models.py tests/test_optimized_context_manager.py tests/test_parallel_evaluator.py tests/test_tpmjs.py -q

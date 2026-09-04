@@ -37,7 +37,17 @@ def test_sensitive_fields_do_not_destroy_ordinary_token_telemetry():
     assert clean["api_key"] == "[REDACTED:sensitive_field]"
 
 
-@pytest.mark.parametrize("key", ["clientSecret", "accessToken"])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "clientSecret",
+        "accessToken",
+        "clientSecretValue",
+        "accessTokenValue",
+        "privateKeyPem",
+        "oauthAccessTokenValue",
+    ],
+)
 def test_camel_case_credential_keys_are_redacted(key):
     placeholder = "synthetic-secret-tail-24680"
     text = f"{key}={placeholder}"
@@ -49,12 +59,17 @@ def test_camel_case_credential_keys_are_redacted(key):
 
 def test_camel_case_structured_credential_keys_are_redacted():
     placeholder = "synthetic-secret-tail-24680"
-    redacted, findings = redact_value(
-        {"clientSecret": placeholder, "accessToken": placeholder}
-    )
+    credential_keys = [
+        "clientSecret",
+        "accessToken",
+        "clientSecretValue",
+        "accessTokenValue",
+        "privateKeyPem",
+        "oauthAccessTokenValue",
+    ]
+    redacted, findings = redact_value({key: placeholder for key in credential_keys})
     assert redacted == {
-        "clientSecret": "[REDACTED:sensitive_field]",
-        "accessToken": "[REDACTED:sensitive_field]",
+        key: "[REDACTED:sensitive_field]" for key in credential_keys
     }
     assert findings == ["sensitive_field"]
 
@@ -74,6 +89,11 @@ def test_arbitrary_redaction_marker_is_not_trusted():
         "PASSWORD=[REDACTED:credential_assignment]",
         ["credential_assignment"],
     )
+
+
+def test_generic_assignment_capture_ignores_non_sensitive_multiline_name():
+    text = "releaseNotes: |\n  ordinary public notes\n"
+    assert redact_text(text) == (text, [])
 
 
 def test_prefixed_deployment_credentials_are_redacted_without_values():
