@@ -36,14 +36,20 @@ def test_sensitive_fields_do_not_destroy_ordinary_token_telemetry():
 
 def test_prefixed_deployment_credentials_are_redacted_without_values():
     placeholder = "synthetic-placeholder-00000000000000000000000000"
+    spaced_placeholder = "synthetic secret phrase 13579"
+    punctuated_placeholder = "synthetic,value,12345"
     text = (
         f"HAM_API_KEY={placeholder}\nPROJECT_API_KEY: {placeholder}\n"
         f'{{"HAM_API_KEY":"{placeholder}"}}\n'
         f'os.environ["PROJECT_API_KEY"] = "{placeholder}"\n'
+        f'{{"PASSWORD":"{spaced_placeholder}"}}\n'
+        f'{{"HAM_API_KEY":"{punctuated_placeholder}"}}\n'
         "ordinary_field=ordinary-value"
     )
     redacted, findings = redact_text(text)
     assert placeholder not in redacted
+    assert spaced_placeholder not in redacted
+    assert punctuated_placeholder not in redacted
     assert "HAM_API_KEY=[REDACTED:credential_assignment]" in redacted
     assert "PROJECT_API_KEY: [REDACTED:credential_assignment]" in redacted
     assert '"HAM_API_KEY":"[REDACTED:credential_assignment]"' in redacted
@@ -51,5 +57,7 @@ def test_prefixed_deployment_credentials_are_redacted_without_values():
         'os.environ["PROJECT_API_KEY"] = "[REDACTED:credential_assignment]"'
         in redacted
     )
+    assert '"PASSWORD":"[REDACTED:credential_assignment]"' in redacted
+    assert '"HAM_API_KEY":"[REDACTED:credential_assignment]"' in redacted
     assert "ordinary_field=ordinary-value" in redacted
     assert findings == ["credential_assignment"]

@@ -125,6 +125,45 @@ def test_export_redacts_prefixed_deployment_assignments_and_load_accepts_only_re
     assert rows[0]["metadata"]["security_quarantined"] is True
 
 
+@pytest.mark.parametrize(
+    "credential_value",
+    [
+        "synthetic secret phrase 13579",
+        "synthetic,value,12345",
+    ],
+)
+def test_export_redacts_quoted_values_with_spaces_or_commas(
+    tmp_path, credential_value
+):
+    collection = MagicMock()
+    collection.get.return_value = {
+        "ids": ["legacy-quoted-value"],
+        "documents": [
+            json.dumps({"PASSWORD": credential_value}, separators=(",", ":"))
+        ],
+        "metadatas": [{}],
+    }
+    chroma = MagicMock()
+    chroma.get_collection.return_value = collection
+    with patch(
+        "scripts.migrate_chroma_to_ham.chromadb.PersistentClient", return_value=chroma
+    ):
+        manifest = export_snapshot(
+            persist_directory="/unused",
+            collection_name="agent_memory",
+            snapshot_directory=tmp_path,
+        )
+
+    persisted = "\n".join(path.read_text() for path in tmp_path.iterdir())
+    assert credential_value not in persisted
+    assert manifest["quarantined_record_count"] == 1
+    _, rows = load_snapshot(tmp_path)
+    assert json.loads(rows[0]["content"]) == {
+        "PASSWORD": "[REDACTED:credential_assignment]"
+    }
+    assert rows[0]["metadata"]["security_quarantined"] is True
+
+
 def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
     collection = MagicMock()
     collection.get.return_value = {
@@ -165,6 +204,8 @@ def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
     [
         '{"HAM_API_KEY":"synthetic-placeholder-00000000000000000000000000"}',
         'os.environ["HAM_API_KEY"] = "synthetic-placeholder-00000000000000000000000000"',
+        '{"PASSWORD":"synthetic secret phrase 13579"}',
+        '{"HAM_API_KEY":"synthetic,value,12345"}',
     ],
 )
 def test_load_rejects_quoted_credential_key_reintroduced(

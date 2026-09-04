@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-DETECTOR_VERSION = "credential-redaction-v4"
+DETECTOR_VERSION = "credential-redaction-v5"
 
 _SENSITIVE_KEY = re.compile(r"(?i)(?:^|[_-])(?:password|secret|token|api[_-]?key|authorization|nsec|private[_-]?key)(?:$|[_-])")
 _PRIVATE_KEY = re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----", re.DOTALL)
@@ -26,7 +26,11 @@ _CREDENTIAL_ASSIGNMENT = re.compile(
     rf"|(?P<key_quote>['\"])(?P<quoted_name>{_SENSITIVE_ASSIGNMENT_NAME})"
     rf"(?P=key_quote)(?:\s*\])?"
     rf")(?![A-Za-z0-9_-])(?P<separator>\s*(?:=|:)\s*)"
-    rf"(?P<value_quote>['\"]?)(?P<value>[^\s,;'\"}}]+)(?P=value_quote)"
+    rf"(?:"
+    rf"(?P<value_quote>['\"])(?P<quoted_value>"
+    rf"(?:\\.|(?!(?P=value_quote)).)+)(?P=value_quote)"
+    rf"|(?P<unquoted_value>[^\s,;'\"}}]+)"
+    rf")"
 )
 _SECRET_PREFIXES = re.compile(
     r"(?i)(?<![A-Za-z0-9])(?:"
@@ -58,11 +62,15 @@ def redact_text(value: str) -> tuple[str, List[str]]:
             or normalized_name.lower().startswith("tellus")
         ):
             return match.group(0)
-        if match.group("value").startswith("[REDACTED:"):
+        value_group = (
+            "quoted_value" if match.group("value_quote") else "unquoted_value"
+        )
+        matched_value = match.group(value_group)
+        if matched_value.startswith("[REDACTED:"):
             return match.group(0)
         findings.add("credential_assignment")
-        relative_value_start = match.start("value") - match.start()
-        relative_value_end = match.end("value") - match.start()
+        relative_value_start = match.start(value_group) - match.start()
+        relative_value_end = match.end(value_group) - match.start()
         return (
             match.group(0)[:relative_value_start]
             + "[REDACTED:credential_assignment]"
