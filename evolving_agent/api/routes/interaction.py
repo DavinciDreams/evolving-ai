@@ -263,17 +263,29 @@ async def openai_chat_completions(
         raise
     except Exception as e:
         logger.error("OpenAI-compatible request failed: {}", type(e).__name__)
+        if isinstance(e, RuntimeBusyError):
+            status_code = 429
+            error_type = "rate_limit_error"
+            error_code = "server_busy"
+        elif isinstance(e, TimeoutError):
+            status_code = 504
+            error_type = "timeout_error"
+            error_code = "response_timeout"
+        else:
+            status_code = 500
+            error_type = "internal_error"
+            error_code = None
         raise HTTPException(
-            status_code=500,
+            status_code=status_code,
             detail={
                 "error": {
                     "message": _public_error(e),
-                    "type": "internal_error",
+                    "type": error_type,
                     "param": None,
-                    "code": None,
+                    "code": error_code,
                 }
             },
-        )
+        ) from None
 
 
 @router.post("/chat/stream", tags=["Interaction"], summary="Chat with streaming + tool visibility", dependencies=[Depends(verify_api_key)])

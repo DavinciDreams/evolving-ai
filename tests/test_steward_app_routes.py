@@ -436,6 +436,41 @@ def test_chat_failures_are_typed_and_sanitized(registered_app, exception, status
     registered_app.agent.run.assert_awaited_once()
 
 
+@pytest.mark.parametrize(
+    "exception,status,error_type,error_code",
+    [
+        (
+            RuntimeBusyError("private-busy-state"),
+            429,
+            "rate_limit_error",
+            "server_busy",
+        ),
+        (
+            TimeoutError("private-provider-timeout"),
+            504,
+            "timeout_error",
+            "response_timeout",
+        ),
+        (RuntimeError("private-provider-body"), 500, "internal_error", None),
+    ],
+)
+def test_openai_nonstreaming_failures_preserve_typed_status(
+    registered_app, exception, status, error_type, error_code
+):
+    registered_app.agent.run.side_effect = exception
+    response = registered_app.client.post(
+        "/v1/chat/completions",
+        headers=headers(),
+        json={"messages": [{"role": "user", "content": "hello"}]},
+    )
+    assert response.status_code == status
+    error = response.json()["detail"]["error"]
+    assert error["type"] == error_type
+    assert error["code"] == error_code
+    assert str(exception) not in response.text
+    registered_app.agent.run.assert_awaited_once()
+
+
 def sse_events(response):
     return [
         json.loads(line[6:])
