@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any, Dict, List
 
-DETECTOR_VERSION = "credential-redaction-v9"
+DETECTOR_VERSION = "credential-redaction-v10"
 
 _SENSITIVE_KEY = re.compile(
     r"(?:^|_)(?:password|secret|token|api_key|authorization|nsec|private_key)(?:$|_)"
@@ -20,6 +20,12 @@ _NSEC = re.compile(r"(?<![A-Za-z0-9])nsec1[023456789acdefghjklmnpqrstuvwxyz]{20,
 
 _ASSIGNMENT_NAME = (
     r"[A-Za-z][A-Za-z0-9_-]*(?:[ ]+[A-Za-z][A-Za-z0-9_-]*)*"
+)
+_NEXT_ASSIGNMENT = (
+    rf"(?:{_ASSIGNMENT_NAME}"
+    rf"|(?:[A-Za-z][A-Za-z0-9_.]*\s*\[\s*)?"
+    rf"['\"]{_ASSIGNMENT_NAME}['\"](?:\s*\])?)"
+    rf"\s*(?:=|:)\s*"
 )
 _MULTILINE_CREDENTIAL_ASSIGNMENT = re.compile(
     rf"(?im)(?<![A-Za-z0-9_-])(?:"
@@ -40,7 +46,8 @@ _CREDENTIAL_ASSIGNMENT = re.compile(
     rf"(?P<value_quote>['\"])(?P<quoted_value>"
     rf"(?:\\[\s\S]|(?!(?P=value_quote))[\s\S])+)(?P=value_quote)"
     rf"(?=$|[\s,;#&|)\]}}])"
-    rf"|(?P<unquoted_value>[^\r\n]+)"
+    rf"|(?P<unquoted_value>[^\r\n]*?)"
+    rf"(?=(?:(?:[ \t]+|;[ \t]*){_NEXT_ASSIGNMENT}|$|[\r\n]))"
     rf")"
 )
 _CANONICAL_REDACTED_VALUES = frozenset(

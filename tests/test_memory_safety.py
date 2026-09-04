@@ -96,6 +96,23 @@ def test_generic_assignment_capture_ignores_non_sensitive_multiline_name():
     assert redact_text(text) == (text, [])
 
 
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        (
+            "ordinary=value PASSWORD=synthetic-secret-tail-24680",
+            "ordinary=value PASSWORD=[REDACTED:credential_assignment]",
+        ),
+        (
+            "ordinary=value;clientSecretValue=synthetic-secret-tail-24680",
+            "ordinary=value;clientSecretValue=[REDACTED:credential_assignment]",
+        ),
+    ],
+)
+def test_non_sensitive_assignment_cannot_mask_later_credential(text, expected):
+    assert redact_text(text) == (expected, ["credential_assignment"])
+
+
 def test_prefixed_deployment_credentials_are_redacted_without_values():
     placeholder = "synthetic-placeholder-00000000000000000000000000"
     spaced_placeholder = "synthetic secret phrase 13579"
