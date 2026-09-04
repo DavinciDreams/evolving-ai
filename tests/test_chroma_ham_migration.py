@@ -159,7 +159,7 @@ def test_export_redacts_quoted_values_with_spaces_or_commas(
     assert manifest["quarantined_record_count"] == 1
     _, rows = load_snapshot(tmp_path)
     assert json.loads(rows[0]["content"]) == {
-        "PASSWORD": "[REDACTED:credential_assignment]"
+        "PASSWORD": "[REDACTED:sensitive_field]"
     }
     assert rows[0]["metadata"]["security_quarantined"] is True
 
@@ -210,6 +210,10 @@ def test_export_removes_and_quarantines_multiline_credential(
             'PASSWORD="[REDACTED:credential_assignment]"synthetic-secret-tail-24680',
             "synthetic-secret-tail-24680",
         ),
+        (
+            "PASSWORD=[REDACTED:syntheticSecretTail24680]",
+            "[REDACTED:syntheticSecretTail24680]",
+        ),
     ],
 )
 def test_export_redacts_complete_credential_assignment(
@@ -238,6 +242,40 @@ def test_export_redacts_complete_credential_assignment(
     _, rows = load_snapshot(tmp_path)
     assert rows[0]["content"].endswith("[REDACTED:credential_assignment]")
     assert rows[0]["metadata"]["security_quarantined"] is True
+
+
+def test_export_redacts_normalized_and_escaped_credential_keys(tmp_path):
+    placeholder = "synthetic-secret-tail-24680"
+    documents = [
+        f"clientSecret={placeholder}",
+        f"accessToken={placeholder}",
+        json.dumps({"clientSecret": placeholder}, separators=(",", ":")),
+        json.dumps({"accessToken": placeholder}, separators=(",", ":")),
+        f'{{"P\\u0041SSWORD":"{placeholder}"}}',
+    ]
+    collection = MagicMock()
+    collection.get.return_value = {
+        "ids": [f"normalized-key-{index}" for index in range(len(documents))],
+        "documents": documents,
+        "metadatas": [{} for _ in documents],
+    }
+    chroma = MagicMock()
+    chroma.get_collection.return_value = collection
+    with patch(
+        "scripts.migrate_chroma_to_ham.chromadb.PersistentClient", return_value=chroma
+    ):
+        manifest = export_snapshot(
+            persist_directory="/unused",
+            collection_name="agent_memory",
+            snapshot_directory=tmp_path,
+        )
+
+    persisted = "\n".join(path.read_text() for path in tmp_path.iterdir())
+    assert placeholder not in persisted
+    assert "P\\u0041SSWORD" not in persisted
+    assert manifest["quarantined_record_count"] == len(documents)
+    _, rows = load_snapshot(tmp_path)
+    assert all(row["metadata"]["security_quarantined"] is True for row in rows)
 
 
 def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
@@ -293,6 +331,10 @@ def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
         "HAM_API_KEY=synthetic,value;tail",
         "PASSWORD=[REDACTED:credential_assignment] leaked tail",
         'PASSWORD="[REDACTED:credential_assignment]"synthetic-secret-tail-24680',
+        "PASSWORD=[REDACTED:syntheticSecretTail24680]",
+        "clientSecret=synthetic-secret-tail-24680",
+        "accessToken=synthetic-secret-tail-24680",
+        '{"P\\u0041SSWORD":"synthetic-secret-tail-24680"}',
     ],
 )
 def test_load_rejects_credential_reintroduced(

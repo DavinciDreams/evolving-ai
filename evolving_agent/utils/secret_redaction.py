@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Dict, List
 
-DETECTOR_VERSION = "credential-redaction-v8"
+DETECTOR_VERSION = "credential-redaction-v9"
 
-_SENSITIVE_KEY = re.compile(r"(?i)(?:^|[_-])(?:password|secret|token|api[_-]?key|authorization|nsec|private[_-]?key)(?:$|[_-])")
+_SENSITIVE_KEY = re.compile(
+    r"(?:^|_)(?:password|secret|token|api_key|authorization|nsec|private_key)(?:$|_)"
+)
+_UNICODE_ESCAPE = re.compile(r"\\u([0-9A-Fa-f]{4})")
+_CAMEL_ACRONYM_BOUNDARY = re.compile(r"(?<=[A-Z])(?=[A-Z][a-z])")
+_CAMEL_WORD_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_NON_KEY_CHARACTER = re.compile(r"[^A-Za-z0-9]+")
 _PRIVATE_KEY = re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----", re.DOTALL)
 _NSEC = re.compile(r"(?<![A-Za-z0-9])nsec1[023456789acdefghjklmnpqrstuvwxyz]{20,}")
 
@@ -15,6 +22,7 @@ _SENSITIVE_ASSIGNMENT_NAME = (
     r"(?:"
     r"tellus(?:[_ -]?(?:api[_ -]?)?(?:key|token))?"
     r"|api[ _-]?key|access[ _-]?token|auth[ _-]?token|secret|password"
+    r"|[A-Za-z][A-Za-z0-9]*(?:Password|Secret|Token|ApiKey|Authorization|Nsec|PrivateKey)"
     r"|(?:[A-Za-z][A-Za-z0-9]*[_-])*"
     r"(?:password|secret|token|api[_-]?key|authorization|nsec|private[_-]?key)"
     r"(?:[_-][A-Za-z0-9]+)*"
@@ -41,7 +49,16 @@ _CREDENTIAL_ASSIGNMENT = re.compile(
     rf"|(?P<unquoted_value>[^\r\n]+)"
     rf")"
 )
-_REDACTED_VALUE = re.compile(r"\[REDACTED:[A-Za-z0-9_-]+\]")
+_CANONICAL_REDACTED_VALUES = frozenset(
+    {
+        "[REDACTED:credential_assignment]",
+        "[REDACTED:credential_multiline_record]",
+        "[REDACTED:nsec]",
+        "[REDACTED:private_key]",
+        "[REDACTED:secret_prefix]",
+        "[REDACTED:sensitive_field]",
+    }
+)
 _SECRET_PREFIXES = re.compile(
     r"(?i)(?<![A-Za-z0-9])(?:"
     r"sk-[A-Za-z0-9_-]{12,}"
@@ -54,8 +71,33 @@ _SECRET_PREFIXES = re.compile(
 )
 
 
+def _normalize_key(value: str) -> str:
+    """Canonicalize serialized, camelCase, snake_case, and kebab-case keys."""
+    unescaped = _UNICODE_ESCAPE.sub(lambda match: chr(int(match.group(1), 16)), value)
+    separated = _CAMEL_ACRONYM_BOUNDARY.sub("_", unescaped)
+    separated = _CAMEL_WORD_BOUNDARY.sub("_", separated)
+    return _NON_KEY_CHARACTER.sub("_", separated).strip("_").lower()
+
+
+def _is_sensitive_key(value: str) -> bool:
+    normalized = _normalize_key(value)
+    return bool(_SENSITIVE_KEY.search(normalized))
+
+
 def redact_text(value: str) -> tuple[str, List[str]]:
     """Redact credential-shaped values without returning or logging matches."""
+    try:
+        structured = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        structured = None
+    if isinstance(structured, (dict, list)):
+        redacted_structured, structured_findings = redact_value(structured)
+        if structured_findings:
+            return (
+                json.dumps(redacted_structured, ensure_ascii=False, separators=(",", ":")),
+                structured_findings,
+            )
+
     findings: set[str] = set()
     if _MULTILINE_CREDENTIAL_ASSIGNMENT.search(value):
         findings.add("credential_multiline_assignment")
@@ -69,17 +111,14 @@ def redact_text(value: str) -> tuple[str, List[str]]:
 
     def redact_assignment(match: re.Match[str]) -> str:
         name = match.group("name") or match.group("quoted_name")
-        normalized_name = name.replace(" ", "_")
-        if not (
-            _SENSITIVE_KEY.search(normalized_name)
-            or normalized_name.lower().startswith("tellus")
-        ):
+        normalized_name = _normalize_key(name)
+        if not (_is_sensitive_key(name) or normalized_name.startswith("tellus")):
             return match.group(0)
         value_group = (
             "quoted_value" if match.group("value_quote") else "unquoted_value"
         )
         matched_value = match.group(value_group)
-        if _REDACTED_VALUE.fullmatch(matched_value.strip()):
+        if matched_value.strip() in _CANONICAL_REDACTED_VALUES:
             return match.group(0)
         findings.add("credential_assignment")
         relative_value_start = match.start(value_group) - match.start()
@@ -108,7 +147,7 @@ def redact_value(value: Any) -> tuple[Any, List[str]]:
         findings: set[str] = set()
         sanitized: Dict[str, Any] = {}
         for key, item in value.items():
-            if _SENSITIVE_KEY.search(str(key)) and item:
+            if _is_sensitive_key(str(key)) and item:
                 sanitized[str(key)] = "[REDACTED:sensitive_field]"
                 findings.add("sensitive_field")
                 continue

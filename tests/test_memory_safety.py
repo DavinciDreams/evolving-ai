@@ -1,4 +1,5 @@
 """HAM-only storage safety without local embedding model imports."""
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -34,6 +35,45 @@ def test_sensitive_fields_do_not_destroy_ordinary_token_telemetry():
     clean, findings = redact_value({"tokens_used": 10, "max_tokens": 20, "api_key": "opaque-key"})
     assert clean["tokens_used"] == 10 and clean["max_tokens"] == 20
     assert clean["api_key"] == "[REDACTED:sensitive_field]"
+
+
+@pytest.mark.parametrize("key", ["clientSecret", "accessToken"])
+def test_camel_case_credential_keys_are_redacted(key):
+    placeholder = "synthetic-secret-tail-24680"
+    text = f"{key}={placeholder}"
+    redacted, findings = redact_text(text)
+    assert placeholder not in redacted
+    assert redacted == f"{key}=[REDACTED:credential_assignment]"
+    assert findings == ["credential_assignment"]
+
+
+def test_camel_case_structured_credential_keys_are_redacted():
+    placeholder = "synthetic-secret-tail-24680"
+    redacted, findings = redact_value(
+        {"clientSecret": placeholder, "accessToken": placeholder}
+    )
+    assert redacted == {
+        "clientSecret": "[REDACTED:sensitive_field]",
+        "accessToken": "[REDACTED:sensitive_field]",
+    }
+    assert findings == ["sensitive_field"]
+
+
+def test_escaped_json_credential_key_is_structurally_redacted():
+    placeholder = "synthetic-secret-tail-24680"
+    text = f'{{"P\\u0041SSWORD":"{placeholder}"}}'
+    redacted, findings = redact_text(text)
+    assert placeholder not in redacted
+    assert json.loads(redacted) == {"PASSWORD": "[REDACTED:sensitive_field]"}
+    assert findings == ["sensitive_field"]
+
+
+def test_arbitrary_redaction_marker_is_not_trusted():
+    text = "PASSWORD=[REDACTED:syntheticSecretTail24680]"
+    assert redact_text(text) == (
+        "PASSWORD=[REDACTED:credential_assignment]",
+        ["credential_assignment"],
+    )
 
 
 def test_prefixed_deployment_credentials_are_redacted_without_values():
