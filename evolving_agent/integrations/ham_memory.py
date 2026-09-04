@@ -6,11 +6,16 @@ This client deliberately never sends an agent identity header or payload field.
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import hashlib
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
 from urllib.parse import urlsplit
 
 import httpx
+
+
+_T = TypeVar("_T")
 
 
 class HAMMemoryError(RuntimeError):
@@ -62,6 +67,8 @@ class HAMMemoryClient:
         self.repo = repo
         self.expected_agent_id = expected_agent_id
         self._initialized = False
+        self._owner_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._worker_wait_seconds = max(float(timeout) + 1.0, 2.0)
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {api_key}"},
@@ -70,6 +77,11 @@ class HAMMemoryClient:
         )
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+        current_loop = asyncio.get_running_loop()
+        if self._owner_loop is None:
+            self._owner_loop = current_loop
+        elif current_loop is not self._owner_loop:
+            raise HAMMemoryError("HAM transport must run on its owning event loop")
         try:
             response = await self._client.request(method, path, **kwargs)
             response.raise_for_status()
@@ -81,6 +93,24 @@ class HAMMemoryClient:
             ) from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise HAMMemoryError(f"HAM request failed: {type(exc).__name__}") from exc
+
+    def run_on_owner(self, operation: Callable[[], Awaitable[_T]]) -> _T:
+        """Run a read submitted by a synchronous SDK tool on the client loop."""
+        owner = self._owner_loop
+        if owner is None or not owner.is_running() or owner.is_closed():
+            raise HAMMemoryError("HAM transport owner event loop is unavailable")
+        try:
+            current = asyncio.get_running_loop()
+        except RuntimeError:
+            current = None
+        if current is owner:
+            raise HAMMemoryError("Synchronous HAM bridge cannot block its owning loop")
+        future = asyncio.run_coroutine_threadsafe(operation(), owner)
+        try:
+            return future.result(timeout=self._worker_wait_seconds)
+        except concurrent.futures.TimeoutError as exc:
+            future.cancel()
+            raise HAMMemoryError("HAM tool read exceeded its deadline") from exc
 
     async def initialize(self) -> None:
         """Verify principal and least authority before the first memory mutation."""
@@ -306,4 +336,6 @@ class HAMMemoryClient:
         return True
 
     async def close(self) -> None:
+        if self._owner_loop is not None and asyncio.get_running_loop() is not self._owner_loop:
+            raise HAMMemoryError("HAM transport must close on its owning event loop")
         await self._client.aclose()

@@ -1,12 +1,17 @@
 """Contract tests for Katbot's transport-neutral HAM REST adapter."""
 
+import asyncio
 import json
 import copy
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
 import pytest
 
 from evolving_agent.integrations.ham_memory import HAMMemoryClient, HAMMemoryError
+from evolving_agent.core.memory import LongTermMemory
+from evolving_agent.core.tools import make_search_memory_tool
 
 
 IDENTITY = {
@@ -24,6 +29,32 @@ PROJECTS = [
         "repo": "DavinciDreams/evolving-ai",
     }
 ]
+
+
+class _KeepAliveHAMHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        body = json.dumps(
+            [
+                {
+                    "id": 71,
+                    "content": "synthetic remembered item",
+                    "score": 0.9,
+                    "timestamp": "2026-08-31T00:00:00Z",
+                    "metadata": {"type": "fact"},
+                }
+            ]
+        ).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args):
+        pass
 
 
 def _client(
@@ -49,6 +80,47 @@ def _client(
         expected_agent_id="katbot-evolving-ai",
         transport=httpx.MockTransport(routed),
     )
+
+
+@pytest.mark.asyncio
+async def test_registered_memory_tool_reuses_ham_client_on_owning_event_loop():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _KeepAliveHAMHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    client = HAMMemoryClient(
+        base_url="https://ham.invalid",
+        api_key="synthetic-test-only",
+        project="evolving-ai",
+        scope="project:evolving-ai",
+        repo="DavinciDreams/evolving-ai",
+        expected_agent_id="katbot-evolving-ai",
+        timeout=2,
+    )
+    await client.close()
+    client._client = httpx.AsyncClient(
+        base_url=f"http://127.0.0.1:{server.server_port}",
+        timeout=2,
+        trust_env=False,
+    )
+    memory = LongTermMemory()
+    memory.backend = "ham"
+    memory.initialized = True
+    memory.ham_client = client
+    try:
+        assert await client.search("warm the real connection pool", top_k=1)
+        tool = make_search_memory_tool(memory)
+        payload = json.loads(
+            await asyncio.to_thread(
+                tool.handler, query="synthetic remembered item", limit=1
+            )
+        )
+        assert "error" not in payload
+        assert payload["results"][0]["content"] == "synthetic remembered item"
+    finally:
+        await client.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=1)
 
 
 @pytest.mark.asyncio

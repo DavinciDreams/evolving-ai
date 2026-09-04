@@ -476,6 +476,11 @@ def make_search_web_tool(web_search: Optional["WebSearchIntegration"]) -> Any:
 def make_search_memory_tool(memory: Optional["LongTermMemory"]) -> Any:
     """Create the search_memory tool bound to a LongTermMemory instance."""
 
+    def run_read(operation):
+        ham_client = getattr(memory, "ham_client", None)
+        owner_runner = getattr(ham_client, "run_on_owner", None)
+        return owner_runner(operation) if callable(owner_runner) else asyncio.run(operation())
+
     @tool(
         name="search_memory",
         description="Search the agent's long-term memory for relevant past interactions, learned patterns, and stored knowledge.",
@@ -487,8 +492,8 @@ def make_search_memory_tool(memory: Optional["LongTermMemory"]) -> Any:
         try:
             search_query = (query or "").strip()
             if search_query:
-                results = asyncio.run(
-                    memory.search_memories(
+                results = run_read(
+                    lambda: memory.search_memories(
                         search_query,
                         n_results=limit,
                         similarity_threshold=0.0,
@@ -498,7 +503,7 @@ def make_search_memory_tool(memory: Optional["LongTermMemory"]) -> Any:
                 results = []
 
             if not results and hasattr(memory, "list_recent_memories"):
-                recent = asyncio.run(memory.list_recent_memories(limit=limit))
+                recent = run_read(lambda: memory.list_recent_memories(limit=limit))
                 results = [(entry, 0.0) for entry in recent]
 
             memories = []
