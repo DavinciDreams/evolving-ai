@@ -89,6 +89,36 @@ def test_export_quarantine_manifest_detects_secret_prefix_in_metadata(tmp_path):
     assert "[REDACTED:secret_prefix]" in rows[0]["metadata"]["debug"]
 
 
+def test_export_redacts_prefixed_deployment_assignments_and_load_accepts_only_redacted(tmp_path):
+    placeholder = "synthetic-placeholder-00000000000000000000000000"
+    collection = MagicMock()
+    collection.get.return_value = {
+        "ids": ["legacy-deployment-note"],
+        "documents": [
+            f"HAM_API_KEY={placeholder}\nPROJECT_API_KEY={placeholder}"
+        ],
+        "metadatas": [
+            {"timestamp": "2026-08-31T00:00:00Z", "memory_type": "fact"}
+        ],
+    }
+    chroma = MagicMock()
+    chroma.get_collection.return_value = collection
+    with patch(
+        "scripts.migrate_chroma_to_ham.chromadb.PersistentClient", return_value=chroma
+    ):
+        manifest = export_snapshot(
+            persist_directory="/unused",
+            collection_name="agent_memory",
+            snapshot_directory=tmp_path,
+        )
+    persisted = "\n".join(path.read_text() for path in tmp_path.iterdir())
+    assert placeholder not in persisted
+    assert manifest["quarantined_record_count"] == 1
+    _, rows = load_snapshot(tmp_path)
+    assert rows[0]["content"].count("[REDACTED:credential_assignment]") == 2
+    assert rows[0]["metadata"]["security_quarantined"] is True
+
+
 def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
     collection = MagicMock()
     collection.get.return_value = {

@@ -5,17 +5,21 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-DETECTOR_VERSION = "credential-redaction-v2"
+DETECTOR_VERSION = "credential-redaction-v3"
 
 _SENSITIVE_KEY = re.compile(r"(?i)(?:^|[_-])(?:password|secret|token|api[_-]?key|authorization|nsec|private[_-]?key)(?:$|[_-])")
 _PRIVATE_KEY = re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----", re.DOTALL)
 _NSEC = re.compile(r"(?<![A-Za-z0-9])nsec1[023456789acdefghjklmnpqrstuvwxyz]{20,}")
 
 _CREDENTIAL_ASSIGNMENT = re.compile(
-    r"(?i)\b(?P<name>"
+    r"(?i)(?<![A-Za-z0-9_-])(?P<name>"
     r"tellus(?:[_ -]?(?:api[_ -]?)?(?:key|token))?"
-    r"|api[_ -]?key|access[_ -]?token|auth[_ -]?token|secret|password"
-    r")(?P<separator>\s*(?:=|:)\s*)(?P<quote>['\"]?)(?P<value>[^\s,;'\"}]+)(?P=quote)"
+    r"|api[ _-]?key|access[ _-]?token|auth[ _-]?token|secret|password"
+    r"|(?:[A-Za-z][A-Za-z0-9]*[_-])*"
+    r"(?:password|secret|token|api[_-]?key|authorization|nsec|private[_-]?key)"
+    r"(?:[_-][A-Za-z0-9]+)*"
+    r")(?![A-Za-z0-9_-])(?P<separator>\s*(?:=|:)\s*)"
+    r"(?P<quote>['\"]?)(?P<value>[^\s,;'\"}]+)(?P=quote)"
 )
 _SECRET_PREFIXES = re.compile(
     r"(?i)(?<![A-Za-z0-9])(?:"
@@ -40,11 +44,18 @@ def redact_text(value: str) -> tuple[str, List[str]]:
         findings.add("nsec")
 
     def redact_assignment(match: re.Match[str]) -> str:
+        name = match.group("name")
+        normalized_name = name.replace(" ", "_")
+        if not (
+            _SENSITIVE_KEY.search(normalized_name)
+            or normalized_name.lower().startswith("tellus")
+        ):
+            return match.group(0)
         if match.group("value").startswith("[REDACTED:"):
             return match.group(0)
         findings.add("credential_assignment")
         return (
-            f"{match.group('name')}{match.group('separator')}"
+            f"{name}{match.group('separator')}"
             "[REDACTED:credential_assignment]"
         )
 
