@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any, Dict, List
 
-DETECTOR_VERSION = "credential-redaction-v10"
+DETECTOR_VERSION = "credential-redaction-v11"
 
 _SENSITIVE_KEY = re.compile(
     r"(?:^|_)(?:password|secret|token|api_key|authorization|nsec|private_key)(?:$|_)"
@@ -27,6 +27,7 @@ _NEXT_ASSIGNMENT = (
     rf"['\"]{_ASSIGNMENT_NAME}['\"](?:\s*\])?)"
     rf"\s*(?:=|:)\s*"
 )
+_NEXT_ASSIGNMENT_BOUNDARY = r"(?:[ \t]+|(?:&&|\|\||[;&|])[ \t]*)"
 _MULTILINE_CREDENTIAL_ASSIGNMENT = re.compile(
     rf"(?im)(?<![A-Za-z0-9_-])(?:"
     rf"(?P<multiline_name>{_ASSIGNMENT_NAME})"
@@ -47,7 +48,7 @@ _CREDENTIAL_ASSIGNMENT = re.compile(
     rf"(?:\\[\s\S]|(?!(?P=value_quote))[\s\S])+)(?P=value_quote)"
     rf"(?=$|[\s,;#&|)\]}}])"
     rf"|(?P<unquoted_value>[^\r\n]*?)"
-    rf"(?=(?:(?:[ \t]+|;[ \t]*){_NEXT_ASSIGNMENT}|$|[\r\n]))"
+    rf"(?=(?:{_NEXT_ASSIGNMENT_BOUNDARY}{_NEXT_ASSIGNMENT}|$|[\r\n]))"
     rf")"
 )
 _CANONICAL_REDACTED_VALUES = frozenset(

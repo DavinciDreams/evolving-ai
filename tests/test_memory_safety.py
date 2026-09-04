@@ -107,6 +107,22 @@ def test_generic_assignment_capture_ignores_non_sensitive_multiline_name():
             "ordinary=value;clientSecretValue=synthetic-secret-tail-24680",
             "ordinary=value;clientSecretValue=[REDACTED:credential_assignment]",
         ),
+        (
+            "ordinary=value&&PASSWORD=synthetic-secret-tail-24680",
+            "ordinary=value&&PASSWORD=[REDACTED:credential_assignment]",
+        ),
+        (
+            "ordinary=value||clientSecretValue=synthetic-secret-tail-24680",
+            "ordinary=value||clientSecretValue=[REDACTED:credential_assignment]",
+        ),
+        (
+            "ordinary=value&PASSWORD=synthetic-secret-tail-24680",
+            "ordinary=value&PASSWORD=[REDACTED:credential_assignment]",
+        ),
+        (
+            "ordinary=value|accessTokenValue=synthetic-secret-tail-24680",
+            "ordinary=value|accessTokenValue=[REDACTED:credential_assignment]",
+        ),
     ],
 )
 def test_non_sensitive_assignment_cannot_mask_later_credential(text, expected):
