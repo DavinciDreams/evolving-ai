@@ -206,9 +206,13 @@ def test_export_removes_and_quarantines_multiline_credential(
     [
         ("password: correct horse battery staple", "horse battery staple"),
         ("HAM_API_KEY=synthetic,value;tail", "value;tail"),
+        (
+            'PASSWORD="[REDACTED:credential_assignment]"synthetic-secret-tail-24680',
+            "synthetic-secret-tail-24680",
+        ),
     ],
 )
-def test_export_redacts_complete_unquoted_credential_line(
+def test_export_redacts_complete_credential_assignment(
     tmp_path, credential_text, plaintext_tail
 ):
     collection = MagicMock()
@@ -288,9 +292,10 @@ def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
         "password: correct horse battery staple",
         "HAM_API_KEY=synthetic,value;tail",
         "PASSWORD=[REDACTED:credential_assignment] leaked tail",
+        'PASSWORD="[REDACTED:credential_assignment]"synthetic-secret-tail-24680',
     ],
 )
-def test_load_rejects_quoted_credential_key_reintroduced(
+def test_load_rejects_credential_reintroduced(
     tmp_path, credential_text
 ):
     _export(tmp_path, count=1)

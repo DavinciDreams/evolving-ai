@@ -99,6 +99,21 @@ def test_unquoted_credential_assignment_owns_complete_line(text, plaintext_tail)
     assert findings == ["credential_assignment"]
 
 
-def test_exact_redaction_marker_remains_idempotent():
-    text = "PASSWORD=[REDACTED:credential_assignment]"
+def test_quoted_marker_with_adjacent_shell_suffix_is_redacted():
+    plaintext_tail = "synthetic-secret-tail-24680"
+    text = f'PASSWORD="[REDACTED:credential_assignment]"{plaintext_tail}'
+    redacted, findings = redact_text(text)
+    assert plaintext_tail not in redacted
+    assert redacted == "PASSWORD=[REDACTED:credential_assignment]"
+    assert findings == ["credential_assignment"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "PASSWORD=[REDACTED:credential_assignment]",
+        'PASSWORD="[REDACTED:credential_assignment]"',
+    ],
+)
+def test_exact_redaction_marker_remains_idempotent(text):
     assert redact_text(text) == (text, [])

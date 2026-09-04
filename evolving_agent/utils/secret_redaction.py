@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-DETECTOR_VERSION = "credential-redaction-v7"
+DETECTOR_VERSION = "credential-redaction-v8"
 
 _SENSITIVE_KEY = re.compile(r"(?i)(?:^|[_-])(?:password|secret|token|api[_-]?key|authorization|nsec|private[_-]?key)(?:$|[_-])")
 _PRIVATE_KEY = re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----", re.DOTALL)
@@ -37,6 +37,7 @@ _CREDENTIAL_ASSIGNMENT = re.compile(
     rf"(?:"
     rf"(?P<value_quote>['\"])(?P<quoted_value>"
     rf"(?:\\[\s\S]|(?!(?P=value_quote))[\s\S])+)(?P=value_quote)"
+    rf"(?=$|[\s,;#&|)\]}}])"
     rf"|(?P<unquoted_value>[^\r\n]+)"
     rf")"
 )
