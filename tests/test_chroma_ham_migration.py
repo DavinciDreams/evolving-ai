@@ -95,7 +95,10 @@ def test_export_redacts_prefixed_deployment_assignments_and_load_accepts_only_re
     collection.get.return_value = {
         "ids": ["legacy-deployment-note"],
         "documents": [
-            f"HAM_API_KEY={placeholder}\nPROJECT_API_KEY={placeholder}"
+            f"HAM_API_KEY={placeholder}\n"
+            f"PROJECT_API_KEY={placeholder}\n"
+            f'{{"HAM_API_KEY":"{placeholder}"}}\n'
+            f'os.environ["PROJECT_API_KEY"] = "{placeholder}"'
         ],
         "metadatas": [
             {"timestamp": "2026-08-31T00:00:00Z", "memory_type": "fact"}
@@ -115,7 +118,10 @@ def test_export_redacts_prefixed_deployment_assignments_and_load_accepts_only_re
     assert placeholder not in persisted
     assert manifest["quarantined_record_count"] == 1
     _, rows = load_snapshot(tmp_path)
-    assert rows[0]["content"].count("[REDACTED:credential_assignment]") == 2
+    assert rows[0]["content"].count("[REDACTED:credential_assignment]") == 4
+    assert json.loads(rows[0]["content"].splitlines()[2]) == {
+        "HAM_API_KEY": "[REDACTED:credential_assignment]"
+    }
     assert rows[0]["metadata"]["security_quarantined"] is True
 
 
@@ -141,6 +147,36 @@ def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
     snapshot_path = tmp_path / "chroma-memory.jsonl"
     rows = [json.loads(line) for line in snapshot_path.read_text().splitlines()]
     rows[0]["content"] = "API_KEY=sk-" + "reintroduced-test-value-12345"
+    tampered = "".join(
+        f"{json.dumps(row, sort_keys=True, separators=(',', ':'))}\n" for row in rows
+    )
+    snapshot_path.write_bytes(tampered.encode())
+    manifest_path = tmp_path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["snapshot_sha256"] = hashlib.sha256(tampered.encode()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+
+    with pytest.raises(RuntimeError, match="credential-shaped"):
+        load_snapshot(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "credential_text",
+    [
+        '{"HAM_API_KEY":"synthetic-placeholder-00000000000000000000000000"}',
+        'os.environ["HAM_API_KEY"] = "synthetic-placeholder-00000000000000000000000000"',
+    ],
+)
+def test_load_rejects_quoted_credential_key_reintroduced(
+    tmp_path, credential_text
+):
+    _export(tmp_path, count=1)
+    snapshot_path = tmp_path / "chroma-memory.jsonl"
+    rows = [json.loads(line) for line in snapshot_path.read_text().splitlines()]
+    rows[0]["content"] = credential_text
+    rows[0]["content_sha256"] = hashlib.sha256(
+        credential_text.encode()
+    ).hexdigest()
     tampered = "".join(
         f"{json.dumps(row, sort_keys=True, separators=(',', ':'))}\n" for row in rows
     )

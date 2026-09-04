@@ -5,21 +5,28 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-DETECTOR_VERSION = "credential-redaction-v3"
+DETECTOR_VERSION = "credential-redaction-v4"
 
 _SENSITIVE_KEY = re.compile(r"(?i)(?:^|[_-])(?:password|secret|token|api[_-]?key|authorization|nsec|private[_-]?key)(?:$|[_-])")
 _PRIVATE_KEY = re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----", re.DOTALL)
 _NSEC = re.compile(r"(?<![A-Za-z0-9])nsec1[023456789acdefghjklmnpqrstuvwxyz]{20,}")
 
-_CREDENTIAL_ASSIGNMENT = re.compile(
-    r"(?i)(?<![A-Za-z0-9_-])(?P<name>"
+_SENSITIVE_ASSIGNMENT_NAME = (
+    r"(?:"
     r"tellus(?:[_ -]?(?:api[_ -]?)?(?:key|token))?"
     r"|api[ _-]?key|access[ _-]?token|auth[ _-]?token|secret|password"
     r"|(?:[A-Za-z][A-Za-z0-9]*[_-])*"
     r"(?:password|secret|token|api[_-]?key|authorization|nsec|private[_-]?key)"
     r"(?:[_-][A-Za-z0-9]+)*"
-    r")(?![A-Za-z0-9_-])(?P<separator>\s*(?:=|:)\s*)"
-    r"(?P<quote>['\"]?)(?P<value>[^\s,;'\"}]+)(?P=quote)"
+    r")"
+)
+_CREDENTIAL_ASSIGNMENT = re.compile(
+    rf"(?i)(?<![A-Za-z0-9_-])(?:"
+    rf"(?P<name>{_SENSITIVE_ASSIGNMENT_NAME})"
+    rf"|(?P<key_quote>['\"])(?P<quoted_name>{_SENSITIVE_ASSIGNMENT_NAME})"
+    rf"(?P=key_quote)(?:\s*\])?"
+    rf")(?![A-Za-z0-9_-])(?P<separator>\s*(?:=|:)\s*)"
+    rf"(?P<value_quote>['\"]?)(?P<value>[^\s,;'\"}}]+)(?P=value_quote)"
 )
 _SECRET_PREFIXES = re.compile(
     r"(?i)(?<![A-Za-z0-9])(?:"
@@ -44,7 +51,7 @@ def redact_text(value: str) -> tuple[str, List[str]]:
         findings.add("nsec")
 
     def redact_assignment(match: re.Match[str]) -> str:
-        name = match.group("name")
+        name = match.group("name") or match.group("quoted_name")
         normalized_name = name.replace(" ", "_")
         if not (
             _SENSITIVE_KEY.search(normalized_name)
@@ -54,9 +61,12 @@ def redact_text(value: str) -> tuple[str, List[str]]:
         if match.group("value").startswith("[REDACTED:"):
             return match.group(0)
         findings.add("credential_assignment")
+        relative_value_start = match.start("value") - match.start()
+        relative_value_end = match.end("value") - match.start()
         return (
-            f"{name}{match.group('separator')}"
-            "[REDACTED:credential_assignment]"
+            match.group(0)[:relative_value_start]
+            + "[REDACTED:credential_assignment]"
+            + match.group(0)[relative_value_end:]
         )
 
     redacted = _CREDENTIAL_ASSIGNMENT.sub(redact_assignment, value)

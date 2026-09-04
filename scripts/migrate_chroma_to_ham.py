@@ -207,6 +207,18 @@ def load_snapshot(
             row["content"]
         ) != row.get("content_sha256"):
             raise RuntimeError("Snapshot per-record content checksum does not match")
+        redacted_content, content_findings = redact_text(row["content"])
+        redacted_metadata, metadata_findings = redact_value(
+            row.get("metadata", {})
+        )
+        if (
+            content_findings
+            and redacted_content != row["content"]
+        ) or (
+            metadata_findings
+            and redacted_metadata != row.get("metadata", {})
+        ):
+            raise RuntimeError("Snapshot still contains credential-shaped values")
         if row.get("source_collection") != manifest.get("source_collection"):
             raise RuntimeError("Snapshot source collection does not match manifest")
     quarantine_path = snapshot_directory / manifest["quarantine_file"]

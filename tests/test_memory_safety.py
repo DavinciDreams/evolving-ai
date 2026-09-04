@@ -38,11 +38,18 @@ def test_prefixed_deployment_credentials_are_redacted_without_values():
     placeholder = "synthetic-placeholder-00000000000000000000000000"
     text = (
         f"HAM_API_KEY={placeholder}\nPROJECT_API_KEY: {placeholder}\n"
+        f'{{"HAM_API_KEY":"{placeholder}"}}\n'
+        f'os.environ["PROJECT_API_KEY"] = "{placeholder}"\n'
         "ordinary_field=ordinary-value"
     )
     redacted, findings = redact_text(text)
     assert placeholder not in redacted
     assert "HAM_API_KEY=[REDACTED:credential_assignment]" in redacted
     assert "PROJECT_API_KEY: [REDACTED:credential_assignment]" in redacted
+    assert '"HAM_API_KEY":"[REDACTED:credential_assignment]"' in redacted
+    assert (
+        'os.environ["PROJECT_API_KEY"] = "[REDACTED:credential_assignment]"'
+        in redacted
+    )
     assert "ordinary_field=ordinary-value" in redacted
     assert findings == ["credential_assignment"]
