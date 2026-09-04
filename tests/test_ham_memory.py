@@ -175,6 +175,38 @@ async def test_add_never_sends_agent_identity_and_checks_server_attribution():
 
 
 @pytest.mark.asyncio
+async def test_memory_page_preserves_cursor_and_scope_filters():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/memories/page"
+        payload = json.loads(request.content)
+        assert payload == {
+            "limit": 100,
+            "scopes": ["project:evolving-ai"],
+            "project": "evolving-ai",
+            "repo": "DavinciDreams/evolving-ai",
+            "cursor": "2026-08-31T00:00:00Z|71",
+        }
+        return httpx.Response(
+            200,
+            json={
+                "items": [{"id": 70, "content": "older", "metadata": {}}],
+                "next_cursor": "2026-08-30T00:00:00Z|70",
+            },
+        )
+
+    client = _client(handler)
+    try:
+        rows, cursor = await client.page(
+            limit=100,
+            cursor="2026-08-31T00:00:00Z|71",
+        )
+    finally:
+        await client.close()
+    assert rows[0]["id"] == 70
+    assert cursor == "2026-08-30T00:00:00Z|70"
+
+
+@pytest.mark.asyncio
 async def test_idempotent_add_fetches_stored_attribution_before_accepting_retry():
     calls = []
 

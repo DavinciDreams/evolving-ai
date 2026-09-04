@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import hashlib
-from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, TypeVar
 from urllib.parse import urlsplit
 
 import httpx
@@ -265,6 +265,32 @@ class HAMMemoryClient:
         if not isinstance(result, list):
             raise HAMMemoryError("HAM recent response was malformed")
         return result
+
+    async def page(
+        self,
+        *,
+        limit: int,
+        cursor: Optional[str] = None,
+        memory_type: Optional[str] = None,
+    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """Page deterministically through visible memories in newest-first order."""
+        payload: Dict[str, Any] = {
+            "limit": min(max(limit, 1), 100),
+            "scopes": [self.scope],
+            "project": self.project,
+            "repo": self.repo,
+        }
+        if cursor:
+            payload["cursor"] = cursor
+        if memory_type:
+            payload["types"] = [memory_type]
+        result = await self._request("POST", "/memories/page", json=payload)
+        if not isinstance(result, dict) or not isinstance(result.get("items"), list):
+            raise HAMMemoryError("HAM memory page response was malformed")
+        next_cursor = result.get("next_cursor")
+        if next_cursor is not None and not isinstance(next_cursor, str):
+            raise HAMMemoryError("HAM memory page cursor was malformed")
+        return result["items"], next_cursor
 
     async def get(self, memory_id: int) -> Optional[Dict[str, Any]]:
         try:

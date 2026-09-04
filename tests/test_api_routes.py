@@ -21,6 +21,7 @@ def client():
     mock_agent.memory = MagicMock()
     mock_agent.memory.get_memory_stats = AsyncMock(return_value={"total_memories": 0})
     mock_agent.memory.list_recent_memories = AsyncMock(return_value=[])
+    mock_agent.memory.page_recent_memories = AsyncMock(return_value=([], None))
     mock_agent.memory.search_memories = AsyncMock(return_value=[])
     mock_agent.knowledge_base = MagicMock()
     mock_agent.knowledge_base.knowledge = {}
@@ -288,15 +289,18 @@ class TestApiKeyAuth:
 
     def test_public_memory_route_remains_public_and_filters_private_rows(self, client):
         memory = api_server_module.agent.memory
-        memory.list_recent_memories.return_value = [
-            MemoryEntry("published", metadata={"audience": "public"}),
-            MemoryEntry(
-                "TELLUS_TOKEN=sk-" + "redacted-test-value-12345",
-                metadata={"audience": "public"},
-            ),
-            MemoryEntry("private", metadata={"audience": "project"}),
-            MemoryEntry("legacy-default-private", metadata={}),
-        ]
+        memory.page_recent_memories.return_value = (
+            [
+                MemoryEntry("published", metadata={"audience": "public"}),
+                MemoryEntry(
+                    "TELLUS_TOKEN=sk-" + "redacted-test-value-12345",
+                    metadata={"audience": "public"},
+                ),
+                MemoryEntry("private", metadata={"audience": "project"}),
+                MemoryEntry("legacy-default-private", metadata={}),
+            ],
+            None,
+        )
         with patch.dict(
             "os.environ",
             {"API_KEY": "secret-key", "API_AUTH_REQUIRED": "true"},
@@ -306,7 +310,50 @@ class TestApiKeyAuth:
             assert response.status_code == 200
             assert [row["content"] for row in response.json()] == ["published"]
             memory.search_memories.assert_not_awaited()
-        memory.list_recent_memories.return_value = []
+        memory.page_recent_memories.return_value = ([], None)
+
+    def test_public_memory_offset_can_cross_storage_pages(self, client):
+        memory = api_server_module.agent.memory
+        first_page = [
+            MemoryEntry(f"public-{index}", metadata={"audience": "public"})
+            for index in range(100)
+        ]
+        memory.page_recent_memories.side_effect = [
+            (first_page, "cursor-100"),
+            ([MemoryEntry("public-100", metadata={"audience": "public"})], None),
+        ]
+        response = client.get("/public/memories?offset=100&limit=1")
+        assert response.status_code == 200
+        assert [row["content"] for row in response.json()] == ["public-100"]
+        cursors = [
+            item.kwargs["cursor"]
+            for item in memory.page_recent_memories.await_args_list
+        ]
+        assert cursors[-2:] == [None, "cursor-100"]
+        memory.page_recent_memories.side_effect = None
+        memory.page_recent_memories.return_value = ([], None)
+
+    def test_public_memory_search_pages_past_newer_private_rows(self, client):
+        memory = api_server_module.agent.memory
+        private_page = [
+            MemoryEntry(f"private-{index}", metadata={"audience": "project"})
+            for index in range(100)
+        ]
+        memory.page_recent_memories.side_effect = [
+            (private_page, "cursor-private"),
+            (
+                [
+                    MemoryEntry("older irrelevant", metadata={"audience": "public"}),
+                    MemoryEntry("older needle", metadata={"audience": "public"}),
+                ],
+                None,
+            ),
+        ]
+        response = client.get("/public/memories?search=needle&limit=1")
+        assert response.status_code == 200
+        assert [row["content"] for row in response.json()] == ["older needle"]
+        memory.page_recent_memories.side_effect = None
+        memory.page_recent_memories.return_value = ([], None)
 
     def test_missing_server_key_fails_closed(self, client):
         with patch.dict(

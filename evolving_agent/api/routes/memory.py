@@ -88,37 +88,56 @@ async def get_public_memories(
 ):
     """Return only memories explicitly published with ``audience=public``."""
     try:
-        candidates = await _load_memories(
-            current_agent,
-            limit=100,
-            offset=0,
-            search=None,
-        )
         public = []
+        cursor = None
+        seen_cursors = set()
+        requested_count = offset + limit
         normalized_search = search.casefold() if search else None
-        for memory in candidates:
-            if memory.metadata.get("audience") != "public":
-                continue
-            _, content_findings = redact_text(memory.content)
-            _, metadata_findings = redact_value(memory.metadata)
-            if content_findings or metadata_findings:
-                logger.warning(
-                    f"Withheld credential-shaped public memory {memory.id}"
-                )
-                continue
-            if normalized_search and normalized_search not in memory.content.casefold():
-                continue
-            public.append(
-                MemoryItem(
-                    id=memory.id,
-                    content=memory.content,
-                    timestamp=memory.timestamp,
-                    metadata={
-                        "audience": "public",
-                        "memory_type": memory.metadata.get("memory_type", "general"),
-                    },
+        while len(public) < requested_count:
+            candidates, next_cursor = (
+                await current_agent.memory.page_recent_memories(
+                    limit=100,
+                    cursor=cursor,
                 )
             )
+            for memory in candidates:
+                if memory.metadata.get("audience") != "public":
+                    continue
+                _, content_findings = redact_text(memory.content)
+                _, metadata_findings = redact_value(memory.metadata)
+                if content_findings or metadata_findings:
+                    logger.warning(
+                        f"Withheld credential-shaped public memory {memory.id}"
+                    )
+                    continue
+                if (
+                    normalized_search
+                    and normalized_search not in memory.content.casefold()
+                ):
+                    continue
+                public.append(
+                    MemoryItem(
+                        id=memory.id,
+                        content=memory.content,
+                        timestamp=memory.timestamp,
+                        metadata={
+                            "audience": "public",
+                            "memory_type": memory.metadata.get(
+                                "memory_type", "general"
+                            ),
+                        },
+                    )
+                )
+                if len(public) >= requested_count:
+                    break
+            if len(public) >= requested_count:
+                break
+            if next_cursor is None:
+                break
+            if next_cursor == cursor or next_cursor in seen_cursors:
+                raise RuntimeError("Memory pagination cursor did not advance")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
         return public[offset : offset + limit]
     except Exception:
         logger.exception("Error retrieving public memories")

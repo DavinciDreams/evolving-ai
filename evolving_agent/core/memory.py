@@ -456,6 +456,68 @@ class LongTermMemory:
 
         return sorted(memories, key=lambda entry: entry.timestamp, reverse=True)
 
+    async def page_recent_memories(
+        self,
+        *,
+        limit: int = 100,
+        cursor: Optional[str] = None,
+        memory_type: Optional[str] = None,
+    ) -> Tuple[List[MemoryEntry], Optional[str]]:
+        """Page through visible memories without truncating at the first batch."""
+        self._ensure_initialized()
+        if not 1 <= limit <= 100:
+            raise ValueError("Memory page limit must be between 1 and 100")
+
+        if self.backend == "ham":
+            rows, next_cursor = await self.ham_client.page(
+                limit=limit,
+                cursor=cursor,
+                memory_type=memory_type,
+            )
+            return (
+                [MemoryEntry.from_ham_result(row) for row in rows],
+                next_cursor,
+            )
+
+        try:
+            offset = int(cursor or "0")
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Legacy memory page cursor is invalid") from exc
+        if offset < 0:
+            raise ValueError("Legacy memory page cursor is invalid")
+        where_clause = (
+            self.search_processor.get_where_clause(memory_type)
+            if memory_type else None
+        )
+        get_kwargs = {"include": ["documents", "metadatas"]}
+        if where_clause:
+            get_kwargs["where"] = where_clause
+        results = self.collection.get(**get_kwargs)
+        entries = []
+        metadatas = results.get("metadatas") or []
+        ids = results.get("ids") or []
+        for index, content in enumerate(results.get("documents") or []):
+            metadata = (
+                dict(metadatas[index] or {}) if index < len(metadatas) else {}
+            )
+            if not metadata.get("timestamp"):
+                metadata["timestamp"] = datetime.now().isoformat()
+            entries.append(
+                MemoryEntry.from_chroma_result(
+                    ids[index] if index < len(ids) else str(uuid.uuid4()),
+                    content,
+                    metadata,
+                )
+            )
+        entries.sort(
+            key=lambda entry: (entry.timestamp, entry.id),
+            reverse=True,
+        )
+        page = entries[offset : offset + limit]
+        next_offset = offset + len(page)
+        next_cursor = str(next_offset) if next_offset < len(entries) else None
+        return page, next_cursor
+
     async def get_memory(self, memory_id: str) -> Optional[MemoryEntry]:
         """Get a specific memory by ID."""
         self._ensure_initialized()
