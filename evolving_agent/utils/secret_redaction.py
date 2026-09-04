@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any, Dict, List
 
-DETECTOR_VERSION = "credential-redaction-v11"
+DETECTOR_VERSION = "credential-redaction-v12"
 
 _SENSITIVE_KEY = re.compile(
     r"(?:^|_)(?:password|secret|token|api_key|authorization|nsec|private_key)(?:$|_)"
@@ -21,13 +21,6 @@ _NSEC = re.compile(r"(?<![A-Za-z0-9])nsec1[023456789acdefghjklmnpqrstuvwxyz]{20,
 _ASSIGNMENT_NAME = (
     r"[A-Za-z][A-Za-z0-9_-]*(?:[ ]+[A-Za-z][A-Za-z0-9_-]*)*"
 )
-_NEXT_ASSIGNMENT = (
-    rf"(?:{_ASSIGNMENT_NAME}"
-    rf"|(?:[A-Za-z][A-Za-z0-9_.]*\s*\[\s*)?"
-    rf"['\"]{_ASSIGNMENT_NAME}['\"](?:\s*\])?)"
-    rf"\s*(?:=|:)\s*"
-)
-_NEXT_ASSIGNMENT_BOUNDARY = r"(?:[ \t]+|(?:&&|\|\||[;&|])[ \t]*)"
 _MULTILINE_CREDENTIAL_ASSIGNMENT = re.compile(
     rf"(?im)(?<![A-Za-z0-9_-])(?:"
     rf"(?P<multiline_name>{_ASSIGNMENT_NAME})"
@@ -37,19 +30,12 @@ _MULTILINE_CREDENTIAL_ASSIGNMENT = re.compile(
     rf"(?:[|>](?:[+-][1-9]?|[1-9][+-]?)?|[\\^`])"
     rf"[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)"
 )
-_CREDENTIAL_ASSIGNMENT = re.compile(
+_ASSIGNMENT_CANDIDATE = re.compile(
     rf"(?i)(?<![A-Za-z0-9_-])(?:"
     rf"(?P<name>{_ASSIGNMENT_NAME})"
     rf"|(?P<key_quote>['\"])(?P<quoted_name>{_ASSIGNMENT_NAME})"
     rf"(?P=key_quote)(?:\s*\])?"
     rf")(?![A-Za-z0-9_-])(?P<separator>\s*(?:=|:)\s*)"
-    rf"(?:"
-    rf"(?P<value_quote>['\"])(?P<quoted_value>"
-    rf"(?:\\[\s\S]|(?!(?P=value_quote))[\s\S])+)(?P=value_quote)"
-    rf"(?=$|[\s,;#&|)\]}}])"
-    rf"|(?P<unquoted_value>[^\r\n]*?)"
-    rf"(?=(?:{_NEXT_ASSIGNMENT_BOUNDARY}{_NEXT_ASSIGNMENT}|$|[\r\n]))"
-    rf")"
 )
 _CANONICAL_REDACTED_VALUES = frozenset(
     {
@@ -91,6 +77,38 @@ def _is_sensitive_assignment_name(value: str) -> bool:
     return _is_sensitive_key(value) or normalized.startswith("tellus")
 
 
+def _line_end(value: str, start: int) -> int:
+    candidates = [position for position in (value.find("\r", start), value.find("\n", start)) if position >= 0]
+    return min(candidates) if candidates else len(value)
+
+
+def _closing_quote(value: str, start: int) -> int | None:
+    quote = value[start]
+    position = start + 1
+    while position < len(value):
+        if value[position] == "\\":
+            position += 2
+            continue
+        if value[position] == quote:
+            return position
+        position += 1
+    return None
+
+
+def _is_quoted_value_boundary(
+    value: str, position: int, *, serialized_key: bool = False
+) -> bool:
+    if position >= len(value) or value[position] in "\r\n":
+        return True
+    if value[position] in " \t":
+        return True
+    if value.startswith(("&&", "||"), position) or value[position] in ";&|":
+        return True
+    if serialized_key and value[position] in "}]":
+        return not value[position + 1 : _line_end(value, position + 1)].strip()
+    return False
+
+
 def redact_text(value: str) -> tuple[str, List[str]]:
     """Redact credential-shaped values without returning or logging matches."""
     try:
@@ -120,26 +138,66 @@ def redact_text(value: str) -> tuple[str, List[str]]:
     if count:
         findings.add("nsec")
 
-    def redact_assignment(match: re.Match[str]) -> str:
+    operations: List[tuple[int, int, str]] = []
+    for match in _ASSIGNMENT_CANDIDATE.finditer(value):
         name = match.group("name") or match.group("quoted_name")
         if not _is_sensitive_assignment_name(name):
-            return match.group(0)
-        value_group = (
-            "quoted_value" if match.group("value_quote") else "unquoted_value"
-        )
-        matched_value = match.group(value_group)
-        if matched_value.strip() in _CANONICAL_REDACTED_VALUES:
-            return match.group(0)
+            continue
+        value_start = match.end()
+        if value_start < len(value) and value[value_start] in "'\"":
+            closing_quote = _closing_quote(value, value_start)
+            if closing_quote is None:
+                operations.append(
+                    (value_start, len(value), "[REDACTED:credential_assignment]")
+                )
+                findings.add("credential_assignment")
+                continue
+            matched_value = value[value_start + 1 : closing_quote]
+            serialized_key = bool(
+                match.group("quoted_name") and ":" in match.group("separator")
+            )
+            has_value_boundary = _is_quoted_value_boundary(
+                value, closing_quote + 1, serialized_key=serialized_key
+            )
+            if (
+                matched_value.strip() in _CANONICAL_REDACTED_VALUES
+                and has_value_boundary
+            ):
+                continue
+            if has_value_boundary:
+                operations.append(
+                    (
+                        value_start + 1,
+                        closing_quote,
+                        "[REDACTED:credential_assignment]",
+                    )
+                )
+            else:
+                operations.append(
+                    (
+                        value_start,
+                        _line_end(value, closing_quote + 1),
+                        "[REDACTED:credential_assignment]",
+                    )
+                )
+        else:
+            value_end = _line_end(value, value_start)
+            matched_value = value[value_start:value_end]
+            if matched_value.strip() in _CANONICAL_REDACTED_VALUES:
+                continue
+            operations.append(
+                (value_start, value_end, "[REDACTED:credential_assignment]")
+            )
         findings.add("credential_assignment")
-        relative_value_start = match.start(value_group) - match.start()
-        relative_value_end = match.end(value_group) - match.start()
-        return (
-            match.group(0)[:relative_value_start]
-            + "[REDACTED:credential_assignment]"
-            + match.group(0)[relative_value_end:]
-        )
 
-    redacted = _CREDENTIAL_ASSIGNMENT.sub(redact_assignment, value)
+    non_overlapping: List[tuple[int, int, str]] = []
+    for operation in operations:
+        if non_overlapping and operation[0] < non_overlapping[-1][1]:
+            continue
+        non_overlapping.append(operation)
+    redacted = value
+    for start, end, replacement in reversed(non_overlapping):
+        redacted = redacted[:start] + replacement + redacted[end:]
 
     def redact_prefix(_: re.Match[str]) -> str:
         findings.add("secret_prefix")

@@ -238,6 +238,10 @@ def test_export_removes_and_quarantines_multiline_credential(
             "ordinary=value|accessTokenValue=synthetic-secret-tail-24680",
             "synthetic-secret-tail-24680",
         ),
+        (
+            "ordinary=value,PASSWORD=synthetic-secret-tail-24680",
+            "synthetic-secret-tail-24680",
+        ),
     ],
 )
 def test_export_redacts_complete_credential_assignment(
@@ -372,6 +376,7 @@ def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
         "ordinary=value||clientSecretValue=synthetic-secret-tail-24680",
         "ordinary=value&PASSWORD=synthetic-secret-tail-24680",
         "ordinary=value|accessTokenValue=synthetic-secret-tail-24680",
+        "ordinary=value,PASSWORD=synthetic-secret-tail-24680",
         '{"P\\u0041SSWORD":"synthetic-secret-tail-24680"}',
     ],
 )
