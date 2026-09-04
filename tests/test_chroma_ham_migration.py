@@ -61,7 +61,7 @@ def test_export_redacts_and_quarantines_credentials_without_storing_values(tmp_p
     assert "value" not in quarantine
 
 
-def test_export_quarantine_manifest_detects_secret_prefix_in_metadata(tmp_path):
+def test_export_quarantine_manifest_redacts_credential_in_metadata(tmp_path):
     credential = "github_pat_" + "x" * 24
     collection = MagicMock()
     collection.get.return_value = {
@@ -86,7 +86,7 @@ def test_export_quarantine_manifest_detects_secret_prefix_in_metadata(tmp_path):
     )
     assert credential not in persisted
     _, rows = load_snapshot(tmp_path)
-    assert "[REDACTED:secret_prefix]" in rows[0]["metadata"]["debug"]
+    assert "[REDACTED:" in rows[0]["metadata"]["debug"]
 
 
 def test_export_redacts_prefixed_deployment_assignments_and_load_accepts_only_redacted(tmp_path):
@@ -201,6 +201,41 @@ def test_export_removes_and_quarantines_multiline_credential(
     assert rows[0]["metadata"]["security_quarantined"] is True
 
 
+@pytest.mark.parametrize(
+    "credential_text,plaintext_tail",
+    [
+        ("password: correct horse battery staple", "horse battery staple"),
+        ("HAM_API_KEY=synthetic,value;tail", "value;tail"),
+    ],
+)
+def test_export_redacts_complete_unquoted_credential_line(
+    tmp_path, credential_text, plaintext_tail
+):
+    collection = MagicMock()
+    collection.get.return_value = {
+        "ids": ["legacy-unquoted-credential"],
+        "documents": [credential_text],
+        "metadatas": [{}],
+    }
+    chroma = MagicMock()
+    chroma.get_collection.return_value = collection
+    with patch(
+        "scripts.migrate_chroma_to_ham.chromadb.PersistentClient", return_value=chroma
+    ):
+        manifest = export_snapshot(
+            persist_directory="/unused",
+            collection_name="agent_memory",
+            snapshot_directory=tmp_path,
+        )
+
+    persisted = "\n".join(path.read_text() for path in tmp_path.iterdir())
+    assert plaintext_tail not in persisted
+    assert manifest["quarantined_record_count"] == 1
+    _, rows = load_snapshot(tmp_path)
+    assert rows[0]["content"].endswith("[REDACTED:credential_assignment]")
+    assert rows[0]["metadata"]["security_quarantined"] is True
+
+
 def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
     collection = MagicMock()
     collection.get.return_value = {
@@ -250,6 +285,9 @@ def test_load_rejects_snapshot_if_secret_is_reintroduced(tmp_path):
         "HAM_API_KEY: >-\n  synthetic,value,12345\n",
         "PROJECT_API_KEY=\\\nsynthetic-shell-secret-24680\n",
         'PASSWORD="synthetic\nquoted secret 97531"',
+        "password: correct horse battery staple",
+        "HAM_API_KEY=synthetic,value;tail",
+        "PASSWORD=[REDACTED:credential_assignment] leaked tail",
     ],
 )
 def test_load_rejects_quoted_credential_key_reintroduced(

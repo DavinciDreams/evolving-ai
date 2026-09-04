@@ -79,3 +79,26 @@ def test_multiline_credential_assignments_are_value_free(text):
     assert "synthetic" not in redacted
     assert "[REDACTED:" in redacted
     assert findings
+
+
+@pytest.mark.parametrize(
+    "text,plaintext_tail",
+    [
+        ("password: correct horse battery staple", "horse battery staple"),
+        ("HAM_API_KEY=synthetic,value;tail", "value;tail"),
+        (
+            "PASSWORD=[REDACTED:credential_assignment] leaked tail",
+            "leaked tail",
+        ),
+    ],
+)
+def test_unquoted_credential_assignment_owns_complete_line(text, plaintext_tail):
+    redacted, findings = redact_text(text)
+    assert plaintext_tail not in redacted
+    assert redacted.endswith("[REDACTED:credential_assignment]")
+    assert findings == ["credential_assignment"]
+
+
+def test_exact_redaction_marker_remains_idempotent():
+    text = "PASSWORD=[REDACTED:credential_assignment]"
+    assert redact_text(text) == (text, [])

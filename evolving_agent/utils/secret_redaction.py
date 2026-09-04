@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
-DETECTOR_VERSION = "credential-redaction-v6"
+DETECTOR_VERSION = "credential-redaction-v7"
 
 _SENSITIVE_KEY = re.compile(r"(?i)(?:^|[_-])(?:password|secret|token|api[_-]?key|authorization|nsec|private[_-]?key)(?:$|[_-])")
 _PRIVATE_KEY = re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----.*?-----END (?:[A-Z ]+ )?PRIVATE KEY-----", re.DOTALL)
@@ -37,9 +37,10 @@ _CREDENTIAL_ASSIGNMENT = re.compile(
     rf"(?:"
     rf"(?P<value_quote>['\"])(?P<quoted_value>"
     rf"(?:\\[\s\S]|(?!(?P=value_quote))[\s\S])+)(?P=value_quote)"
-    rf"|(?P<unquoted_value>[^\s,;'\"}}]+)"
+    rf"|(?P<unquoted_value>[^\r\n]+)"
     rf")"
 )
+_REDACTED_VALUE = re.compile(r"\[REDACTED:[A-Za-z0-9_-]+\]")
 _SECRET_PREFIXES = re.compile(
     r"(?i)(?<![A-Za-z0-9])(?:"
     r"sk-[A-Za-z0-9_-]{12,}"
@@ -77,7 +78,7 @@ def redact_text(value: str) -> tuple[str, List[str]]:
             "quoted_value" if match.group("value_quote") else "unquoted_value"
         )
         matched_value = match.group(value_group)
-        if matched_value.startswith("[REDACTED:"):
+        if _REDACTED_VALUE.fullmatch(matched_value.strip()):
             return match.group(0)
         findings.add("credential_assignment")
         relative_value_start = match.start(value_group) - match.start()
