@@ -2,6 +2,10 @@
 
 This guide covers deploying the Evolving AI Agent to Coolify (backend) and Vercel (frontend).
 
+> Security gate: follow `docs/SECURE_HAM_MIGRATION.md` before any production
+> deployment. The current canonical frontend is `https://www.evolvingai.bio`,
+> and the Coolify API is reached through the same-origin `/api` Vercel rewrite.
+
 ## Prerequisites
 
 - GitHub account with the repository pushed
@@ -39,9 +43,12 @@ In Coolify, add these environment variables:
 
 **Required:**
 ```bash
-# LLM Provider (choose one)
-DEFAULT_LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-...
+# Current Z AI coding-plan provider
+DEFAULT_LLM_PROVIDER=zai
+DEFAULT_MODEL=glm-5.1
+ZAI_MODEL=glm-5.1
+ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
+ZAI_API_KEY=<managed-zai-key>
 
 # Or use Anthropic
 DEFAULT_LLM_PROVIDER=anthropic
@@ -61,8 +68,9 @@ DOMAIN=katbot.atlasfoundation.app
 TRAEFIK_DOCKER_NETWORK=coolify
 
 # Security
-# Required if the backend is reachable from the internet.
-API_KEY=generate-a-long-random-secret
+# Private routes fail closed when this key is missing.
+API_AUTH_REQUIRED=true
+PROJECT_API_KEY=<separate-long-random-secret>
 
 # GitHub Integration
 GITHUB_TOKEN=ghp_...
@@ -81,7 +89,17 @@ WEB_SEARCH_DEFAULT_PROVIDER=duckduckgo
 TAVILY_API_KEY=tvly-...
 SERPAPI_KEY=your_serpapi_key
 
-# Memory
+# Authoritative HAM memory
+MEMORY_BACKEND=ham
+HAM_API_URL=https://ham.flobots.xyz
+HAM_API_KEY=<distinct-katbot-service-credential>
+HAM_PROJECT=evolving-ai
+HAM_SCOPE=project:evolving-ai
+HAM_REPO=DavinciDreams/evolving-ai
+HAM_EXPECTED_AGENT_ID=katbot-evolving-ai
+
+# Legacy Chroma source (migration/rollback only)
+LEGACY_MEMORY_READ_ONLY=true
 MEMORY_PERSIST_DIRECTORY=/app/data/memory_db
 PERSISTENT_DATA_DIR=/app/data/persistent_data
 MEMORY_COLLECTION_NAME=agent_memory
@@ -89,8 +107,8 @@ KNOWLEDGE_BASE_PATH=/app/data/knowledge_base
 BACKUP_DIRECTORY=/app/data/backups
 SCRATCHPAD_DIR=/app/data/scratchpad
 
-# CORS for Vercel frontend
-CORS_ORIGINS=https://<your-vercel-domain>.vercel.app,https://katbot.atlasfoundation.app
+# Same-origin Vercel rewrite needs no cross-origin browser access.
+CORS_ORIGINS=
 
 # Logging
 LOG_LEVEL=INFO

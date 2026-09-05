@@ -7,7 +7,6 @@ export const useChat = () => {
     mutationFn: ({ query, contextHints = [], conversationId = null }) =>
       chatService.sendMessage(query, contextHints, conversationId),
     onError: (error) => {
-      console.error('Error sending message:', error);
       toast.error(error?.response?.data?.detail || error?.message || 'Failed to send message');
     },
   });

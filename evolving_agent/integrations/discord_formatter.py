@@ -31,7 +31,8 @@ class DiscordFormatter:
         query_id: Optional[str] = None,
         evaluation_score: Optional[float] = None,
         processing_time: Optional[float] = None,
-        use_embed: bool = True
+        use_embed: bool = True,
+        max_message_length: int = MAX_MESSAGE_LENGTH,
     ) -> List[Any]:
         """Format agent response for Discord.
 
@@ -47,13 +48,18 @@ class DiscordFormatter:
         """
         if not use_embed:
             # Plain text mode - just split if too long
-            return DiscordFormatter._split_long_message(response)
+            return DiscordFormatter._split_long_message(
+                response, max_length=max_message_length
+            )
+
+        if len(response) > DiscordFormatter.MAX_EMBED_DESCRIPTION:
+            return DiscordFormatter._split_long_message(
+                response, max_length=max_message_length
+            )
 
         # Create rich embed
         embed = discord.Embed(
-            description=DiscordFormatter._truncate_text(
-                response, DiscordFormatter.MAX_EMBED_DESCRIPTION
-            ),
+            description=response,
             color=DiscordFormatter.COLOR_AGENT,
             timestamp=datetime.utcnow()
         )
@@ -319,25 +325,29 @@ class DiscordFormatter:
                 parts.append(remaining)
                 break
 
-            # Try to split at a paragraph break
-            split_pos = remaining.rfind("\n\n", 0, max_length)
+            # Try to split after a paragraph break while preserving every byte.
+            split_pos = remaining.rfind("\n\n", 0, max_length + 1)
+            if split_pos > 0:
+                split_pos += 2
 
             # If no paragraph break, try to split at a sentence
-            if split_pos == -1:
-                split_pos = remaining.rfind(". ", 0, max_length)
-                if split_pos != -1:
-                    split_pos += 1  # Include the period
+            if split_pos <= 0:
+                split_pos = remaining.rfind(". ", 0, max_length + 1)
+                if split_pos > 0:
+                    split_pos += 2
 
             # If no sentence break, try to split at a word
-            if split_pos == -1:
-                split_pos = remaining.rfind(" ", 0, max_length)
+            if split_pos <= 0:
+                split_pos = remaining.rfind(" ", 0, max_length + 1)
+                if split_pos > 0:
+                    split_pos += 1
 
             # If no word break, just hard split
-            if split_pos == -1:
-                split_pos = max_length - 3  # Leave room for "..."
+            if split_pos <= 0:
+                split_pos = max_length
 
-            parts.append(remaining[:split_pos] + "...")
-            remaining = "..." + remaining[split_pos:].lstrip()
+            parts.append(remaining[:split_pos])
+            remaining = remaining[split_pos:]
 
         logger.debug(f"Split long message into {len(parts)} parts")
         return parts

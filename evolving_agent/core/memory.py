@@ -8,13 +8,10 @@ from datetime import datetime
 # from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import chromadb
-# import numpy as np  # Removed unused import
-from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
-
+from ..integrations.ham_memory import HAMMemoryClient
 from ..utils.config import config
 from ..utils.logging import setup_logger
+from ..utils.secret_redaction import redact_text, redact_value
 
 logger = setup_logger(__name__)
 
@@ -105,6 +102,31 @@ class MemoryEntry:
             metadata=filtered_metadata,
             timestamp=datetime.fromisoformat(metadata["timestamp"]),
             entry_id=doc_id,
+        )
+
+    @classmethod
+    def from_ham_result(cls, result: Dict[str, Any]) -> "MemoryEntry":
+        """Create a memory entry from HAM's REST response shape."""
+        raw_metadata = dict(result.get("metadata") or {})
+        memory_type = str(raw_metadata.get("type") or "general")
+        reserved = {
+            "type", "title", "agent_id", "actor_type", "credential_id",
+            "run_id", "scopes", "project", "repo", "task", "thread",
+            "sequence", "status", "durability", "visibility",
+            "idempotency_key",
+        }
+        metadata = {key: value for key, value in raw_metadata.items() if key not in reserved}
+        timestamp_value = (
+            result.get("timestamp")
+            or result.get("created_at")
+            or datetime.now().isoformat()
+        )
+        return cls(
+            content=str(result.get("content") or ""),
+            memory_type=memory_type,
+            metadata=metadata,
+            timestamp=datetime.fromisoformat(str(timestamp_value).replace("Z", "+00:00")),
+            entry_id=str(result["id"]),
         )
 
 
@@ -221,7 +243,7 @@ class MemoryOperations:
 
 
 class LongTermMemory:
-    """Long-term memory system using ChromaDB for vector storage."""
+    """Long-term memory facade with HAM as the production authority."""
 
     def __init__(self):
         self.embedding_model = None
@@ -230,13 +252,31 @@ class LongTermMemory:
         self.initialized = False
         self.search_processor = None
         self.memory_ops = None
+        self.ham_client: Optional[HAMMemoryClient] = None
+        self.backend = config.memory_backend
 
     async def initialize(self):
         """Initialize the memory system."""
         try:
-            await self._init_components()
+            if self.backend == "ham":
+                self.ham_client = HAMMemoryClient(
+                    base_url=config.ham_api_url,
+                    api_key=config.ham_api_key,
+                    project=config.ham_project,
+                    scope=config.ham_scope,
+                    repo=config.ham_repo,
+                    expected_agent_id=config.ham_expected_agent_id,
+                    timeout=config.ham_timeout_seconds,
+                )
+                await self.ham_client.initialize()
+            elif self.backend == "chroma":
+                await self._init_components()
+            else:
+                raise RuntimeError(
+                    f"Unsupported MEMORY_BACKEND={self.backend!r}; use 'ham' or 'chroma'"
+                )
             self.initialized = True
-            logger.info("Long-term memory system initialized successfully")
+            logger.info(f"Long-term memory system initialized with {self.backend}")
         except Exception as e:
             logger.error(f"Failed to initialize memory system: {e}")
             raise
@@ -260,11 +300,16 @@ class LongTermMemory:
 
     async def _init_embedding_model(self):
         """Initialize the embedding model."""
+        from sentence_transformers import SentenceTransformer
+
         self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
         logger.info("Embedding model loaded")
 
     async def _init_chroma_client(self):
         """Initialize ChromaDB client."""
+        import chromadb
+        from chromadb.config import Settings
+
         self.client = chromadb.PersistentClient(
             path=config.memory_persist_directory,
             settings=Settings(anonymized_telemetry=False, allow_reset=True),
@@ -310,6 +355,25 @@ class LongTermMemory:
 
     async def add_memory(self, entry: MemoryEntry) -> str:
         """Add a memory entry to the database."""
+        self._ensure_initialized()
+        entry.content, content_findings = redact_text(entry.content)
+        entry.metadata, metadata_findings = redact_value(entry.metadata)
+        if content_findings or metadata_findings:
+            entry.metadata["redacted"] = True
+        entry.metadata.setdefault("audience", "project")
+        if self.backend == "ham":
+            memory_id = await self.ham_client.add(
+                content=entry.content,
+                source_id=entry.id,
+                timestamp=entry.timestamp.isoformat(),
+                memory_type=entry.memory_type,
+                metadata=entry.metadata,
+            )
+            return str(memory_id)
+        if config.legacy_memory_read_only:
+            raise RuntimeError(
+                "Legacy Chroma memory is read-only; use MEMORY_BACKEND=ham"
+            )
         return await self._handle_memory_operation(
             "add memory entry", self.memory_ops.add_memory, entry
         )
@@ -322,6 +386,18 @@ class LongTermMemory:
         similarity_threshold: float = 0.5,
     ) -> List[Tuple[MemoryEntry, float]]:
         """Search for relevant memories based on query."""
+        self._ensure_initialized()
+        if self.backend == "ham":
+            rows = await self.ham_client.search(
+                query,
+                top_k=n_results,
+                memory_type=memory_type,
+            )
+            return [
+                (MemoryEntry.from_ham_result(row), float(row.get("score", 0.0)))
+                for row in rows
+                if float(row.get("score", 0.0)) >= similarity_threshold
+            ]
         query_embedding = await self.memory_ops.generate_embedding(query)
         where_clause = self.search_processor.get_where_clause(memory_type)
 
@@ -340,6 +416,13 @@ class LongTermMemory:
     ) -> List[MemoryEntry]:
         """List memories directly from storage, newest first when timestamps exist."""
         self._ensure_initialized()
+
+        if self.backend == "ham":
+            rows = await self.ham_client.recent(
+                limit=limit,
+                memory_type=memory_type,
+            )
+            return [MemoryEntry.from_ham_result(row) for row in rows]
 
         where_clause = (
             self.search_processor.get_where_clause(memory_type)
@@ -373,14 +456,103 @@ class LongTermMemory:
 
         return sorted(memories, key=lambda entry: entry.timestamp, reverse=True)
 
+    async def page_recent_memories(
+        self,
+        *,
+        limit: int = 100,
+        cursor: Optional[str] = None,
+        memory_type: Optional[str] = None,
+    ) -> Tuple[List[MemoryEntry], Optional[str]]:
+        """Page through visible memories without truncating at the first batch."""
+        self._ensure_initialized()
+        if not 1 <= limit <= 100:
+            raise ValueError("Memory page limit must be between 1 and 100")
+
+        if self.backend == "ham":
+            rows, next_cursor = await self.ham_client.page(
+                limit=limit,
+                cursor=cursor,
+                memory_type=memory_type,
+            )
+            return (
+                [MemoryEntry.from_ham_result(row) for row in rows],
+                next_cursor,
+            )
+
+        try:
+            offset = int(cursor or "0")
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Legacy memory page cursor is invalid") from exc
+        if offset < 0:
+            raise ValueError("Legacy memory page cursor is invalid")
+        where_clause = (
+            self.search_processor.get_where_clause(memory_type)
+            if memory_type else None
+        )
+        get_kwargs = {"include": ["documents", "metadatas"]}
+        if where_clause:
+            get_kwargs["where"] = where_clause
+        results = self.collection.get(**get_kwargs)
+        entries = []
+        metadatas = results.get("metadatas") or []
+        ids = results.get("ids") or []
+        for index, content in enumerate(results.get("documents") or []):
+            metadata = (
+                dict(metadatas[index] or {}) if index < len(metadatas) else {}
+            )
+            if not metadata.get("timestamp"):
+                metadata["timestamp"] = datetime.now().isoformat()
+            entries.append(
+                MemoryEntry.from_chroma_result(
+                    ids[index] if index < len(ids) else str(uuid.uuid4()),
+                    content,
+                    metadata,
+                )
+            )
+        entries.sort(
+            key=lambda entry: (entry.timestamp, entry.id),
+            reverse=True,
+        )
+        page = entries[offset : offset + limit]
+        next_offset = offset + len(page)
+        next_cursor = str(next_offset) if next_offset < len(entries) else None
+        return page, next_cursor
+
     async def get_memory(self, memory_id: str) -> Optional[MemoryEntry]:
         """Get a specific memory by ID."""
+        self._ensure_initialized()
+        if self.backend == "ham":
+            try:
+                numeric_id = int(memory_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("HAM memory IDs are positive integers") from exc
+            row = await self.ham_client.get(numeric_id)
+            return MemoryEntry.from_ham_result(row) if row else None
         return await self._handle_memory_operation(
             "get memory", self.memory_ops.get_memory, memory_id
         )
 
     async def update_memory(self, memory_id: str, entry: MemoryEntry) -> bool:
         """Update an existing memory entry."""
+        self._ensure_initialized()
+        entry.content, _ = redact_text(entry.content)
+        entry.metadata, _ = redact_value(entry.metadata)
+        if self.backend == "ham":
+            current = await self.ham_client.get(int(memory_id))
+            if not current:
+                return False
+            await self.ham_client.supersede(
+                int(memory_id),
+                expected_version=int(current.get("version", 1)),
+                content=entry.content,
+                source_id=entry.id,
+                timestamp=entry.timestamp.isoformat(),
+                memory_type=entry.memory_type,
+                metadata=entry.metadata,
+            )
+            return True
+        if config.legacy_memory_read_only:
+            raise RuntimeError("Legacy Chroma memory is read-only")
         if not await self.get_memory(memory_id):
             return False
         await self.delete_memory(memory_id)
@@ -390,12 +562,32 @@ class LongTermMemory:
 
     async def delete_memory(self, memory_id: str) -> bool:
         """Delete a memory entry."""
+        self._ensure_initialized()
+        if self.backend == "ham":
+            current = await self.ham_client.get(int(memory_id))
+            if not current:
+                return False
+            return await self.ham_client.retract(
+                int(memory_id), expected_version=int(current.get("version", 1))
+            )
+        if config.legacy_memory_read_only:
+            raise RuntimeError("Legacy Chroma memory is read-only")
         return await self._handle_memory_operation(
             "delete memory", self.memory_ops.delete_memory, memory_id
         )
 
     async def get_memory_stats(self) -> Dict[str, Any]:
         """Get statistics about the memory system."""
+        self._ensure_initialized()
+        if self.backend == "ham":
+            stats = await self.ham_client.stats()
+            return {
+                "total_memories": int(stats.get("total", 0)),
+                "memory_types": {},
+                "backend": "ham",
+                "project": config.ham_project,
+                "scope": config.ham_scope,
+            }
         count = self.collection.count()
         memory_types = await self.memory_ops.get_memory_type_distribution()
 
@@ -404,10 +596,18 @@ class LongTermMemory:
             "memory_types": memory_types,
             "collection_name": config.memory_collection_name,
             "persist_directory": config.memory_persist_directory,
+            "backend": "chroma",
         }
 
     async def cleanup_old_memories(self, max_entries: Optional[int] = None) -> int:
         """Clean up old memories to maintain performance."""
+        self._ensure_initialized()
+        if self.backend == "ham":
+            # HAM uses explicit supersede/retract lifecycle rather than destructive
+            # count-based eviction.
+            return 0
+        if config.legacy_memory_read_only:
+            return 0
         max_entries = max_entries or config.max_memory_entries
         current_count = self.collection.count()
 
@@ -419,3 +619,8 @@ class LongTermMemory:
         )
         self.collection.delete(ids=entries_to_delete)
         return len(entries_to_delete)
+
+    async def close(self) -> None:
+        """Release transport resources."""
+        if self.ham_client is not None:
+            await self.ham_client.close()

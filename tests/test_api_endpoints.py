@@ -1,5 +1,8 @@
 """
-Test script for the FastAPI server endpoints.
+Historical live-server probe; not part of the network-free default suite.
+
+Legacy /analyze and /self-improve are retired and now return HTTP 410. The
+registered-app contract tests cover their replacements without remote effects.
 """
 
 import asyncio
@@ -8,6 +11,8 @@ from typing import Any, Dict
 
 import httpx
 import pytest
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.mark.asyncio

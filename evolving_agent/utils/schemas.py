@@ -134,8 +134,8 @@ class AgentStatus(BaseModel):
     is_initialized: bool = Field(..., description="Whether the agent is initialized")
     session_id: Optional[str] = Field(None, description="Current session ID")
     total_interactions: int = Field(..., description="Total number of interactions")
-    memory_count: int = Field(..., description="Number of memories stored")
-    knowledge_count: int = Field(..., description="Number of knowledge items")
+    memory_count: Optional[int] = Field(None, description="Number of memories stored, or null when unavailable")
+    knowledge_count: Optional[int] = Field(None, description="Number of knowledge items, or null when unavailable")
     uptime: str = Field(..., description="Agent uptime")
 
 

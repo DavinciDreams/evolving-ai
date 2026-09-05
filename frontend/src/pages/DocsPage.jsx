@@ -34,11 +34,14 @@ const DocsPage = () => {
       ],
     },
     {
-      category: 'Self-Improvement',
+      category: 'Measured Steward',
       endpoints: [
-        { method: 'POST', path: '/analyze', description: 'Trigger code analysis' },
-        { method: 'GET', path: '/analysis-history', description: 'Get analysis history' },
-        { method: 'POST', path: '/self-improve', description: 'Run full self-improvement loop (analyze → modify → validate → PR)' },
+        { method: 'GET', path: '/steward/status', description: 'Inspect runtime, dream, and measured-adaptation telemetry' },
+        { method: 'POST', path: '/steward/dream', description: 'Request one bounded consolidation job; returns a job receipt' },
+        { method: 'POST', path: '/steward/improvement/evaluate', description: 'Evaluate a closed strategy against explicit development and holdout fixtures' },
+        { method: 'POST', path: '/steward/improvement/promote', description: 'Promote a measured strategy after its evidence gate passes' },
+        { method: 'POST', path: '/steward/improvement/rollback', description: 'Roll back a strategy using its expected revision' },
+        { method: 'GET', path: '/analysis-history', description: 'Read bounded, redacted historical analysis records; never triggers analysis' },
       ],
     },
     {
@@ -46,10 +49,21 @@ const DocsPage = () => {
       endpoints: [
         { method: 'GET', path: '/github/status', description: 'Get GitHub integration status' },
         { method: 'GET', path: '/github/repository', description: 'Get repository information' },
-        { method: 'POST', path: '/github/demo-pr', description: 'Create demo pull request' },
         { method: 'GET', path: '/github/pull-requests', description: 'Get open pull requests' },
         { method: 'GET', path: '/github/commits', description: 'Get recent commits' },
         { method: 'GET', path: '/github/improvement-history', description: 'Get improvement history' },
+      ],
+    },
+    {
+      category: 'Optional Media and Connectors',
+      endpoints: [
+        { method: 'GET', path: '/media/status', description: 'Inspect enabled, configured, and ready media capabilities' },
+        { method: 'POST', path: '/media/vision', description: 'Analyze a bounded image upload; disabled by default' },
+        { method: 'POST', path: '/media/transcribe', description: 'Transcribe bounded audio; disabled by default' },
+        { method: 'POST', path: '/media/speech', description: 'Generate disclosed AI speech; disabled by default' },
+        { method: 'GET', path: '/connectors/status', description: 'Inspect reviewed connector manifests and readiness' },
+        { method: 'POST', path: '/connectors/webhooks/app-webhook', description: 'Receive signed untrusted app events into a review-only inbox' },
+        { method: 'GET', path: '/connectors/events', description: 'Read pending app events; no automatic tool execution' },
       ],
     },
     {
@@ -107,6 +121,11 @@ const DocsPage = () => {
       </div>
 
       <Card title="API Endpoints Overview">
+        <p className="mb-4 text-sm text-gray-700">
+          Private endpoints require project authentication. Legacy POST /analyze,
+          /self-improve, /github/demo-pr, and /github/issue are retired (HTTP 410).
+          Measured strategy adaptation does not modify repository code or publish externally.
+        </p>
         <div className="space-y-6">
           {apiEndpoints.map((category) => (
             <div key={category.category}>
@@ -156,7 +175,8 @@ const DocsPage = () => {
               Quick Example
             </h3>
             <p className="text-gray-600 mb-2">
-              Send a chat message to the agent:
+              Send a chat message to the agent. Supply the project credential through your
+              secure client configuration; do not paste a real key into documentation or shell history:
             </p>
             <pre className="p-4 bg-gray-900 text-gray-100 rounded-lg overflow-x-auto">
               <code>{`curl -X POST "${API_BASE_URL}/chat" \\
@@ -172,12 +192,12 @@ const DocsPage = () => {
             </h3>
             <ul className="list-disc list-inside space-y-2 text-gray-600">
               <li>Interactive chat interface with intelligent responses</li>
-              <li>Persistent long-term memory using vector embeddings</li>
+              <li>Project-scoped HAM/PostgreSQL memory with explicit storage status</li>
               <li>Real-time web search with multiple provider support</li>
-              <li>Self-analysis and code improvement recommendations</li>
+              <li>Bounded dreaming and measured, reversible response-strategy adaptation</li>
               <li>Automatic knowledge extraction and organization</li>
               <li>Multi-LLM support (OpenAI, Anthropic, OpenRouter)</li>
-              <li>GitHub integration for automated code improvements</li>
+              <li>Read-only GitHub visibility; publication requires a separate authorized workflow</li>
               <li>Discord bot interface for real-time interactions</li>
             </ul>
 

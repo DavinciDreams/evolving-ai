@@ -5,6 +5,8 @@ import Spinner from '../components/common/Spinner';
 import { api } from '../services/api';
 import { getGitHubStatus } from '../services/githubService';
 import { getDiscordStatus } from '../services/discordService';
+import StewardPanel from '../components/status/StewardPanel';
+import LearningLabPanel from '../components/status/LearningLabPanel';
 
 const StatusPage = () => {
   const { data: agentStatus, isLoading: loadingStatus, error: statusError } = useQuery({
@@ -75,6 +77,8 @@ const StatusPage = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <StewardPanel />
+        <LearningLabPanel />
         {/* Agent Status */}
         <Card title="Agent Status">
           {loadingStatus && !agentStatus ? (
@@ -105,13 +109,13 @@ const StatusPage = () => {
               <div className="flex justify-between items-center">
                 <span className="text-gray-600">Memory Count</span>
                 <span className="text-gray-800 font-semibold">
-                  {agentStatus?.memory_count || 0}
+                  {agentStatus?.memory_count ?? 'Unavailable'}
                 </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-600">Knowledge Count</span>
                 <span className="text-gray-800 font-semibold">
-                  {agentStatus?.knowledge_count || 0}
+                  {agentStatus?.knowledge_count ?? 'Unavailable'}
                 </span>
               </div>
               <div className="flex justify-between items-center">
@@ -143,7 +147,7 @@ const StatusPage = () => {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-600">GitHub Available</span>
-                {getStatusBadge(healthStatus?.github_available)}
+                <Badge variant={healthStatus?.github_available ? 'success' : 'secondary'}>{healthStatus?.github_available ? 'Available' : 'Not configured'}</Badge>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-600">Last Check</span>
@@ -213,7 +217,7 @@ const StatusPage = () => {
             <div className="space-y-3">
               <div className="flex justify-between items-center">
                 <span className="text-gray-600">Enabled</span>
-                {getStatusBadge(discordStatus?.enabled)}
+                <Badge variant="secondary">{discordStatus?.enabled ? 'Enabled' : 'Disabled'}</Badge>
               </div>
               {discordStatus?.enabled && (
                 <>

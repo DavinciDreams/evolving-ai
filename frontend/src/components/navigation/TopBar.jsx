@@ -1,9 +1,14 @@
-import { Bars3Icon, SunIcon, MoonIcon } from '@heroicons/react/24/outline';
+import {
+  ArrowRightStartOnRectangleIcon,
+  Bars3Icon,
+  MoonIcon,
+  SunIcon,
+} from '@heroicons/react/24/outline';
 import { useApp } from '../../context/AppContext';
 import Badge from '../common/Badge';
 
 export const TopBar = () => {
-  const { toggleSidebar, theme, toggleTheme } = useApp();
+  const { toggleSidebar, theme, toggleTheme, logout } = useApp();
 
   return (
     <div className="sticky top-0 z-10 flex-shrink-0 flex h-16 bg-white shadow">
@@ -35,6 +40,14 @@ export const TopBar = () => {
             )}
           </button>
           <Badge variant="success">Active</Badge>
+          <button
+            type="button"
+            onClick={logout}
+            aria-label="Log out"
+            className="p-1.5 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+          >
+            <ArrowRightStartOnRectangleIcon className="h-5 w-5" aria-hidden="true" />
+          </button>
         </div>
       </div>
     </div>

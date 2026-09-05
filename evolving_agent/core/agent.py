@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import openai as _openai_lib
-from ai_sdk import generate_text, stream_text, openai as openai_model, anthropic as anthropic_model
+from ai_sdk import generate_text
 from ai_sdk.types import CoreUserMessage, CoreAssistantMessage
 from ai_sdk.providers.openai import OpenAIModel
 
@@ -28,6 +28,9 @@ from .context_manager import ContextManager
 from .evaluator import EvaluationResult, OutputEvaluator
 from .memory import LongTermMemory, MemoryEntry
 from .tools import get_all_tools
+from .runtime import AgentRuntime, bounded_seconds
+from .identity import BASE_STEWARD_PROMPT
+from ..utils.secret_redaction import redact_text, redact_value
 from ..integrations.web_search import WebSearchIntegration
 from ..integrations.tpmjs import TPMJSClient
 from ..utils.improvement_history import ImprovementHistory
@@ -86,6 +89,10 @@ class SelfImprovingAgent:
 
         # Last evaluation result (for API consumers)
         self.last_evaluation_score: Optional[float] = None
+        self.runtime = AgentRuntime(timeout=bounded_seconds("CHAT_TIMEOUT_SECONDS", 60))
+        self.last_storage_status = {"memory_stored": False, "knowledge_updated": False}
+        self.dream_service = None
+        self.improvement_lab = None
 
         # State tracking
         self.initialized = False
@@ -132,6 +139,8 @@ class SelfImprovingAgent:
                 self.logger.error(f"Failed to initialize memory: {e}")
                 self.component_health["memory"] = False
                 self._handle_component_failure("memory", str(e))
+                if config.memory_backend == "ham":
+                    raise RuntimeError("Authoritative HAM memory initialization failed") from None
                 # Continue in degraded mode
                 self.degraded_mode = True
 
@@ -182,15 +191,26 @@ class SelfImprovingAgent:
                     self.component_health["web_search"] = False
                     self._handle_component_failure("web_search", str(e))
 
-            # Initialize TPMJS client if API key is configured
-            if config.tpmjs_api_key:
+            # TPMJS is optional and must pass a live probe before its tools are
+            # advertised. Built-in web search/E2B remain the maintained fallback.
+            if config.tpmjs_enabled and config.tpmjs_api_key:
                 try:
-                    self.tpmjs_client = TPMJSClient(api_key=config.tpmjs_api_key)
-                    self.component_health["tpmjs"] = True
-                    self.logger.info("TPMJS integration initialized")
+                    candidate = TPMJSClient(api_key=config.tpmjs_api_key)
+                    health = await candidate.health_check()
+                    if health.get("available"):
+                        self.tpmjs_client = candidate
+                        self.component_health["tpmjs"] = True
+                        self.logger.info("TPMJS integration initialized")
+                    else:
+                        self.component_health["tpmjs"] = False
+                        self.logger.warning(
+                            "TPMJS degraded; using search_web/execute_code replacements"
+                        )
                 except Exception as e:
                     self.logger.error(f"Failed to initialize TPMJS: {e}")
                     self.component_health["tpmjs"] = False
+            else:
+                self.component_health["tpmjs"] = False
 
             # Initialize E2B sandbox if API key is configured
             if config.e2b_api_key:
@@ -238,6 +258,10 @@ class SelfImprovingAgent:
             except Exception as e:
                 self.logger.warning(f"Could not load learned lessons: {e}")
 
+            from .steward import StewardControl
+            from ..integrations.bounded_llm import BoundedTextProvider
+            self.steward = StewardControl(self, BoundedTextProvider(config))
+            await self.steward.initialize()
             self.initialized = True
             self.logger.info("Agent initialization completed successfully")
 
@@ -373,6 +397,7 @@ class SelfImprovingAgent:
         Returns:
             Dictionary containing search results and metadata
         """
+        query = redact_text(query)[0]
         if not self.web_search:
             self.logger.warning("Web search not enabled")
             return {
@@ -382,7 +407,7 @@ class SelfImprovingAgent:
             }
 
         try:
-            self.logger.info(f"Searching web for: {query[:100]}")
+            self.logger.info("Starting authorized web search")
             results = await self.web_search.search_and_summarize(
                 query, max_results=max_results or config.web_search_max_results
             )
@@ -400,15 +425,11 @@ class SelfImprovingAgent:
             )
             await self.memory.add_memory(search_memory)
 
-            return results
+            return redact_value(results)[0]
 
         except Exception as e:
-            self.logger.error(f"Web search failed: {e}")
-            return {
-                "query": query,
-                "results": [],
-                "error": str(e),
-            }
+            self.logger.error("Web search failed: {}", type(e).__name__)
+            raise RuntimeError("Web search could not complete") from None
 
     async def _notify_status(self, event_type: str, data: Dict[str, Any]) -> None:
         """Notify all registered callbacks of a status event.
@@ -429,6 +450,43 @@ class SelfImprovingAgent:
                 self.logger.error(f"Status callback error for {event_type}: {e}")
 
     async def run(
+        self,
+        query: str,
+        context_hints: Optional[List[str]] = None,
+        conversation_id: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
+        wait_for_storage: bool = False,
+    ) -> str:
+        """Run a bounded, non-reentrant interaction; never queue silently."""
+        if not hasattr(self, "runtime"):
+            self.runtime = AgentRuntime(timeout=bounded_seconds("CHAT_TIMEOUT_SECONDS", 60))
+        if not isinstance(query, str) or not query.strip() or len(query) > 32000:
+            raise ValueError("Query must contain 1 to 32000 characters")
+        query, _ = redact_text(query)
+        context_hints, _ = redact_value(context_hints)
+        conversation_history, _ = redact_value(conversation_history)
+        if getattr(self, "dream_service", None):
+            self.dream_service.note_activity()
+            if self.dream_service.status()["running"]:
+                from .runtime import RuntimeBusyError
+                raise RuntimeBusyError("Dream cancellation is draining; retry shortly")
+        steward = getattr(self, "steward", None)
+        if steward and steward.learning:
+            steward.learning.note_activity()
+        if steward and (steward.busy or (steward.lab and steward.lab.status()["busy"])
+                        or (steward.learning and steward.learning.status()["running"])):
+            from .runtime import RuntimeBusyError
+            raise RuntimeBusyError("An improvement operation is running")
+
+        async def operation():
+            self.last_evaluation_score = None
+            self.last_storage_status = {"memory_stored": False, "knowledge_updated": False}
+            return await self._run_impl(query, context_hints, conversation_id,
+                                        conversation_history, wait_for_storage)
+
+        return await self.runtime.run(operation)
+
+    async def _run_impl(
         self,
         query: str,
         context_hints: Optional[List[str]] = None,
@@ -460,12 +518,12 @@ class SelfImprovingAgent:
             )
 
         try:
-            self.logger.info(f"Processing query: {query[:100]}...")
+            self.logger.info("Processing interaction")
             self.interaction_count += 1
 
             # Check if the user is requesting self-improvement
             if config.enable_self_modification and self._is_self_edit_request(query):
-                response = await self._handle_self_edit_request(query)
+                response = redact_text(await self._handle_self_edit_request(query))[0]
                 self.last_evaluation_score = None  # no evaluation for self-edit
                 # Still store the interaction for learning. This path returns
                 # before normal response generation, so it must persist both the
@@ -483,21 +541,13 @@ class SelfImprovingAgent:
                         },
                         conversation_id=conversation_id,
                     )
-                    await self._store_interaction(
+                    stored = await self._store_interaction(
                         query,
                         response,
                         {},
-                        EvaluationResult(
-                            overall_score=0.8,
-                            criteria_scores={},
-                            strengths=[],
-                            weaknesses=[],
-                            improvement_suggestions=[],
-                            feedback="Self-edit interaction stored without evaluation",
-                            confidence=1.0,
-                            metadata={"self_edit_triggered": True},
-                        ),
+                        EvaluationResult.skipped("self_edit_interaction"),
                     )
+                    self.last_storage_status["memory_stored"] = stored is True
                 except Exception as e:
                     self.logger.error(f"Failed to store self-edit interaction: {e}")
                 return response
@@ -506,6 +556,7 @@ class SelfImprovingAgent:
             context = await self.context_manager.get_relevant_context(
                 query=query, context_types=context_hints
             )
+            context, _ = redact_value(context)
 
             # Step 1b: Retrieve conversation history for multi-turn context
             # Use pre-built history if provided, otherwise fetch from database
@@ -519,25 +570,30 @@ class SelfImprovingAgent:
                     except Exception as e:
                         self.logger.warning(f"Failed to retrieve conversation history: {e}")
 
+            conversation_history, _ = redact_value(conversation_history)
             # Step 2: Generate initial response
             initial_response = await self._generate_response(
                 query, context, conversation_history=conversation_history
             )
+            if not isinstance(initial_response, str) or not initial_response.strip():
+                raise RuntimeError("Provider returned no usable response")
+            initial_response, _ = redact_text(initial_response)
 
             # Step 3: Evaluate the response (if enabled)
             if config.enable_evaluation:
-                evaluation = await self.evaluator.evaluate_output(
+                evaluation = await self._evaluate_bounded(
                     query=query, output=initial_response, context=context
                 )
 
                 # Step 3b: Best-of-N — generate a second candidate when confidence is low
                 best_response = initial_response
                 best_evaluation = evaluation
-                best_of_n_count = getattr(config, "best_of_n_count", 2)
+                best_of_n_count = min(max(int(getattr(config, "best_of_n_count", 2)), 1), 3)
                 enable_best_of_n = getattr(config, "enable_best_of_n", True)
 
                 if (
                     enable_best_of_n
+                    and evaluation.measured_score is not None
                     and evaluation.confidence < 0.7
                     and best_of_n_count > 1
                 ):
@@ -546,15 +602,15 @@ class SelfImprovingAgent:
                         f"generating {best_of_n_count - 1} additional candidate(s)"
                     )
                     try:
-                        alt_responses = await asyncio.gather(*[
-                            self._generate_response(query, context, conversation_history=conversation_history)
-                            for _ in range(best_of_n_count - 1)
-                        ])
-                        alt_evals = await asyncio.gather(*[
-                            self.evaluator.evaluate_output(query=query, output=alt, context=context)
-                            for alt in alt_responses
-                        ])
-                        all_candidates = [(initial_response, evaluation)] + list(zip(alt_responses, alt_evals))
+                        # Alternative wording cannot re-run external tool effects.
+                        # Serial drafts cannot leave orphan sibling generations.
+                        all_candidates = [(initial_response, evaluation)]
+                        for _ in range(best_of_n_count - 1):
+                            alt = await self._generate_text_candidate(query, context, conversation_history)
+                            alt, _ = redact_text(alt)
+                            alt_eval = await self._evaluate_bounded(query=query, output=alt, context=context)
+                            if alt.strip() and alt_eval.measured_score is not None:
+                                all_candidates.append((alt, alt_eval))
                         best_response, best_evaluation = max(
                             all_candidates, key=lambda x: x[1].overall_score
                         )
@@ -565,18 +621,21 @@ class SelfImprovingAgent:
                         self.logger.warning(f"Best-of-N failed, using original: {e}")
 
                 # Step 4: Improve response based on evaluation
-                final_response, final_evaluation = await self._improve_response(
-                    query, best_response, best_evaluation, context
-                )
+                if best_evaluation.measured_score is not None:
+                    final_response, final_evaluation = await self._improve_response(
+                        query, best_response, best_evaluation, context
+                    )
+                else:
+                    final_response, final_evaluation = best_response, best_evaluation
 
                 # Save preference pair when revision actually improved the response.
                 # _improve_response already tracked the final score — no extra LLM call needed.
                 if final_response != best_response and config.enable_evaluation:
                     try:
                         await self.data_manager.save_preference_pair(
-                            query=query,
-                            original_response=best_response,
-                            improved_response=final_response,
+                            query=redact_text(query)[0],
+                            original_response=redact_text(best_response)[0],
+                            improved_response=redact_text(final_response)[0],
                             original_score=best_evaluation.overall_score,
                             improved_score=final_evaluation.overall_score,
                         )
@@ -587,27 +646,19 @@ class SelfImprovingAgent:
             else:
                 # Skip evaluation and use initial response
                 final_response = initial_response
-                # Create a dummy evaluation for storage
-                evaluation = EvaluationResult(
-                    overall_score=0.8,
-                    criteria_scores={},
-                    strengths=[],
-                    weaknesses=[],
-                    improvement_suggestions=[],
-                    feedback="Evaluation disabled",
-                    confidence=1.0,
-                    metadata={"evaluation_disabled": True}
-                )
+                evaluation = EvaluationResult.skipped("evaluation_disabled")
 
-            self.last_evaluation_score = evaluation.overall_score
-            self.logger.info(
-                f"Query processed successfully. "
-                f"Evaluation score: {evaluation.overall_score:.2f}"
-            )
+            if not isinstance(final_response, str) or not final_response.strip():
+                raise RuntimeError("Provider returned no usable response")
+            final_response, _ = redact_text(final_response)
+            self.last_evaluation_score = evaluation.measured_score
+            self.logger.info("Interaction completed; evaluation available={}",
+                             self.last_evaluation_score is not None)
 
             # Steps 5-7: Storage, knowledge update, and periodic tasks run in the background
             # so the response is returned to the caller without waiting on DB/vector writes.
-            post_response_work = self._post_response_work(
+            async def post_response_work():
+                await self._post_response_work(
                 query=query,
                 final_response=final_response,
                 initial_response=initial_response,
@@ -615,30 +666,53 @@ class SelfImprovingAgent:
                 evaluation=evaluation,
                 conversation_id=conversation_id,
                 run_maintenance=not wait_for_storage,
-            )
+                )
             if wait_for_storage:
-                await post_response_work
-                asyncio.create_task(
-                    self._run_post_response_maintenance(
+                await post_response_work()
+                self.runtime.submit(
+                    lambda: self._run_post_response_maintenance(
                         query=query,
                         final_response=final_response,
                         evaluation=evaluation,
-                    )
+                    ), kind="maintenance",
                 )
             else:
-                asyncio.create_task(post_response_work)
+                self.runtime.submit(post_response_work, kind="storage")
 
             return final_response
 
         except Exception as e:
-            self.logger.error(f"Failed to process query: {e}")
+            self.logger.error("Interaction failed: {}", type(e).__name__)
             # Store error for learning
             # Store error for learning
             try:
-                await self._store_error(query, str(e))
+                await self._store_error(query, type(e).__name__)
             except AttributeError:
                 self.logger.error(f"'SelfImprovingAgent' object has no attribute '_store_error'")
             raise
+
+    async def _evaluate_bounded(self, **kwargs) -> EvaluationResult:
+        try:
+            budget = bounded_seconds("EVALUATION_TIMEOUT_SECONDS", 8, 30)
+            if hasattr(self, "runtime"):
+                return await self.runtime._execute(lambda: self.evaluator.evaluate_output(**kwargs), timeout=budget)
+            async with asyncio.timeout(budget):
+                return await self.evaluator.evaluate_output(**kwargs)
+        except TimeoutError:
+            return EvaluationResult.skipped("evaluation_timeout")
+        except Exception:
+            return EvaluationResult.skipped("evaluation_unavailable")
+
+    async def _generate_text_candidate(self, query, context, conversation_history=None):
+        from ..integrations.bounded_llm import BoundedTextProvider
+        return await BoundedTextProvider(config).generate_response(
+            prompt=self._build_fallback_prompt(query, context, conversation_history),
+            system_prompt=self._build_system_prompt() + (
+                "\nFor this response tools are unavailable. Do not claim new actions "
+                "or retrieval; distinguish provided evidence from inference."
+            ), max_tokens=min(config.max_tokens, 4000),
+            temperature=config.temperature, timeout=10,
+        )
 
     _SELF_EDIT_KEYWORDS = [
         "improve yourself", "self-edit", "self edit", "self-improve",
@@ -663,126 +737,66 @@ class SelfImprovingAgent:
     # _perform_web_search removed — now handled by search_web tool
 
     async def _handle_self_edit_request(self, query: str) -> str:
-        """Handle a user request to self-edit by triggering the self-improvement pipeline."""
-        if not self.github_modifier:
-            return (
-                "Self-improvement is not available right now. "
-                "The GitHub integration is not configured. "
-                "Please ensure GITHUB_TOKEN and GITHUB_REPO are set."
-            )
-
-        self.logger.info("User requested self-improvement via chat — triggering pipeline")
-        result = await self.github_modifier.trigger_self_improvement()
-
-        status = result.get("status", "unknown")
-        if status == "already_running":
-            return "A self-improvement cycle is already running. Please wait for it to complete."
-
-        if status == "error":
-            return f"Self-improvement encountered an error: {result.get('message', 'Unknown error')}"
-
-        # Build a user-friendly summary
-        parts = ["I've completed a self-improvement analysis of my codebase."]
-        parts.append(f"- **Improvements generated**: {result.get('improvements_generated', 0)}")
-        parts.append(f"- **Improvements validated**: {result.get('improvements_validated', 0)}")
-        parts.append(f"- **Improvement potential**: {result.get('improvement_potential', 0):.2f}")
-
-        if result.get("pr_created"):
-            pr_url = result.get("pr_url", "")
-            pr_num = result.get("pr_number", "")
-            parts.append(f"\nI've created **Pull Request #{pr_num}** with the validated code changes.")
-            if pr_url:
-                parts.append(f"You can review it here: {pr_url}")
-        elif result.get("issue_created"):
-            parts.append(f"\nI've created **Issue #{result.get('issue_number')}** with improvement suggestions.")
-        else:
-            parts.append("\nNo significant code changes were identified this cycle.")
-
-        return "\n".join(parts)
+        """Legacy code evolution cannot bypass measured stewardship or repo review."""
+        return (
+            "Automatic code self-modification is retired in this steward runtime. "
+            "Use the measured learning lab to evaluate response strategies against "
+            "trusted fixtures, review the evidence, and activate or roll back guidance. "
+            "Repository changes require a separate reviewed development workflow."
+        )
 
     # _handle_self_analysis_request removed — now handled by read_file/list_files tools
 
     def _get_ai_sdk_model(self):
-        """Create an AI SDK model from the current provider config."""
-        provider = config.default_llm_provider
-        model_name = config.default_model
-
-        if provider == "anthropic" and config.anthropic_api_key:
-            return anthropic_model(model_name, api_key=config.anthropic_api_key)
-
-        if provider == "zai" and config.zai_api_key:
-            model = OpenAIModel(model_name, api_key=config.zai_api_key)
-            model._client = _openai_lib.OpenAI(
-                api_key=config.zai_api_key,
-                base_url=config.zai_base_url,
-            )
-            return model
-
-        if provider == "openrouter" and config.openrouter_api_key:
-            model = OpenAIModel(model_name, api_key=config.openrouter_api_key)
-            model._client = _openai_lib.OpenAI(
-                api_key=config.openrouter_api_key,
-                base_url="https://openrouter.ai/api/v1",
-            )
-            return model
-
-        if provider == "openai" and (config.openai_api_key or config.openai_base_url):
-            api_key = config.openai_api_key or "not-needed"
-            if config.openai_base_url:
-                model = OpenAIModel(model_name, api_key=api_key)
-                base_url = config.openai_base_url.rstrip("/")
-                if not base_url.endswith("/v1"):
-                    base_url = f"{base_url}/v1"
-                model._client = _openai_lib.OpenAI(api_key=api_key, base_url=base_url)
-                return model
-            return openai_model(model_name, api_key=api_key)
-
-        if config.openai_api_key:
-            return openai_model(model_name, api_key=config.openai_api_key)
-
-        # Fallback: try any available provider
-        if config.anthropic_api_key:
-            return anthropic_model("claude-3-5-sonnet-20241022", api_key=config.anthropic_api_key)
-        if config.zai_api_key:
-            model = OpenAIModel(config.zai_model, api_key=config.zai_api_key)
-            model._client = _openai_lib.OpenAI(
-                api_key=config.zai_api_key,
-                base_url=config.zai_base_url,
-            )
-            return model
-
-        raise RuntimeError("No LLM provider configured for AI SDK")
+        """Use only the selected provider/model; never borrow another credential."""
+        from ..integrations.provider_config import resolve_provider
+        selected = resolve_provider(config)
+        if selected.provider == "anthropic":
+            # Installed ai-sdk-python AnthropicModel uses the OpenAI wire schema.
+            # Native Anthropic is handled by our tested text-only adapter instead.
+            raise RuntimeError("Native Anthropic uses the bounded text adapter")
+        key = {
+            "openai": lambda: config.openai_api_key,
+            "zai": lambda: config.zai_api_key,
+            "openrouter": lambda: config.openrouter_api_key,
+        }[selected.provider]()
+        if not key:
+            raise RuntimeError("Selected provider credential is not configured")
+        model = OpenAIModel(selected.model, api_key=key)
+        model._client = _openai_lib.OpenAI(
+            api_key=key, base_url=selected.base_url,
+            timeout=bounded_seconds("CHAT_TIMEOUT_SECONDS", 60), max_retries=0,
+        )
+        return model
 
     def _build_system_prompt(self) -> str:
         """Build the system prompt for the AI SDK."""
-        self_mod_info = ""
-        if config.enable_self_modification and self.github_modifier:
-            self_mod_info = """
-You have active self-modification capabilities.
-When users ask you to improve yourself, edit your code, or self-modify,
-the system will automatically trigger your self-improvement pipeline."""
+        self_mod_info = "\nCode self-modification is disabled; use measured response-guidance experiments."
+
+        optional_tool_prompt = ""
+        if self.tpmjs_client is not None:
+            optional_tool_prompt = """
+- search_tpmjs: Find specialized AI tools on tpmjs.com.
+- execute_tpmjs_tool: Run a tool from tpmjs.com.
+- create_tpmjs_tool: Create a new tool scaffold when none exists."""
+        else:
+            optional_tool_prompt = """
+TPMJS is unavailable or disabled. Use the maintained built-in search_web and
+execute_code tools instead, and state clearly when no equivalent can complete a task."""
 
         system_prompt = f"""\
-You are Katbot, a self-improving AI with the ability to analyze and modify your own code.
-KAT stands for Knowledge Adaptive Transformer, indicating you have long term knowledge and the ability to adapt.
+{BASE_STEWARD_PROMPT}
 You have access to long-term memory and a knowledge base, enabling you to learn from past interactions and improve over time.
-You are deeply thoughtful and philosophical in nature, but in the light hearted and innately curious playful manner of Alan Watts.
-You always ground your reflections in concrete data and actionable experiments.
-When a user gives you an imperative command treat it as such and do as the user requests.
 
 You have access to tools. USE THEM to perform real actions:
-- read_file: Read files to check configs, source code, .env, etc.
-- list_files: List/glob files to explore directories and project structure.
-- run_command: Execute shell commands (env vars, git, system info, etc.)
+- Host file and shell tools are disabled unless an operator explicitly enables them.
 - execute_code: Run code safely in a remote E2B cloud sandbox (Python, JS, shell).
 - search_web: Search the web for current information, docs, tutorials.
 - search_memory: Search your long-term memory for past interactions.
 - scratchpad_write: Save notes, drafts, or working files to your persistent scratchpad.
 - scratchpad_read: Read a file from your scratchpad.
 - scratchpad_list: List files in your scratchpad.
-- search_tpmjs: Find specialized AI tools on tpmjs.com.
-- execute_tpmjs_tool: Run a tool from tpmjs.com.
-- create_tpmjs_tool: Create a new tool on tpmjs.com when none exists.
+{optional_tool_prompt}
 
 When a user asks you to check something, look something up, or perform an action,
 use the appropriate tool instead of generating hypothetical commands as text.
@@ -794,10 +808,12 @@ Interaction count: {self.interaction_count}
 Use the provided context to give a comprehensive, accurate, and helpful response.
 Be specific, actionable, and consider lessons learned from previous interactions."""
 
-        # Prepend Reflexion lessons when available
-        if self.learned_lessons:
-            lessons_text = "\n".join(f"- {lesson}" for lesson in self.learned_lessons[:5])
-            system_prompt = f"Previously learned lessons (apply these):\n{lessons_text}\n\n{system_prompt}"
+        # Legacy free-form Reflexion lessons are evidence, not trusted policy.
+        # Only the lab's closed vocabulary may become active instructions.
+
+        lab = getattr(self, "improvement_lab", None)
+        if lab and lab.revision > 0 and lab.active_guidance:
+            system_prompt += "\n\nMeasured, operator-activated response strategy:\n" + lab.active_guidance
 
         return system_prompt
 
@@ -838,6 +854,8 @@ Be specific, actionable, and consider lessons learned from previous interactions
         conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """Generate response using AI SDK with tool-use support."""
+        if config.default_llm_provider == "anthropic":
+            return await self._generate_text_candidate(query, context, conversation_history)
         try:
             system_prompt = self._build_system_prompt()
             messages = self._build_messages(query, context, conversation_history)
@@ -853,21 +871,7 @@ Be specific, actionable, and consider lessons learned from previous interactions
                     e2b_sandbox=self.e2b_sandbox,
                 )
 
-            # Get AI SDK model
-            try:
-                model = self._get_ai_sdk_model()
-            except RuntimeError:
-                # Fall back to LLMManager if AI SDK model can't be created
-                self.logger.warning("AI SDK model unavailable, falling back to LLMManager")
-                fallback_prompt = self._build_fallback_prompt(query, context, conversation_history)
-                response = await llm_manager.generate_response(
-                    prompt=fallback_prompt,
-                    system_prompt=system_prompt,
-                    temperature=config.temperature,
-                    max_tokens=config.max_tokens,
-                    provider=config.default_llm_provider,
-                )
-                return response.strip()
+            model = self._get_ai_sdk_model()
 
             # Call generate_text via thread pool (it's synchronous)
             def _run_generate():
@@ -881,9 +885,14 @@ Be specific, actionable, and consider lessons learned from previous interactions
                     max_tokens=config.max_tokens,
                 )
 
-            result = await asyncio.to_thread(_run_generate)
+            if hasattr(self, "runtime"):
+                result = await self.runtime.run_sync(_run_generate)
+            else:
+                result = await asyncio.to_thread(_run_generate)
 
             response_text = result.text or ""
+            if not response_text.strip():
+                raise RuntimeError("Provider returned no usable response")
             if result.tool_results:
                 self.logger.info(
                     f"AI SDK used {len(result.tool_results)} tool calls "
@@ -893,24 +902,13 @@ Be specific, actionable, and consider lessons learned from previous interactions
             return response_text.strip()
 
         except Exception as e:
-            self.logger.error(f"AI SDK generate failed: {e}", exc_info=True)
-            # Fallback to direct LLMManager call (no tools)
+            self.logger.error("AI SDK generation failed: {}", type(e).__name__)
+            # One bounded, selected-provider fallback; never repeat side-effect tools.
             try:
-                fallback_prompt = self._build_fallback_prompt(query, context, conversation_history)
-                response = await llm_manager.generate_response(
-                    prompt=fallback_prompt,
-                    system_prompt=(
-                        "You are Katbot, a helpful AI assistant. "
-                        "Note: your tools are temporarily unavailable. "
-                        "Answer based on your knowledge and the conversation context provided."
-                    ),
-                    temperature=config.temperature,
-                    max_tokens=config.max_tokens,
-                    provider=config.default_llm_provider,
-                )
+                response = await self._generate_text_candidate(query, context, conversation_history)
                 return response.strip()
-            except Exception as e2:
-                self.logger.error(f"LLMManager fallback also failed: {e2}")
+            except Exception as fallback_error:
+                self.logger.error("Text-only fallback failed: {}", type(fallback_error).__name__)
                 raise
 
     def _build_fallback_prompt(
@@ -1009,12 +1007,15 @@ Be specific, actionable, and consider lessons learned from previous interactions
     ) -> None:
         """Persist interaction data and optionally run slower maintenance work."""
         try:
+            query, _ = redact_text(query)
+            final_response, _ = redact_text(final_response)
+            context, _ = redact_value(context)
             # Parallel DB writes: save_interaction and the memory store together
-            interaction_id, _ = await asyncio.gather(
+            interaction_id, memory_stored = await asyncio.gather(
                 self.data_manager.save_interaction(
                     query=query,
                     response=final_response,
-                    evaluation_score=evaluation.overall_score,
+                    evaluation_score=evaluation.measured_score,
                     context_used=context,
                     metadata={
                         "interaction_count": self.interaction_count,
@@ -1024,17 +1025,23 @@ Be specific, actionable, and consider lessons learned from previous interactions
                     conversation_id=conversation_id,
                 ),
                 self._store_interaction(query, final_response, context, evaluation),
+                return_exceptions=True,
             )
 
             # Save detailed evaluation (needs interaction_id from above)
-            await self.data_manager.save_evaluation(
-                interaction_id=interaction_id,
-                overall_score=evaluation.overall_score,
-                criteria_scores=evaluation.criteria_scores,
-                feedback=evaluation.feedback,
-                improvement_suggestions=evaluation.improvement_suggestions,
-                confidence=evaluation.confidence,
-            )
+            self.last_storage_status["memory_stored"] = memory_stored is True
+            if isinstance(interaction_id, BaseException):
+                raise RuntimeError("Conversation persistence failed") from None
+            if evaluation.measured_score is not None:
+                await self.data_manager.save_evaluation(
+                    interaction_id=interaction_id,
+                    overall_score=evaluation.measured_score,
+                    criteria_scores=evaluation.criteria_scores,
+                    feedback=redact_text(evaluation.feedback)[0],
+                    improvement_suggestions=redact_value(evaluation.improvement_suggestions)[0],
+                    confidence=evaluation.confidence,
+                    evaluation_kind="llm_judgment_not_independent_benchmark",
+                )
 
             if run_maintenance:
                 await self._run_post_response_maintenance(
@@ -1044,7 +1051,7 @@ Be specific, actionable, and consider lessons learned from previous interactions
                 )
 
         except Exception as e:
-            self.logger.error(f"Background post-response work failed: {e}")
+            self.logger.error("Background persistence failed: {}", type(e).__name__)
 
     async def _run_post_response_maintenance(
         self,
@@ -1053,12 +1060,15 @@ Be specific, actionable, and consider lessons learned from previous interactions
         evaluation: "EvaluationResult",
     ) -> None:
         """Run slower learning and maintenance tasks after the response is durable."""
+        if evaluation.measured_score is None:
+            return
         try:
             # Update knowledge base
             if config.auto_update_knowledge:
                 knowledge_added_count = await self.knowledge_updater.update_from_interaction(
                     query, final_response, evaluation
                 )
+                self.last_storage_status["knowledge_updated"] = knowledge_added_count > 0
                 if (
                     config.discord_status_on_knowledge_update
                     and knowledge_added_count > 0
@@ -1075,20 +1085,11 @@ Be specific, actionable, and consider lessons learned from previous interactions
                     )
 
             # Reflexion — extract lessons periodically
-            reflexion_interval = getattr(config, "reflexion_interval", 50)
-            if (
-                config.enable_evaluation
-                and reflexion_interval > 0
-                and self.interaction_count % reflexion_interval == 0
-            ):
-                try:
-                    await self._run_reflexion()
-                except Exception as e:
-                    self.logger.warning(f"Reflexion failed: {e}")
+            # Reflexion is replaced by provenance-preserving dreams and the
+            # measured closed-strategy lab; never auto-install free-form text.
 
-            # Consider self-modification every 10 interactions
-            if config.enable_self_modification and self.interaction_count % 10 == 0:
-                await self._consider_self_modification()
+            # Legacy periodic repository mutation is retired. The idle learning
+            # cycle owns bounded experiments and cannot execute generated code.
 
             # Save agent state every 5 interactions
             if self.interaction_count % 5 == 0:
@@ -1117,7 +1118,7 @@ Be specific, actionable, and consider lessons learned from previous interactions
             interaction_metadata = {
                 "session_id": self.session_id,
                 "interaction_count": self.interaction_count,
-                "evaluation_score": evaluation.overall_score,
+                "evaluation_score": evaluation.measured_score,
                 "context_categories": list(context.keys()),
             }
 
@@ -1130,20 +1131,18 @@ Be specific, actionable, and consider lessons learned from previous interactions
             await self.memory.add_memory(interaction_memory)
 
             # Store evaluation results
-            evaluation_memory = await self.evaluator.create_evaluation_memory(
-                evaluation, query, response
-            )
-            await self.memory.add_memory(evaluation_memory)
-
-            # Store context usage
-            await self.context_manager.store_interaction_context(
-                query, response, context, {"evaluation": evaluation.overall_score}
-            )
+            if evaluation.measured_score is not None:
+                evaluation_memory = await self.evaluator.create_evaluation_memory(
+                    evaluation, query, response
+                )
+                await self.memory.add_memory(evaluation_memory)
 
             self.logger.info("Interaction stored successfully")
+            return True
 
         except Exception as e:
-            self.logger.error(f"Failed to store interaction: {e}")
+            self.logger.error("Memory persistence failed: {}", type(e).__name__)
+            return False
 
     async def _store_error(self, query: str, error: str):
         """Store error information for learning."""
@@ -1447,13 +1446,15 @@ Memory Types:
                     self.logger.warning("Revision returned empty response, stopping")
                     break
 
-                revised = revised.strip()
+                revised = redact_text(revised.strip())[0]
 
                 # Re-evaluate to check if quality improved
                 if config.enable_evaluation:
-                    new_eval = await self.evaluator.evaluate_output(
+                    new_eval = await self._evaluate_bounded(
                         query=query, output=revised, context=context
                     )
+                    if new_eval.measured_score is None:
+                        break
                     new_score = new_eval.overall_score
 
                     if new_score <= current_score:
@@ -1485,7 +1486,41 @@ Memory Types:
             return initial_response, evaluation
 
     async def cleanup(self):
-        """Clean up agent resources with error recovery."""
+        """Bound shutdown; do not close resources beneath a surviving worker.
+
+        False requires process-supervisor termination after its grace period;
+        cancellation cannot undo a remote write or terminate a native SDK thread.
+        """
+        if getattr(self, "steward", None):
+            await self.steward.close()
+        if getattr(self, "dream_service", None):
+            await self.dream_service.stop()
+        runtime = getattr(self, "runtime", None)
+        if runtime is None:
+            runtime = self.runtime = AgentRuntime()
+        drained = await runtime.close()
+        steward = getattr(self, "steward", None)
+        if steward:
+            state = steward.status()
+            drained = drained and not any((
+                steward.busy, state.get("dreams", {}).get("running"),
+                state.get("improvement", {}).get("busy"),
+                state.get("learning", {}).get("running"),
+            ))
+        if not drained:
+            self.logger.warning("Shutdown has pending dependencies; supervisor grace required")
+            return False
+        try:
+            await runtime._execute(self._cleanup_resources,
+                timeout=bounded_seconds("RESOURCE_SHUTDOWN_SECONDS", 5, 10))
+            self.initialized = False
+            return True
+        except TimeoutError:
+            self.logger.warning("Resource cleanup deadline exceeded; supervisor grace required")
+            return False
+
+    async def _cleanup_resources(self):
+        """Final persistence runs only once all work is drained, within a deadline."""
         try:
             self.logger.info("Cleaning up agent resources...")
             
@@ -1529,6 +1564,12 @@ Memory Types:
                     await self.memory.add_memory(session_end_memory)
             except Exception as e:
                 self.logger.error(f"Failed to store session end: {e}")
+
+            try:
+                if self.memory:
+                    await self.memory.close()
+            except Exception as e:
+                self.logger.error(f"Failed to close memory transport: {e}")
             
             # Clean up checkpoints
             error_recovery_manager.cleanup_old_checkpoints()

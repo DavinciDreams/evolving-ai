@@ -364,7 +364,7 @@ class OpenRouterInterface(LLMInterface):
 class ZAIInterface(LLMInterface):
     """Z AI API interface for GLM models."""
 
-    def __init__(self, api_key: str, model: str = "glm-5", base_url: str = "https://api.z.ai/api/coding/paas/v4"):
+    def __init__(self, api_key: str, model: str = "glm-5.1", base_url: str = "https://api.z.ai/api/coding/paas/v4"):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url

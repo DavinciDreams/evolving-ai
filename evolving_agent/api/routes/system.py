@@ -1,204 +1,153 @@
-"""System endpoints: /health/detailed, /health/recovery, /system/*."""
+"""Cached private telemetry; status requests never probe models or replay effects."""
 
 from datetime import datetime
 
-import evolving_agent.utils.app_state as state
 from fastapi import APIRouter, Depends, HTTPException
 
-from evolving_agent.utils.deps import verify_api_key
-
+import evolving_agent.utils.app_state as state
 from evolving_agent.utils.config import config
+from evolving_agent.utils.deps import verify_api_key
 from evolving_agent.utils.error_recovery import error_recovery_manager
 from evolving_agent.utils.llm_interface import llm_manager
 from evolving_agent.utils.logging import setup_logger
 
 logger = setup_logger(__name__)
+router = APIRouter(dependencies=[Depends(verify_api_key)])
 
-router = APIRouter()
+
+def _count(value):
+    return value if type(value) is int and value >= 0 else None
+
+
+def _cached_recovery():
+    raw = error_recovery_manager.get_recovery_status()
+    # Arbitrary diagnostics, service names and checkpoint data may hold secrets.
+    return {
+        "degraded_mode": raw.get("degraded_mode") is True,
+        "active_checkpoints": _count(raw.get("active_checkpoints")),
+        "partial_responses": _count(raw.get("partial_responses")),
+        "recovery_history_count": _count(raw.get("recovery_history_count")),
+        "circuit_breaker_count": len(raw.get("circuit_breakers", {})),
+    }
 
 
 @router.get("/health/detailed", tags=["System"])
 async def health_check_detailed():
-    """
-    Comprehensive health check endpoint with recovery status.
-
-    Returns overall system health and component status.
-    """
+    """Read cached facts only; not a live availability or successful-call claim."""
     try:
-        # Get recovery status
-        recovery_status = error_recovery_manager.get_recovery_status()
-
-        # Get agent health if available
-        agent_health = {}
-        if state.agent:
-            agent_health = await state.agent.check_system_health()
-
-        # Get LLM provider health
-        llm_health = {}
-        try:
-            llm_health = llm_manager.get_provider_health_status()
-        except Exception as e:
-            llm_health = {"error": str(e)}
-
-        # Get GitHub integration health
-        github_health = {}
-        if state.github_modifier:
-            try:
-                github_health = state.github_modifier.github_integration.get_status()
-            except Exception as e:
-                github_health = {"error": str(e)}
-
-        # Get Discord integration health
-        discord_health = {}
-        if state.discord_integration:
-            try:
-                discord_status = await state.discord_integration.get_status() if hasattr(state.discord_integration, 'get_status') else {}
-                discord_health = {
-                    "enabled": config.discord_enabled,
-                    "connected": discord_status.get("connected", False),
-                }
-            except Exception as e:
-                discord_health = {"error": str(e)}
-
-        # Determine overall health
-        degraded_mode = recovery_status.get("degraded_mode", False)
-
-        if degraded_mode:
-            overall_status = "degraded"
-        elif agent_health.get("overall") != "healthy":
-            overall_status = agent_health.get("overall", "unknown")
-        else:
-            overall_status = "healthy"
-
-        return {
-            "status": overall_status,
-            "timestamp": datetime.now().isoformat(),
-            "degraded_mode": degraded_mode,
-            "components": {
-                "agent": agent_health,
-                "llm_providers": llm_health,
-                "github": github_health,
-                "discord": discord_health,
-                "error_recovery": {
-                    "circuit_breakers": recovery_status.get("circuit_breakers", {}),
-                    "active_checkpoints": recovery_status.get("active_checkpoints", 0),
-                    "recovery_history_count": recovery_status.get("recovery_history_count", 0),
-                }
+        recovery = _cached_recovery()
+        providers = {}
+        for name in ("openai", "anthropic", "openrouter", "zai"):
+            cached = llm_manager.provider_status.get(name, {})
+            providers[name] = {
+                "last_reported_available": (
+                    cached.get("available")
+                    if type(cached.get("available")) is bool
+                    else None
+                ),
+                "has_recorded_error": bool(cached.get("last_error")),
+                "request_count": _count(cached.get("request_count")),
+                "freshness": "not_verified_by_this_request",
             }
-        }
-    except Exception as e:
-        logger.error(f"Error in health check: {e}")
+        agent = state.agent
+        components = getattr(agent, "component_health", {}) if agent else {}
         return {
-            "status": "error",
+            "status": "degraded" if recovery["degraded_mode"] else "not_probed",
+            "cached_only": True,
             "timestamp": datetime.now().isoformat(),
-            "error": str(e)
+            "degraded_mode": recovery["degraded_mode"],
+            "components": {
+                "agent": {
+                    "initialized": getattr(agent, "initialized", False) is True,
+                    "last_reported": {
+                        name: (
+                            components.get(name)
+                            if type(components.get(name)) is bool
+                            else None
+                        )
+                        for name in ("memory", "knowledge_base", "persistent_storage")
+                    },
+                },
+                "llm_providers": providers,
+                "github": {
+                    "configured": state.github_modifier is not None,
+                    "status": "not_probed",
+                },
+                "discord": {
+                    "enabled": bool(config.discord_enabled),
+                    "status": "not_probed",
+                },
+                "error_recovery": recovery,
+            },
         }
+    except Exception as exc:
+        logger.error("Cached health unavailable: {}", type(exc).__name__)
+        raise HTTPException(503, "Cached health telemetry unavailable") from None
 
 
 @router.get("/health/recovery", tags=["System"])
 async def recovery_status():
-    """
-    Get detailed error recovery status.
-
-    Returns information about circuit breakers, error patterns, and recovery history.
-    """
+    """Counts only; no probes, raw recovery logs, or implicit recovery actions."""
     try:
-        recovery_status = error_recovery_manager.get_recovery_status()
-        recovery_history = error_recovery_manager.get_recovery_history(limit=10)
-        health_checks = await error_recovery_manager.perform_health_checks()
-
         return {
-            "recovery_status": recovery_status,
-            "health_checks": health_checks,
-            "recent_recoveries": recovery_history,
-            "timestamp": datetime.now().isoformat()
+            "recovery_status": _cached_recovery(),
+            "cached_only": True,
+            "health_checks": {"performed": False},
+            "recent_recoveries_included": False,
+            "timestamp": datetime.now().isoformat(),
         }
-    except Exception as e:
-        logger.error(f"Error getting recovery status: {e}")
-        return {
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }
+    except Exception as exc:
+        logger.error("Cached recovery unavailable: {}", type(exc).__name__)
+        raise HTTPException(503, "Cached recovery telemetry unavailable") from None
 
 
-@router.post("/system/trigger-recovery", tags=["System"], dependencies=[Depends(verify_api_key)])
+@router.post(
+    "/system/trigger-recovery",
+    tags=["System"],
+    deprecated=True,
+    responses={410: {"description": "Legacy repository queue replay is retired"}},
+)
 async def trigger_recovery():
-    """
-    Trigger recovery operations for failed components.
+    """A recovery label does not authorize queued commits, branches, or PRs."""
+    raise HTTPException(
+        410,
+        "Legacy repository queue replay is retired. Reconcile pending effects "
+        "through a separately authorized repository workflow.",
+    )
 
-    This endpoint can be used to manually trigger recovery attempts.
-    """
-    try:
-        # Process pending GitHub operations if any
-        if state.github_modifier and state.github_modifier.github_integration:
-            try:
-                results = await state.github_modifier.github_integration.process_pending_operations()
-                return {
-                    "message": "Recovery triggered",
-                    "github_operations_processed": len(results),
-                    "results": results
-                }
-            except Exception as e:
-                logger.error(f"Error processing GitHub operations: {e}")
-                return {
-                    "message": "Recovery partially completed",
-                    "error": str(e)
-                }
 
-        return {
-            "message": "No pending operations to process"
-        }
-    except Exception as e:
-        logger.error(f"Error triggering recovery: {e}")
+def _set_degraded(enabled):
+    agent = state.agent
+    runtime = getattr(agent, "runtime", None)
+    steward = getattr(agent, "steward", None)
+    if runtime and runtime.busy:
         raise HTTPException(
-            status_code=500,
-            detail=f"Error triggering recovery: {str(e)}"
+            409, "Runtime is occupied; mode changes do not clear its lease"
         )
+    if steward and (
+        steward.busy
+        or steward.dreams.status()["running"]
+        or (steward.lab and steward.lab.status()["busy"])
+        or (steward.learning and steward.learning.status()["running"])
+    ):
+        raise HTTPException(
+            409, "Steward is occupied; mode changes do not clear its lease"
+        )
+    error_recovery_manager.set_degraded_mode(enabled)
+    if agent:
+        agent.degraded_mode = enabled
+    return {
+        "degraded_mode": enabled,
+        "runtime_lease_unchanged": True,
+        "timestamp": datetime.now().isoformat(),
+    }
 
 
-@router.post("/system/enable-degraded-mode", tags=["System"], dependencies=[Depends(verify_api_key)])
+@router.post("/system/enable-degraded-mode", tags=["System"])
 async def enable_degraded_mode():
-    """
-    Manually enable degraded mode.
-
-    This can be useful for maintenance or when issues are detected.
-    """
-    try:
-        error_recovery_manager.set_degraded_mode(True)
-        if state.agent:
-            state.agent.degraded_mode = True
-
-        return {
-            "message": "Degraded mode enabled",
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Error enabling degraded mode: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error enabling degraded mode: {str(e)}"
-        )
+    return _set_degraded(True)
 
 
-@router.post("/system/disable-degraded-mode", tags=["System"], dependencies=[Depends(verify_api_key)])
+@router.post("/system/disable-degraded-mode", tags=["System"])
 async def disable_degraded_mode():
-    """
-    Manually disable degraded mode.
-
-    This can be used to attempt to return to normal operation.
-    """
-    try:
-        error_recovery_manager.set_degraded_mode(False)
-        if state.agent:
-            state.agent.degraded_mode = False
-
-        return {
-            "message": "Degraded mode disabled",
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Error disabling degraded mode: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error disabling degraded mode: {str(e)}"
-        )
+    return _set_degraded(False)

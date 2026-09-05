@@ -4,6 +4,7 @@ Output evaluation system for self-improvement.
 
 import asyncio
 import json
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -43,6 +44,23 @@ class EvaluationResult:
     confidence: float
     metadata: Dict[str, Any]
 
+    @property
+    def measured_score(self) -> Optional[float]:
+        """Never turn unavailable, disabled, or partially failed judging into evidence."""
+        import math
+
+        if (self.metadata.get("evaluation_disabled") or
+                self.metadata.get("evaluation_skipped") or
+                self.metadata.get("failed_criteria") or
+                not math.isfinite(self.overall_score)):
+            return None
+        return self.overall_score
+
+    @classmethod
+    def skipped(cls, reason: str) -> "EvaluationResult":
+        return cls(0.0, {}, [], [], [], reason, 0.0,
+                   {"evaluation_skipped": True, "reason": reason})
+
 
 class OutputEvaluator:
     """Evaluates agent outputs and suggests improvements."""
@@ -70,8 +88,22 @@ class OutputEvaluator:
             rows = await persistent_data_manager.get_recent_evaluations(50)
             for row in reversed(rows):  # oldest first
                 try:
+                    evidence_kind = row.get("evaluation_kind")
+                    if evidence_kind != "llm_judgment_not_independent_benchmark":
+                        # Old rows cannot distinguish a measured score from a
+                        # fabricated neutral fallback. Preserve them in storage,
+                        # but never hydrate them as evidence of improvement.
+                        continue
                     criteria_scores = json.loads(row["criteria_scores"]) if row["criteria_scores"] else {}
                     suggestions = json.loads(row["improvement_suggestions"]) if row["improvement_suggestions"] else []
+                    if not isinstance(criteria_scores, dict) or not criteria_scores:
+                        continue
+                    values = [row["overall_score"], row["confidence"], *criteria_scores.values()]
+                    if any(isinstance(value, bool) or not isinstance(value, (int, float))
+                           or not math.isfinite(value) or not 0 <= value <= 1 for value in values):
+                        continue
+                    if not isinstance(suggestions, list) or any(not isinstance(item, str) for item in suggestions):
+                        continue
                     synthetic = EvaluationResult(
                         overall_score=row["overall_score"],
                         criteria_scores=criteria_scores,
@@ -79,15 +111,16 @@ class OutputEvaluator:
                         weaknesses=[],
                         improvement_suggestions=suggestions,
                         feedback=row["feedback"] or "",
-                        confidence=row["confidence"] or 0.7,
-                        metadata={"from_db": True, "timestamp": row["timestamp"]},
+                        confidence=row["confidence"],
+                        metadata={"from_db": True, "timestamp": row["timestamp"],
+                                  "evaluation_kind": evidence_kind},
                     )
                     query = row.get("query", "")
                     self.evaluation_history.append((query, "", synthetic))
                 except Exception:
                     continue
             self._history_loaded_from_db = True
-            logger.info(f"Loaded {len(rows)} historical evaluations from DB")
+            logger.info(f"Loaded {len(self.evaluation_history)} provenance-backed historical evaluations from DB")
         except Exception as e:
             logger.warning(f"Could not load evaluation history from DB: {e}")
             self._history_loaded_from_db = True  # don't retry on failure
@@ -154,11 +187,13 @@ class OutputEvaluator:
                     "context_available": context is not None,
                     "evaluation_time_seconds": (datetime.now() - start_time).total_seconds(),
                     "consolidated_evaluation": True,
+                    "evaluation_kind": "llm_judgment_not_independent_benchmark",
                     "failed_criteria": failed_criteria,
                 },
             )
 
-            self.evaluation_history.append((query, output, evaluation_result))
+            if evaluation_result.measured_score is not None:
+                self.evaluation_history.append((query, output, evaluation_result))
 
             total_time = (datetime.now() - start_time).total_seconds()
             logger.info(f"Consolidated evaluation completed in {total_time:.2f} seconds. Overall score: {overall_score:.2f}")
@@ -277,9 +312,15 @@ Reply with ONLY this JSON, no other text:
             # Extract scores
             scores_data = data.get("scores", data)  # Handle both nested and flat formats
             criteria_scores = {}
+            failed = []
             for c in criteria:
-                score = scores_data.get(c, 0.7)
-                criteria_scores[c] = max(0.0, min(1.0, float(score)))
+                score = scores_data.get(c)
+                if (isinstance(score, bool) or not isinstance(score, (int, float))
+                        or not math.isfinite(score) or not 0 <= score <= 1):
+                    criteria_scores[c] = 0.0
+                    failed.append(c)
+                else:
+                    criteria_scores[c] = float(score)
 
             # Build feedback dict
             strengths = data.get("strengths", [])
@@ -295,7 +336,7 @@ Reply with ONLY this JSON, no other text:
                     "suggestions": suggestions,
                 }
 
-            return criteria_scores, all_feedback, []
+            return criteria_scores, all_feedback, failed
 
         except Exception as e:
             logger.warning(f"Failed to parse consolidated evaluation: {e}")

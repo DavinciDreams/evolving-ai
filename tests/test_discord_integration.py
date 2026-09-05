@@ -100,6 +100,7 @@ class TestDiscordFormatter:
 
         assert len(parts) == 2
         assert all(len(part) <= 2000 for part in parts)
+        assert "".join(parts) == text
 
     def test_split_short_message(self):
         """Test that short messages are not split."""
@@ -134,6 +135,14 @@ class TestDiscordFormatter:
 
         assert len(messages) == 1
         assert messages[0] == response
+
+    def test_format_agent_response_does_not_truncate_long_embed(self):
+        response = "paragraph. " * 700
+        messages = DiscordFormatter.format_agent_response(response=response, use_embed=True)
+
+        assert all(isinstance(message, str) for message in messages)
+        assert "".join(messages) == response
+        assert all(len(message) <= 2000 for message in messages)
 
     def test_format_error_message(self):
         """Test formatting error message."""
@@ -214,6 +223,9 @@ class TestDiscordIntegration:
         config.discord_status_updates_enabled = True
         config.discord_rate_limit_messages = 10
         config.discord_cooldown_seconds = 2
+        config.discord_max_message_length = 2000
+        config.discord_attachment_threshold = 12000
+        config.discord_max_attachment_bytes = 7_500_000
         return config
 
     async def test_discord_integration_initialization(self, mock_agent, mock_config):
@@ -273,6 +285,36 @@ class TestDiscordIntegration:
 
         # Verify channel.send was called
         assert mock_channel.send.called
+
+    async def test_long_response_uses_complete_attachment(self, mock_agent, mock_config):
+        from evolving_agent.integrations.discord_integration import DiscordIntegration
+
+        integration = DiscordIntegration("test_token", mock_agent, mock_config)
+        integration._send_attachment_with_retry = AsyncMock()
+        response = "long response " * 1200
+
+        await integration.send_response(channel=AsyncMock(), response=response)
+
+        attachment_call = integration._send_attachment_with_retry.await_args.args
+        assert attachment_call[1].decode("utf-8") == response
+        assert "complete response" in attachment_call[2]
+
+    async def test_chunk_failure_reports_progress_and_attaches_full_response(
+        self, mock_agent, mock_config
+    ):
+        from evolving_agent.integrations.discord_integration import DiscordIntegration
+
+        integration = DiscordIntegration("test_token", mock_agent, mock_config)
+        integration._send_with_retry = AsyncMock(side_effect=RuntimeError("send failed"))
+        integration._send_attachment_with_retry = AsyncMock()
+        response = "chunked response " * 400
+
+        await integration.send_response(channel=AsyncMock(), response=response)
+
+        attachment_call = integration._send_attachment_with_retry.await_args.args
+        assert attachment_call[1].decode("utf-8") == response
+        assert "0/" in attachment_call[2]
+        assert "complete response" in attachment_call[2]
 
     async def test_discord_conversation_id_uses_channel(self, mock_agent, mock_config):
         """Discord messages should share stable channel conversation context."""

@@ -1,27 +1,31 @@
 # 🤖 Self-Improving AI Agent
 
-A sophisticated AI agent with advanced self-improvement capabilities, long-term memory, and autonomous code evolution.
+A private AI steward with project-scoped HAM memory, provenance-preserving dream consolidation, and measured, reversible response-guidance experiments.
+
+Start with the [Katbot steward operating guide](docs/KATBOT_STEWARD.md). Optional dreams, learning, audio/vision, and signed connectors are disabled until an operator configures them. Run one authenticated worker. Legacy code-evolution and direct GitHub mutation endpoints are retired; no code deployment or weight training is performed by the measured lab. Keep the backend private until the [HAM migration](docs/SECURE_HAM_MIGRATION.md) and credential checks are complete.
 
 ## 🌟 Key Features
 
 ### 🧠 Advanced AI Capabilities
 
-- **Long-term Memory**: Persistent memory system using ChromaDB vector embeddings
+- **Long-term Memory**: Project-scoped HAM shared memory with explicit public/private audiences
 - **Dynamic Context Management**: Intelligent context retrieval and management
-- **Self-Evaluation**: Continuous output evaluation and improvement cycles
-- **Knowledge Base**: Automatic knowledge acquisition and updates
+- **Self-Evaluation**: Bounded optional judging, clearly separated from independent fixture evidence
+- **Knowledge Base**: Explicitly configured knowledge acquisition and updates
 
 ### 🔄 Self-Improvement Engine
 
-- **Code Analysis**: Automated analysis of its own codebase
-- **Autonomous Modifications**: Safe self-modification with validation
-- **GitHub Integration**: Automatic pull request creation for improvements
-- **Performance Monitoring**: Continuous performance tracking and optimization
+- **Dream Consolidation**: Immutable source references, exact evidence, and explicitly unverified hypotheses in HAM
+- **Measured Adaptation**: Closed strategy candidates, paired baseline tests, holdout and regression gates
+- **Operator Control**: Asynchronous jobs, evidence inspection, explicit activation, audited rollback
+- **Idle Learning**: Opt-in bounded experiments with durable daily reservations; automatic promotion separately opt-in
+- **Runtime Telemetry**: Single-flight admission, honest timeouts, late-worker quarantine, and bounded shutdown
+- **Media and Connectors**: Opt-in image analysis, transcription, speech, and signed review-only webhook intake
 
 ### 🚀 Production Features
 
 - **FastAPI Web Server**: RESTful API with Swagger documentation
-- **Multiple LLM Providers**: Support for OpenAI, Anthropic, OpenRouter, Z AI (GLM-4.7 with coding endpoint), and more
+- **Multiple LLM Providers**: Support for OpenAI, Anthropic, OpenRouter, and Z AI (GLM-5.1 coding endpoint)
 - **Web Search Integration**: Real-time web search with multiple provider support (DuckDuckGo, Tavily, SerpAPI)
 - **Discord Bot**: Real-time chat integration with Discord
 - **Robust Error Handling**: Comprehensive error management and recovery
@@ -30,7 +34,7 @@ A sophisticated AI agent with advanced self-improvement capabilities, long-term 
 ## 📋 Requirements
 
 - Python 3.12+
-- ChromaDB for vector storage
+- HAM service access for production memory; ChromaDB only for controlled legacy migration
 - FastAPI for web server
 - Multiple LLM provider APIs
 

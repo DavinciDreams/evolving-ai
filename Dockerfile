@@ -50,4 +50,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
 # Run behind reverse proxies (Traefik/Cloudflare) with forwarded headers enabled
-CMD uvicorn evolving_agent.utils.api_server:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips="*"
+CMD uvicorn evolving_agent.utils.api_server:app --host 0.0.0.0 --port ${PORT} --workers 1 --timeout-graceful-shutdown 30 --proxy-headers --forwarded-allow-ips="*"

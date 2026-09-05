@@ -5,6 +5,7 @@ This is the thin entry point. Route handlers live in evolving_agent/api/routes/.
 """
 
 import asyncio
+import hmac
 import os
 import signal
 from contextlib import asynccontextmanager
@@ -14,13 +15,19 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 
 import evolving_agent.utils.app_state as app_state
 from evolving_agent.core.agent import SelfImprovingAgent
 from evolving_agent.integrations.discord_integration import DiscordIntegration
 from evolving_agent.self_modification.github_enhanced_modifier import GitHubEnabledSelfModifier
 from evolving_agent.utils.config import config
-from evolving_agent.utils.deps import API_KEY_HEADER, get_agent, verify_api_key  # noqa: F401 — re-exported for tests and routers
+from evolving_agent.utils.deps import (  # noqa: F401 — re-exported for tests and routers
+    API_KEY_HEADER,
+    authenticate_request,
+    get_agent,
+    verify_api_key,
+)
 from evolving_agent.utils.error_recovery import error_recovery_manager
 from evolving_agent.utils.logging import setup_logger
 
@@ -39,9 +46,47 @@ logger = setup_logger(__name__)
 graceful_shutdown_timeout = 30
 
 
+def _validate_separate_service_credentials() -> None:
+    """Fail closed when unrelated capabilities share one bearer credential."""
+    credentials = {
+        "HAM_API_KEY": config.ham_api_key,
+        "PROJECT_API_KEY": config.api_key,
+        "GITHUB_TOKEN": os.getenv("GITHUB_TOKEN", ""),
+    }
+    configured = [(name, value) for name, value in credentials.items() if value]
+    for index, (left_name, left_value) in enumerate(configured):
+        for right_name, right_value in configured[index + 1 :]:
+            if hmac.compare_digest(left_value, right_value):
+                raise RuntimeError(
+                    f"{left_name} and {right_name} must be distinct least-privilege credentials"
+                )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup the agent with graceful shutdown."""
+    _validate_separate_service_credentials()
+    if os.getenv("WEB_CONCURRENCY", "1") != "1":
+        raise RuntimeError("Steward runtime requires exactly one worker")
+    app_state.server_shutdown = False
+    from evolving_agent.integrations.media import MediaService
+    from evolving_agent.integrations.connectors import ConnectorService
+    app.state.media_service = MediaService.from_env(config)
+    app.state.connector_service = ConnectorService.from_env(config)
+    app.state.service_tasks = set()
+    app.state.discord_task = None
+
+    def observe_service(task):
+        """Keep external listeners visible and consume failures without payloads."""
+        app.state.service_tasks.add(task)
+        def finished(done):
+            app.state.service_tasks.discard(done)
+            if not done.cancelled():
+                error = done.exception()
+                if error is not None:
+                    logger.warning("External listener failed: {}", type(error).__name__)
+        task.add_done_callback(finished)
+        return task
 
     async def initialize_agent():
         """Initialize the core Self-Improving Agent."""
@@ -61,9 +106,10 @@ async def lifespan(app: FastAPI):
             app_state.github_modifier = GitHubEnabledSelfModifier(
                 github_token=github_token, repo_name=github_repo, local_repo_path=local_repo_path
             )
-            await app_state.github_modifier.initialize()
+            # Read-only dashboard connects lazily in its bounded snapshot worker.
+            # Never invoke legacy synchronous SDK/retry initialization at startup.
             app_state.agent.github_modifier = app_state.github_modifier
-            logger.info("GitHub integration initialized successfully")
+            logger.info("Read-only GitHub integration configured; connection is lazy")
         else:
             logger.warning(
                 "GitHub credentials not found. GitHub features will be unavailable."
@@ -80,8 +126,9 @@ async def lifespan(app: FastAPI):
             )
             await app_state.discord_integration.initialize()
 
-            asyncio.create_task(app_state.discord_integration.start())
-            logger.info("Discord integration started successfully")
+            app.state.discord_task = observe_service(asyncio.create_task(
+                app_state.discord_integration.start(), name="katbot-discord-listener"))
+            logger.info("Discord listener scheduled; connection not yet confirmed")
         else:
             logger.info(
                 "Discord integration disabled or token not configured. "
@@ -93,20 +140,34 @@ async def lifespan(app: FastAPI):
         if app_state.discord_integration:
             logger.info("Shutting down Discord integration...")
             try:
-                await app_state.discord_integration.close()
-                logger.info("Discord integration shut down successfully")
+                closing = observe_service(asyncio.create_task(app_state.discord_integration.close()))
+                done, _ = await asyncio.wait({closing}, timeout=2)
+                if closing in done:
+                    closing.result()
+                else:
+                    closing.cancel()
+                    logger.warning("Discord close pending; supervisor grace required")
             except Exception as e:
-                logger.error(f"Error shutting down Discord: {e}")
+                logger.error("Discord cleanup failed: {}", type(e).__name__)
+            finally:
+                # A failed close must not skip stopping the listener.
+                listener = app.state.discord_task
+                if listener is not None and not listener.done():
+                    listener.cancel()
+                    await asyncio.wait({listener}, timeout=2)
 
     async def cleanup_agent():
         """Safely clean up the agent."""
         if app_state.agent:
             logger.info("Cleaning up agent...")
             try:
-                await app_state.agent.cleanup()
-                logger.info("Agent cleanup completed")
+                drained = await app_state.agent.cleanup()
+                if drained is False:
+                    logger.warning("Agent still has pending cleanup; supervisor grace required")
+                else:
+                    logger.info("Agent cleanup completed")
             except Exception as e:
-                logger.error(f"Error during agent cleanup: {e}")
+                logger.error("Agent cleanup failed: {}", type(e).__name__)
 
     async def cleanup_error_recovery():
         """Clean up error recovery manager checkpoints."""
@@ -114,7 +175,7 @@ async def lifespan(app: FastAPI):
             error_recovery_manager.cleanup_old_checkpoints()
             logger.info("Error recovery resources cleaned up")
         except Exception as e:
-            logger.error(f"Error cleaning up error recovery: {e}")
+            logger.error("Recovery cleanup failed: {}", type(e).__name__)
 
     async def graceful_shutdown():
         """Execute all cleanup operations in order."""
@@ -123,6 +184,10 @@ async def lifespan(app: FastAPI):
 
         await cleanup_discord()
         await cleanup_agent()
+        if app_state.github_modifier is not None:
+            service = getattr(app_state.github_modifier, "read_service", None)
+            if service is not None:
+                await service.close()
         await cleanup_error_recovery()
 
         logger.info("Graceful shutdown completed")
@@ -134,6 +199,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await graceful_shutdown()
+        await app.state.media_service.close()
 
 
 # FastAPI app initialization
@@ -148,10 +214,12 @@ app = FastAPI(
     * **Interactive Chat**: Send queries and receive intelligent responses
     * **Memory System**: Persistent long-term memory using vector embeddings
     * **Web Search**: Real-time web search with multiple provider support
-    * **Self-Analysis**: Code analysis and improvement recommendations
-    * **Knowledge Management**: Automatic knowledge extraction and organization
+    * **Dream Consolidation**: Source-preserving evidence and labeled hypotheses
+    * **Measured Learning**: Bounded fixture experiments, explicit promotion, and rollback
+    * **Knowledge Management**: Explicitly configured knowledge extraction
     * **Multi-LLM Support**: OpenAI, Anthropic, and OpenRouter integration
-    * **GitHub Integration**: Automated code improvements via pull requests
+    * **GitHub Integration**: Read-only repository activity; legacy direct mutations retired
+    * **Media and Connectors**: Opt-in audio, vision, and signed review-only webhook intake
     * **Discord Integration**: Real-time chat bot interface
     * **OpenAI Compatible**: Drop-in `/v1/chat/completions` endpoint for standard tooling
 
@@ -161,7 +229,7 @@ app = FastAPI(
     2. Send a query using `/chat`
     3. Search the web with `/web-search`
     4. Explore memories with `/memories`
-    5. Trigger code analysis with `/analyze`
+    5. Inspect `/steward/status`; configure measured experiments before activation
     """,
     version="1.0.0",
     contact={
@@ -193,6 +261,48 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(RequestValidationError)
+async def safe_validation_error(request: Request, exc: RequestValidationError):
+    """Pydantic's default input field can echo uploaded media or secret values."""
+    return JSONResponse(status_code=422, content={"detail": "Invalid request fields; consult the endpoint schema"},
+                        headers={"Cache-Control": "no-store"})
+
+
+_PUBLIC_API_PATHS = frozenset({
+    "/",
+    "/health",
+    "/openapi.json",
+    "/docs",
+    "/docs/oauth2-redirect",
+    "/redoc",
+    "/public/memories",
+})
+
+
+@app.middleware("http")
+async def project_authorization_middleware(request: Request, call_next):
+    """Enforce project auth centrally so newly added routes are private by default."""
+    is_public = request.method == "OPTIONS" or request.url.path in _PUBLIC_API_PATHS
+    if not is_public:
+        try:
+            authenticate_request(request)
+        except Exception as exc:
+            from fastapi import HTTPException
+
+            if isinstance(exc, HTTPException):
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content={"detail": exc.detail},
+                    headers={"Cache-Control": "no-store"},
+                )
+            raise
+
+    response = await call_next(request)
+    if not is_public:
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 # Error recovery middleware
 @app.middleware("http")
 async def error_recovery_middleware(request: Request, call_next):
@@ -206,7 +316,7 @@ async def error_recovery_middleware(request: Request, call_next):
         # Let HTTP exceptions propagate normally
         raise e
     except Exception as e:
-        logger.error(f"Unhandled error in request {request.url}: {e}")
+        logger.error("Unhandled request error: {} {}", request.method, type(e).__name__)
 
         # Check if we should return a degraded response
         if error_recovery_manager.is_degraded_mode():
@@ -242,6 +352,9 @@ from evolving_agent.api.routes.memory import router as memory_router
 from evolving_agent.api.routes.self_improvement import router as self_improvement_router
 from evolving_agent.api.routes.system import router as system_router
 from evolving_agent.api.routes.web_search import router as web_search_router
+from evolving_agent.api.routes.steward import router as steward_router
+from evolving_agent.api.routes.media import router as media_router
+from evolving_agent.api.routes.connectors import router as connectors_router
 
 app.include_router(general_router)
 app.include_router(interaction_router)
@@ -253,6 +366,9 @@ app.include_router(discord_router)
 app.include_router(web_search_router)
 app.include_router(system_router)
 app.include_router(feedback_router)
+app.include_router(steward_router)
+app.include_router(media_router)
+app.include_router(connectors_router)
 
 
 # ---------------------------------------------------------------------------

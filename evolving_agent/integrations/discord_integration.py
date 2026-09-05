@@ -1,16 +1,16 @@
 """Core Discord integration for self-improving AI agent."""
 
 import asyncio
-import discord
-import httpx
-from typing import Optional, Dict, Any, List, Callable
-from loguru import logger
+import io
 from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
+
+import discord
+from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .discord_formatter import DiscordFormatter
 from .discord_rate_limiter import RateLimiter
-from ..utils.llm_interface import llm_manager
 
 
 class DiscordIntegration:
@@ -69,9 +69,15 @@ class DiscordIntegration:
         self.use_embeds = config.discord_embed_responses
         self.show_typing = config.discord_typing_indicator
         self.status_updates_enabled = config.discord_status_updates_enabled
-
-        # API server configuration for GitHub integration
-        self.api_server_url = getattr(config, 'api_server_url', 'http://localhost:8000')
+        self.max_message_length = min(
+            max(int(config.discord_max_message_length), 1),
+            DiscordFormatter.MAX_MESSAGE_LENGTH,
+        )
+        self.attachment_threshold = max(
+            int(config.discord_attachment_threshold),
+            DiscordFormatter.MAX_EMBED_DESCRIPTION + 1,
+        )
+        self.max_attachment_bytes = max(int(config.discord_max_attachment_bytes), 1)
 
         # State
         self.initialized = False
@@ -91,8 +97,7 @@ class DiscordIntegration:
         @self.client.event
         async def on_ready():
             """Called when Discord bot is ready."""
-            logger.info(f"Discord bot logged in as {self.client.user}")
-            logger.info(f"Bot ID: {self.client.user.id}")
+            logger.info("Discord bot connected")
             logger.info(f"Connected to {len(self.client.guilds)} guilds")
 
             # Set bot status
@@ -129,19 +134,19 @@ class DiscordIntegration:
                 await self.handle_message(message)
 
             except Exception as e:
-                logger.error(f"Error in on_message: {e}", exc_info=True)
+                logger.error("Discord message handling failed")
                 try:
                     error_embed = self.formatter.format_error_message(
-                        str(e), user_friendly=True
+                        "Discord operation failed", user_friendly=True
                     )
                     await message.channel.send(embed=error_embed)
                 except Exception as send_error:
-                    logger.error(f"Failed to send error message: {send_error}")
+                    logger.error("Discord error notice delivery failed")
 
         @self.client.event
         async def on_error(event: str, *args, **kwargs):
             """Called when an error occurs."""
-            logger.error(f"Discord error in {event}: {args}", exc_info=True)
+            logger.error("Discord event handling failed")
 
         @self.client.event
         async def on_disconnect():
@@ -184,7 +189,7 @@ class DiscordIntegration:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to initialize Discord integration: {e}")
+            logger.error("Discord initialization failed")
             return False
 
     async def start(self):
@@ -194,7 +199,7 @@ class DiscordIntegration:
             logger.info("Starting Discord bot...")
             await self.client.start(self.bot_token)
         except Exception as e:
-            logger.error(f"Failed to start Discord bot: {e}")
+            logger.error("Discord connection failed")
             self.is_running = False
             raise
 
@@ -212,7 +217,7 @@ class DiscordIntegration:
             logger.info("Discord bot shutdown complete")
 
         except Exception as e:
-            logger.error(f"Error during Discord bot shutdown: {e}")
+            logger.error("Discord shutdown failed")
 
     async def handle_message(self, message: discord.Message):
         """Handle incoming Discord message.
@@ -229,23 +234,16 @@ class DiscordIntegration:
             query = query.replace(f"<@{bot_user.id}>", "").strip()
             query = query.replace(f"<@!{bot_user.id}>", "").strip()
 
+        query = query.strip()
         if not query:
             return
 
-        # Check for feature request commands
-        if query.startswith('!feature ') or query.startswith('!request '):
-            await self.handle_feature_request(message)
-            return
-
-        logger.info(
-            f"Received message from {message.author} "
-            f"in #{message.channel.name}: {query[:100]}..."
-        )
+        logger.info("Discord message received")
 
         # Check rate limit
         if self.rate_limiter.is_user_rate_limited(user_id):
             cooldown = self.rate_limiter.get_remaining_cooldown(user_id)
-            logger.warning(f"User {user_id} is rate limited")
+            logger.warning("Discord message rate limited")
 
             rate_limit_embed = self.formatter.format_rate_limit_message(cooldown)
             await message.channel.send(embed=rate_limit_embed)
@@ -253,6 +251,11 @@ class DiscordIntegration:
 
         # Record request
         self.rate_limiter.add_request(user_id)
+
+        # Retired commands must never enter the model or a publication adapter.
+        if query.split(maxsplit=1)[0].lower() in {"!feature", "!request"}:
+            await self.handle_feature_request(message)
+            return
 
         # Show typing indicator if enabled
         async with message.channel.typing() if self.show_typing else self._noop_context():
@@ -289,15 +292,12 @@ class DiscordIntegration:
                     processing_time=processing_time
                 )
 
-                logger.info(
-                    f"Sent response to {message.author} "
-                    f"(processing time: {processing_time:.2f}s)"
-                )
+                logger.info(f"Discord response sent (processing time: {processing_time:.2f}s)")
 
             except Exception as e:
-                logger.error(f"Error processing message: {e}", exc_info=True)
+                logger.error("Discord message processing failed")
                 error_embed = self.formatter.format_error_message(
-                    str(e), user_friendly=True
+                    "Discord operation failed", user_friendly=True
                 )
                 await message.channel.send(embed=error_embed)
 
@@ -324,26 +324,87 @@ class DiscordIntegration:
             evaluation_score: Optional evaluation score
             processing_time: Optional processing time in seconds
         """
-        try:
-            # Format response
-            messages = self.formatter.format_agent_response(
-                response=response,
-                query_id=query_id,
-                evaluation_score=evaluation_score,
-                processing_time=processing_time,
-                use_embed=self.use_embeds
-            )
+        response_bytes = response.encode("utf-8")
+        if (
+            len(response) >= self.attachment_threshold
+            and len(response_bytes) <= self.max_attachment_bytes
+        ):
+            try:
+                await self._send_attachment_with_retry(
+                    channel,
+                    response_bytes,
+                    "The complete response is attached because it exceeds Discord's message limits.",
+                )
+                return
+            except Exception as exc:
+                logger.warning(
+                    f"Discord attachment delivery failed; falling back to chunks: {type(exc).__name__}"
+                )
 
-            # Send all message parts
+        messages = self.formatter.format_agent_response(
+            response=response,
+            query_id=query_id,
+            evaluation_score=evaluation_score,
+            processing_time=processing_time,
+            use_embed=self.use_embeds,
+            max_message_length=self.max_message_length,
+        )
+
+        sent_count = 0
+        try:
             for msg in messages:
                 if isinstance(msg, discord.Embed):
                     await self._send_with_retry(channel, embed=msg)
                 else:
                     await self._send_with_retry(channel, content=msg)
+                sent_count += 1
+        except Exception as exc:
+            logger.error(
+                f"Discord chunk delivery stopped after {sent_count}/{len(messages)} parts: "
+                f"{type(exc).__name__}"
+            )
+            if len(response_bytes) <= self.max_attachment_bytes:
+                try:
+                    await self._send_attachment_with_retry(
+                        channel,
+                        response_bytes,
+                        f"Chunk delivery stopped after {sent_count}/{len(messages)} parts; "
+                        "the complete response is attached.",
+                    )
+                    return
+                except Exception as attachment_exc:
+                    raise RuntimeError(
+                        f"Discord delivery incomplete: {sent_count}/{len(messages)} parts "
+                        "sent and attachment fallback failed"
+                    ) from attachment_exc
+            raise RuntimeError(
+                f"Discord delivery failed after {sent_count}/{len(messages)} parts and "
+                "the response exceeds the configured attachment limit"
+            ) from exc
 
-        except Exception as e:
-            logger.error(f"Failed to send response: {e}", exc_info=True)
-            raise
+    async def _send_attachment_with_retry(
+        self,
+        channel: discord.TextChannel,
+        response_bytes: bytes,
+        notice: str,
+    ) -> discord.Message:
+        """Upload a fresh file object on each attempt so retries remain valid."""
+        last_error: Optional[Exception] = None
+        for attempt in range(1, 4):
+            buffer = io.BytesIO(response_bytes)
+            attachment = discord.File(buffer, filename="katbot-response.txt")
+            try:
+                return await channel.send(content=notice, file=attachment)
+            except discord.HTTPException as exc:
+                last_error = exc
+                logger.warning(
+                    f"Discord attachment attempt {attempt}/3 failed: {type(exc).__name__}"
+                )
+                if attempt < 3:
+                    await asyncio.sleep(2 ** (attempt - 1))
+            finally:
+                attachment.close()
+        raise RuntimeError("Discord attachment failed after 3 attempts") from last_error
 
     async def handle_status_update(self, event_type: str, data: Dict[str, Any]):
         """Handle status update from agent.
@@ -362,12 +423,12 @@ class DiscordIntegration:
             return
 
         try:
-            logger.info(f"Posting status update: {event_type}")
+            logger.info("Posting Discord status update")
 
             # Get status channel
             channel = self.client.get_channel(self.status_channel_id)
             if not channel:
-                logger.error(f"Status channel {self.status_channel_id} not found")
+                logger.error("Discord status channel unavailable")
                 return
 
             # Format status update
@@ -376,10 +437,10 @@ class DiscordIntegration:
             # Send status update
             await self._send_with_retry(channel, embed=embed)
 
-            logger.info(f"Posted status update: {event_type}")
+            logger.info("Discord status update posted")
 
         except Exception as e:
-            logger.error(f"Failed to post status update: {e}", exc_info=True)
+            logger.error("Discord status update failed")
 
     async def _post_startup_status(self):
         """Post startup status message."""
@@ -392,7 +453,7 @@ class DiscordIntegration:
                 embed = self.formatter.format_status_update("agent_startup", data)
                 await channel.send(embed=embed)
         except Exception as e:
-            logger.error(f"Failed to post startup status: {e}")
+            logger.error("Discord startup notice failed")
 
     async def _post_shutdown_status(self):
         """Post shutdown status message."""
@@ -407,7 +468,7 @@ class DiscordIntegration:
                 )
                 await channel.send(embed=embed)
         except Exception as e:
-            logger.error(f"Failed to post shutdown status: {e}")
+            logger.error("Discord shutdown notice failed")
 
     @retry(
         stop=stop_after_attempt(3),
@@ -435,7 +496,7 @@ class DiscordIntegration:
         try:
             return await channel.send(content=content, embed=embed)
         except discord.HTTPException as e:
-            logger.warning(f"Failed to send message (retrying): {e}")
+            logger.warning("Discord message delivery failed; retrying")
             raise
 
     def _noop_context(self):
@@ -450,302 +511,35 @@ class DiscordIntegration:
         return NoopContext()
 
     async def _convert_feature_to_technical_spec(
-        self,
-        feature_request: str,
-        user_name: str
+        self, feature_request: str, user_name: str
     ) -> Dict[str, str]:
-        """Convert a feature request into a technical specification using LLM.
-
-        Args:
-            feature_request: The raw feature request from the user
-            user_name: Name of the user who submitted the request
-
-        Returns:
-            Dictionary with 'title' and 'description' for the GitHub issue
-        """
-        system_prompt = """You are a technical product manager and software architect.
-Your task is to convert user feature requests into well-structured technical specifications
-for GitHub issues.
-
-The output should include:
-1. A clear, concise title (max 100 characters)
-2. A detailed technical description that includes:
-   - Problem statement
-   - Proposed solution
-   - Technical requirements
-   - Acceptance criteria
-   - Potential implementation approach
-
-Format your response as JSON with keys 'title' and 'description'."""
-
-        user_prompt = f"""Convert the following feature request into a technical specification:
-
-User: {user_name}
-Feature Request: {feature_request}
-
-Respond with a JSON object containing 'title' and 'description' keys."""
-
-        try:
-            response = await llm_manager.generate_response(
-                prompt=user_prompt,
-                system_prompt=system_prompt,
-                temperature=0.3,
-                max_tokens=2000
-            )
-
-            # Try to parse JSON response
-            import json
-            try:
-                # Clean up the response in case it contains markdown
-                response = response.strip()
-                if response.startswith('```json'):
-                    response = response[7:]
-                if response.startswith('```'):
-                    response = response[3:]
-                if response.endswith('```'):
-                    response = response[:-3]
-                response = response.strip()
-
-                spec = json.loads(response)
-                
-                # Ensure required keys exist
-                if 'title' not in spec or 'description' not in spec:
-                    raise ValueError("Missing required keys in LLM response")
-
-                # Add metadata to description
-                spec['description'] = f"""## Feature Request
-
-**Submitted by:** {user_name}
-**Original Request:**
-```
-{feature_request}
-```
-
----
-
-{spec['description']}
-"""
-
-                return spec
-
-            except json.JSONDecodeError:
-                logger.warning("Failed to parse LLM response as JSON, using fallback")
-                # Fallback: create a simple spec
-                title = f"Feature: {feature_request[:50]}..."
-                description = f"""## Feature Request
-
-**Submitted by:** {user_name}
-**Original Request:**
-```
-{feature_request}
-```
-
----
-
-### Technical Specification
-
-{response}
-
-### Implementation Notes
-
-This feature request was submitted via Discord and needs to be reviewed by the development team.
-"""
-                return {'title': title, 'description': description}
-
-        except Exception as e:
-            logger.error(f"Error converting feature to technical spec: {e}")
-            # Fallback to simple format
-            title = f"Feature Request from {user_name}"
-            description = f"""## Feature Request
-
-**Submitted by:** {user_name}
-**Original Request:**
-```
-{feature_request}
-```
-
----
-
-### Technical Specification
-
-This feature request was submitted via Discord. The AI system encountered an error while
-generating a detailed technical specification. Please review the original request and
-create a proper technical specification.
-
-### Implementation Notes
-
-This feature request needs to be reviewed by the development team.
-"""
-            return {'title': title, 'description': description}
+        """Retired: Discord commands do not authorize unbounded model work."""
+        raise RuntimeError("Legacy Discord feature conversion is retired")
 
     async def _create_github_issue(
-        self,
-        title: str,
-        description: str,
-        labels: Optional[List[str]] = None
+        self, title: str, description: str, labels: Optional[List[str]] = None
     ) -> Dict[str, Any]:
-        """Create a GitHub issue via the API server.
-
-        Args:
-            title: Issue title
-            description: Issue description
-            labels: Optional list of labels
-
-        Returns:
-            Dictionary with issue details or error information
-        """
-        url = f"{self.api_server_url}/github/issue"
-        
-        payload = {
-            "title": title,
-            "description": description,
-            "labels": labels or ["enhancement", "discord-request"]
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
-                return response.json()
-
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error creating GitHub issue: {e.response.status_code} - {e.response.text}")
-            return {
-                "error": f"HTTP error {e.response.status_code}",
-                "details": e.response.text
-            }
-        except httpx.RequestError as e:
-            logger.error(f"Request error creating GitHub issue: {e}")
-            return {
-                "error": "Failed to connect to API server",
-                "details": str(e)
-            }
-        except Exception as e:
-            logger.error(f"Unexpected error creating GitHub issue: {e}")
-            return {
-                "error": "Unexpected error",
-                "details": str(e)
-            }
+        """Retired: Discord messages cannot grant repository publication authority."""
+        return {"error": "retired", "details": "Direct Discord issue publication is retired"}
 
     async def handle_feature_request(self, message: discord.Message):
-        """Handle a feature request command from Discord.
-
-        Args:
-            message: Discord message object
-        """
-        user_id = message.author.id
-        user_name = message.author.name
-
-        # Extract the feature request (remove command prefix)
-        query = message.content
-        if query.startswith('!feature '):
-            feature_request = query[9:].strip()
-        elif query.startswith('!request '):
-            feature_request = query[9:].strip()
-        else:
-            await message.channel.send(
-                embed=self.formatter.format_error_message(
-                    "Invalid command. Use `!feature <your request>` or `!request <your request>`"
-                )
-            )
-            return
-
-        if not feature_request:
-            await message.channel.send(
-                embed=self.formatter.format_error_message(
-                    "Please provide a feature request. Usage: `!feature <your request>`"
-                )
-            )
-            return
-
-        logger.info(
-            f"Processing feature request from {user_name}: {feature_request[:100]}..."
+        """Acknowledge retirement without parsing, storing, or converting payloads."""
+        logger.info("Retired Discord feature command received")
+        embed = discord.Embed(
+            title="Feature submission retired",
+            description=(
+                "The !feature and !request commands no longer generate specifications "
+                "or publish GitHub issues. No request was submitted or saved. "
+                "Use a separately authorized repository workflow; measured strategy "
+                "evaluation is available in the private steward dashboard."
+            ),
+            color=DiscordFormatter.COLOR_WARNING,
         )
-
-        # Check rate limit
-        if self.rate_limiter.is_user_rate_limited(user_id):
-            cooldown = self.rate_limiter.get_remaining_cooldown(user_id)
-            logger.warning(f"User {user_id} is rate limited")
-
-            rate_limit_embed = self.formatter.format_rate_limit_message(cooldown)
-            await message.channel.send(embed=rate_limit_embed)
-            return
-
-        # Record request
-        self.rate_limiter.add_request(user_id)
-
-        # Show typing indicator if enabled
-        async with message.channel.typing() if self.show_typing else self._noop_context():
-            try:
-                # Send initial processing message
-                processing_embed = discord.Embed(
-                    title="🔄 Processing Feature Request",
-                    description="Converting your request to a technical specification and creating a GitHub issue...",
-                    color=0xFFA500,  # Orange
-                    timestamp=datetime.utcnow()
-                )
-                await message.channel.send(embed=processing_embed)
-
-                # Step 1: Convert to technical spec
-                spec = await self._convert_feature_to_technical_spec(
-                    feature_request,
-                    user_name
-                )
-
-                # Step 2: Create GitHub issue
-                result = await self._create_github_issue(
-                    title=spec['title'],
-                    description=spec['description'],
-                    labels=["enhancement", "discord-request"]
-                )
-
-                # Step 3: Send response
-                if 'error' in result:
-                    error_embed = discord.Embed(
-                        title="❌ Failed to Create GitHub Issue",
-                        description=f"An error occurred while creating the GitHub issue:\n```\n{result.get('details', 'Unknown error')}\n```\n\nYour feature request has been logged but not submitted to GitHub.",
-                        color=0xFF0000,  # Red
-                        timestamp=datetime.utcnow()
-                    )
-                    await message.channel.send(embed=error_embed)
-                else:
-                    success_embed = discord.Embed(
-                        title="✅ Feature Request Submitted",
-                        description=f"Your feature request has been converted to a technical specification and submitted to GitHub!",
-                        color=0x00FF00,  # Green
-                        timestamp=datetime.utcnow()
-                    )
-                    success_embed.add_field(
-                        name="Issue Number",
-                        value=f"#{result.get('issue_number', 'N/A')}",
-                        inline=True
-                    )
-                    success_embed.add_field(
-                        name="Issue URL",
-                        value=result.get('issue_url', 'N/A'),
-                        inline=False
-                    )
-                    success_embed.add_field(
-                        name="Title",
-                        value=spec['title'][:100] + ('...' if len(spec['title']) > 100 else ''),
-                        inline=False
-                    )
-                    success_embed.set_footer(
-                        text=f"Requested by {user_name}"
-                    )
-                    await message.channel.send(embed=success_embed)
-
-                logger.info(
-                    f"Feature request from {user_name} processed. "
-                    f"Issue: #{result.get('issue_number', 'N/A')}"
-                )
-
-            except Exception as e:
-                logger.error(f"Error processing feature request: {e}", exc_info=True)
-                error_embed = self.formatter.format_error_message(
-                    f"An error occurred while processing your feature request: {str(e)}"
-                )
-                await message.channel.send(embed=error_embed)
+        try:
+            async with asyncio.timeout(10):
+                await message.channel.send(embed=embed)
+        except TimeoutError:
+            logger.warning("Discord retirement notice delivery timed out")
 
     def get_stats(self) -> Dict[str, Any]:
         """Get Discord integration statistics.

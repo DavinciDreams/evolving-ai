@@ -86,7 +86,7 @@ def _make_eval_result(overall_score: float = 0.9) -> EvaluationResult:
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def agent():
+async def agent():
     """Return a SelfImprovingAgent whose __init__ is bypassed and whose
     every external dependency is replaced with a mock so no real I/O occurs."""
     with patch.object(SelfImprovingAgent, "__init__", return_value=None):
@@ -126,14 +126,16 @@ def agent():
     a._generate_response = AsyncMock(return_value="Test answer")
     # _improve_response now returns (response_str, EvaluationResult)
     a._improve_response = AsyncMock(return_value=("Improved answer", _make_eval_result()))
-    a._store_interaction = AsyncMock()
+    a._store_interaction = AsyncMock(return_value=True)
     a._store_error = AsyncMock()
     a._is_self_edit_request = MagicMock(return_value=False)
     a._handle_self_edit_request = AsyncMock(return_value="Self-edit response")
     a._consider_self_modification = AsyncMock()
     a._notify_status = AsyncMock()
 
-    return a
+    yield a
+    if hasattr(a, "runtime"):
+        await a.runtime.close()
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +223,7 @@ async def test_run_waits_for_storage_when_requested(agent):
     with patch("evolving_agent.core.agent.config", _make_config()):
         await agent.run("hello", wait_for_storage=True)
 
+    await _drain_tasks()
     agent.data_manager.save_interaction.assert_called_once()
     agent._store_interaction.assert_called_once()
 
@@ -236,6 +239,7 @@ async def test_run_wait_for_storage_defers_heavy_maintenance(agent):
     ):
         await agent.run("hello", wait_for_storage=True)
 
+    await _drain_tasks()
     agent.data_manager.save_interaction.assert_called_once()
     agent._store_interaction.assert_called_once()
     agent._run_post_response_maintenance.assert_called_once()
@@ -286,21 +290,20 @@ async def test_run_detects_self_edit_request(agent):
     agent._store_interaction.assert_called_once()
 
 
-async def test_run_triggers_self_modification_every_10_interactions(agent):
-    """_consider_self_modification must be called when interaction_count becomes
-    a multiple of 10 after the increment inside run()."""
+async def test_legacy_flag_cannot_trigger_automatic_repository_mutation(agent):
+    """Periodic code mutation is retired even with a stale enabled deployment flag."""
     # Start at 9 so the increment brings it to 10.
     agent.interaction_count = 9
 
     with patch(
         "evolving_agent.core.agent.config",
-        _make_config(enable_self_modification=True),
+        _make_config(enable_self_modification=True, enable_evaluation=True),
     ):
         await agent.run("hello")
         await _drain_tasks()  # drain inside patch so background task sees mocked config
 
     assert agent.interaction_count == 10
-    agent._consider_self_modification.assert_called_once()
+    agent._consider_self_modification.assert_not_called()
 
 
 async def test_run_does_not_trigger_self_modification_on_other_counts(agent):
@@ -336,7 +339,7 @@ async def test_run_updates_knowledge_when_enabled(agent):
     must be called after the interaction is stored."""
     with patch(
         "evolving_agent.core.agent.config",
-        _make_config(auto_update_knowledge=True),
+        _make_config(auto_update_knowledge=True, enable_evaluation=True),
     ):
         await agent.run("hello")
         await _drain_tasks()  # drain inside patch so background task sees mocked config
@@ -355,3 +358,46 @@ async def test_run_skips_knowledge_update_when_disabled(agent):
         await _drain_tasks()  # drain inside patch so background task sees mocked config
 
     agent.knowledge_updater.update_from_interaction.assert_not_called()
+
+
+async def test_disabled_evaluation_never_persists_fake_score(agent):
+    with patch("evolving_agent.core.agent.config", _make_config()):
+        await agent.run("hello", wait_for_storage=True)
+    assert agent.last_evaluation_score is None
+    assert agent.data_manager.save_interaction.call_args.kwargs["evaluation_score"] is None
+    agent.data_manager.save_evaluation.assert_not_called()
+
+
+async def test_blank_generation_fails_without_success_memory(agent):
+    agent._generate_response.return_value = "  "
+    with patch("evolving_agent.core.agent.config", _make_config()):
+        with pytest.raises(RuntimeError, match="no usable response"):
+            await agent.run("hello", wait_for_storage=True)
+    agent._store_interaction.assert_not_called()
+
+
+async def test_evaluation_timeout_preserves_answer(agent, monkeypatch):
+    monkeypatch.setenv("EVALUATION_TIMEOUT_SECONDS", "0.01")
+    async def slow(**kwargs):
+        await asyncio.sleep(10)
+    agent.evaluator.evaluate_output.side_effect = slow
+    with patch("evolving_agent.core.agent.config", _make_config(enable_evaluation=True)):
+        assert await agent.run("hello", wait_for_storage=True) == "Test answer"
+    assert agent.last_evaluation_score is None
+    agent._improve_response.assert_not_called()
+
+
+async def test_storage_redacts_query_and_reports_failed_memory(agent):
+    agent._store_interaction.return_value = False
+    with patch("evolving_agent.core.agent.config", _make_config()):
+        await agent.run("api_key=example-not-a-real-key", wait_for_storage=True)
+    assert "example-not-a-real-key" not in agent.data_manager.save_interaction.call_args.kwargs["query"]
+    assert agent.last_storage_status["memory_stored"] is False
+
+
+async def test_secret_redacted_before_retrieval_and_generation(agent):
+    with patch("evolving_agent.core.agent.config", _make_config()):
+        await agent.run("api_key=synthetic-secret-value", wait_for_storage=True)
+    assert "synthetic-secret-value" not in str(agent.context_manager.get_relevant_context.call_args)
+    assert "synthetic-secret-value" not in str(agent._generate_response.call_args)
+    assert "synthetic-secret-value" not in str(agent.data_manager.save_interaction.call_args)

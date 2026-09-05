@@ -403,7 +403,9 @@ class ContextManager:
 
             for memory, similarity in memories:
                 # Recency score (newer = higher score)
-                time_diff = current_time - memory.timestamp
+                memory_time = memory.timestamp
+                now = datetime.now(memory_time.tzinfo) if memory_time.tzinfo else current_time
+                time_diff = now - memory_time
                 recency_score = max(
                     0, 1 - (time_diff.total_seconds() / (30 * 24 * 3600))
                 )  # 30 days decay

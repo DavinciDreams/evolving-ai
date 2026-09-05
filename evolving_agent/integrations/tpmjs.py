@@ -29,6 +29,31 @@ class TPMJSClient:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
+    async def health_check(self) -> Dict[str, Any]:
+        """Return an explicit availability result before tools are exposed."""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(
+                    f"{BASE_URL}/tools",
+                    params={"limit": 1},
+                    headers=self._headers(),
+                )
+                response.raise_for_status()
+                payload = response.json()
+                return {
+                    "available": bool(payload.get("success")),
+                    "replacement": None,
+                }
+        except Exception as exc:
+            logger.warning(
+                f"TPMJS unavailable; built-in tools remain active: {type(exc).__name__}"
+            )
+            return {
+                "available": False,
+                "reason": type(exc).__name__,
+                "replacement": "search_web and execute_code",
+            }
+
     async def search_tools(
         self, query: str, limit: int = 5, category: Optional[str] = None
     ) -> List[Dict[str, Any]]:

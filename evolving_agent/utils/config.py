@@ -57,7 +57,7 @@ class Config:
     @property
     def zai_model(self) -> str:
         """Get Z AI model name."""
-        return os.getenv("ZAI_MODEL", "glm-5")
+        return os.getenv("ZAI_MODEL", "glm-5.1")
 
     @property
     def log_level(self) -> str:
@@ -73,6 +73,55 @@ class Config:
     def memory_persist_directory(self) -> str:
         """Get memory persistence directory."""
         return os.getenv("MEMORY_PERSIST_DIRECTORY", "./memory_db")
+
+    @property
+    def memory_backend(self) -> str:
+        """Get the authoritative memory backend.
+
+        HAM is the production default. ``chroma`` remains available only for
+        local tests and the controlled migration/rollback window.
+        """
+        return os.getenv("MEMORY_BACKEND", "ham").strip().lower()
+
+    @property
+    def legacy_memory_read_only(self) -> bool:
+        """Whether the legacy Chroma backend must reject writes."""
+        return os.getenv("LEGACY_MEMORY_READ_ONLY", "true").lower() == "true"
+
+    @property
+    def ham_api_url(self) -> str:
+        """Get the transport-neutral HAM REST API base URL."""
+        return os.getenv("HAM_API_URL", "https://ham.flobots.xyz").rstrip("/")
+
+    @property
+    def ham_api_key(self) -> str:
+        """Get Katbot's managed HAM service credential."""
+        return os.getenv("HAM_API_KEY", "")
+
+    @property
+    def ham_project(self) -> str:
+        """Get the dedicated HAM project slug for Evolving AI."""
+        return os.getenv("HAM_PROJECT", "evolving-ai")
+
+    @property
+    def ham_scope(self) -> str:
+        """Get the single least-privilege scope requested by Katbot."""
+        return os.getenv("HAM_SCOPE", "project:evolving-ai")
+
+    @property
+    def ham_repo(self) -> str:
+        """Get repository provenance attached to Katbot memories."""
+        return os.getenv("HAM_REPO", "DavinciDreams/evolving-ai")
+
+    @property
+    def ham_expected_agent_id(self) -> str:
+        """Get the server-bound AgentPrincipal expected on HAM writes."""
+        return os.getenv("HAM_EXPECTED_AGENT_ID", "katbot-evolving-ai")
+
+    @property
+    def ham_timeout_seconds(self) -> float:
+        """Get the timeout for HAM REST requests."""
+        return float(os.getenv("HAM_TIMEOUT_SECONDS", "30"))
 
     @property
     def persistent_data_dir(self) -> str:
@@ -95,17 +144,29 @@ class Config:
     @property
     def default_llm_provider(self) -> str:
         """Get default LLM provider."""
-        return os.getenv("DEFAULT_LLM_PROVIDER", "anthropic")
+        return os.getenv("DEFAULT_LLM_PROVIDER", "zai")
 
     @property
     def default_model(self) -> str:
         """Get default model."""
-        return os.getenv("DEFAULT_MODEL", "claude-3-5-sonnet-20241022")
+        return os.getenv("DEFAULT_MODEL", "glm-5.1")
+
+    @property
+    def default_model_override(self) -> str:
+        """Explicit cross-provider model override; empty means provider default."""
+        return os.getenv("DEFAULT_MODEL", "")
+
+    @property
+    def selected_model(self) -> str:
+        """Resolve the exact model shared by chat and bounded learning."""
+        from ..integrations.provider_config import resolve_provider
+
+        return resolve_provider(self).model
 
     @property
     def evaluation_model(self) -> str:
         """Get evaluation model."""
-        return os.getenv("EVALUATION_MODEL", "claude-3-5-sonnet-20241022")
+        return os.getenv("EVALUATION_MODEL", "glm-5.1")
 
     @property
     def evaluation_provider(self) -> str:
@@ -125,12 +186,12 @@ class Config:
     @property
     def enable_self_modification(self) -> bool:
         """Get self-modification setting."""
-        return os.getenv("ENABLE_SELF_MODIFICATION", "true").lower() == "true"
+        return os.getenv("ENABLE_SELF_MODIFICATION", "false").lower() == "true"
 
     @property
     def auto_pr_enabled(self) -> bool:
         """Get automatic PR/issue creation setting for self-improvement."""
-        return os.getenv("AUTO_PR_ENABLED", "true").lower() == "true"
+        return os.getenv("AUTO_PR_ENABLED", "false").lower() == "true"
 
     @property
     def backup_directory(self) -> str:
@@ -170,7 +231,7 @@ class Config:
     @property
     def auto_update_knowledge(self) -> bool:
         """Get auto update knowledge setting."""
-        return os.getenv("AUTO_UPDATE_KNOWLEDGE", "true").lower() == "true"
+        return os.getenv("AUTO_UPDATE_KNOWLEDGE", "false").lower() == "true"
 
     @property
     def knowledge_similarity_threshold(self) -> float:
@@ -208,6 +269,16 @@ class Config:
     def discord_max_message_length(self) -> int:
         """Get Discord max message length."""
         return int(os.getenv("DISCORD_MAX_MESSAGE_LENGTH", "2000"))
+
+    @property
+    def discord_attachment_threshold(self) -> int:
+        """Response length at which Discord delivery switches to an attachment."""
+        return int(os.getenv("DISCORD_ATTACHMENT_THRESHOLD", "12000"))
+
+    @property
+    def discord_max_attachment_bytes(self) -> int:
+        """Conservative upper bound for a Discord response attachment."""
+        return int(os.getenv("DISCORD_MAX_ATTACHMENT_BYTES", "7500000"))
 
     @property
     def discord_typing_indicator(self) -> bool:
@@ -327,7 +398,7 @@ class Config:
     @property
     def iterative_revision_max_rounds(self) -> int:
         """Max revision rounds in the CAI-style iterative improvement loop."""
-        return int(os.getenv("ITERATIVE_REVISION_MAX_ROUNDS", "3"))
+        return min(max(int(os.getenv("ITERATIVE_REVISION_MAX_ROUNDS", "1")), 0), 3)
 
     @property
     def iterative_revision_target_score(self) -> float:
@@ -342,7 +413,7 @@ class Config:
     @property
     def enable_best_of_n(self) -> bool:
         """Enable Best-of-N sampling for low-confidence responses."""
-        return os.getenv("ENABLE_BEST_OF_N", "true").lower() == "true"
+        return os.getenv("ENABLE_BEST_OF_N", "false").lower() == "true"
 
     @property
     def reflexion_interval(self) -> int:
@@ -362,11 +433,18 @@ class Config:
 
     @property
     def api_key(self) -> str:
-        """Get optional API key for write-endpoint authentication.
+        """Get the project-steward API key (legacy ``API_KEY`` is supported)."""
+        return os.getenv("PROJECT_API_KEY", "") or os.getenv("API_KEY", "")
 
-        Returns an empty string when not configured, which disables auth.
-        """
-        return os.getenv("API_KEY", "")
+    @property
+    def api_auth_required(self) -> bool:
+        """Whether non-public API routes require project authentication."""
+        return os.getenv("API_AUTH_REQUIRED", "true").lower() == "true"
+
+    @property
+    def tpmjs_enabled(self) -> bool:
+        """Whether the optional TPMJS registry should be probed and exposed."""
+        return os.getenv("TPMJS_ENABLED", "false").lower() == "true"
 
     def get_all_config(self) -> Dict[str, Any]:
         """Get all configuration as a dictionary."""
@@ -378,6 +456,14 @@ class Config:
             "log_level": self.log_level,
             "log_file": self.log_file,
             "memory_persist_directory": self.memory_persist_directory,
+            "memory_backend": self.memory_backend,
+            "legacy_memory_read_only": self.legacy_memory_read_only,
+            "ham_api_url": self.ham_api_url,
+            "ham_api_key": "***" if self.ham_api_key else "",
+            "ham_project": self.ham_project,
+            "ham_scope": self.ham_scope,
+            "ham_repo": self.ham_repo,
+            "ham_expected_agent_id": self.ham_expected_agent_id,
             "persistent_data_dir": self.persistent_data_dir,
             "memory_collection_name": self.memory_collection_name,
             "max_memory_entries": self.max_memory_entries,
@@ -423,6 +509,8 @@ class Config:
             "e2b_api_key": "***" if self.e2b_api_key else "",
             "scratchpad_dir": self.scratchpad_dir,
             "tpmjs_api_key": "***" if self.tpmjs_api_key else "",
+            "tpmjs_enabled": self.tpmjs_enabled,
+            "api_auth_required": self.api_auth_required,
             "iterative_revision_max_rounds": self.iterative_revision_max_rounds,
             "iterative_revision_target_score": self.iterative_revision_target_score,
             "best_of_n_count": self.best_of_n_count,
