@@ -3,7 +3,7 @@ Dynamic context management for intelligent query processing.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 import asyncio
 
@@ -14,6 +14,17 @@ from ..utils.error_recovery import error_recovery_manager
 from .memory import LongTermMemory, MemoryEntry
 
 logger = setup_logger(__name__)
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Normalize stored timestamps for safe comparison across backends.
+
+    Legacy Chroma records may be naive while HAM returns offset-aware values.
+    Treat naive values as UTC, which matches the historical storage convention.
+    """
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 @dataclass
@@ -501,7 +512,7 @@ class ContextManager:
     async def _get_recent_context(self, hours: int = 24) -> List[Dict[str, Any]]:
         """Get recent interaction context."""
         try:
-            cutoff_time = datetime.now() - timedelta(hours=hours)
+            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
 
             if hasattr(self.memory, "list_recent_memories"):
                 recent_entries = await self.memory.list_recent_memories(limit=20)
@@ -516,11 +527,12 @@ class ContextManager:
             # Filter by time and format
             recent_context = []
             for memory, _ in recent_memories:
-                if memory.timestamp >= cutoff_time:
+                memory_time = _as_utc(memory.timestamp)
+                if memory_time >= cutoff_time:
                     recent_context.append(
                         {
                             "content": memory.content,
-                            "timestamp": memory.timestamp.isoformat(),
+                            "timestamp": memory_time.isoformat(),
                             "memory_type": memory.memory_type,
                         }
                     )
