@@ -50,20 +50,23 @@ class E2BSandbox:
             return {"error": "e2b package not installed"}
 
         try:
-            from e2b import Sandbox
+            from e2b import AsyncSandbox
 
-            sandbox = Sandbox(api_key=self.api_key, timeout=timeout + 10)
+            sandbox = await AsyncSandbox.create(
+                api_key=self.api_key,
+                timeout=timeout + 10,
+            )
             try:
                 if language == "shell":
-                    result = sandbox.commands.run(code, timeout=timeout)
+                    result = await sandbox.commands.run(code, timeout=timeout)
                 elif language == "javascript":
-                    result = sandbox.commands.run(
+                    result = await sandbox.commands.run(
                         f'node -e {json.dumps(code)}',
                         timeout=timeout,
                     )
                 else:
                     # Default: Python
-                    result = sandbox.commands.run(
+                    result = await sandbox.commands.run(
                         f'python3 -c {json.dumps(code)}',
                         timeout=timeout,
                     )
@@ -75,7 +78,7 @@ class E2BSandbox:
                 }
             finally:
                 try:
-                    sandbox.kill()
+                    await sandbox.kill()
                 except Exception:
                     pass
 
@@ -97,15 +100,15 @@ class E2BSandbox:
             return {"error": "e2b package not installed"}
 
         try:
-            from e2b import Sandbox
+            from e2b import AsyncSandbox
 
-            sandbox = Sandbox(api_key=self.api_key)
+            sandbox = await AsyncSandbox.create(api_key=self.api_key)
             try:
-                sandbox.files.write(path, content)
+                await sandbox.files.write(path, content)
                 return {"path": path, "written": True}
             finally:
                 try:
-                    sandbox.kill()
+                    await sandbox.kill()
                 except Exception:
                     pass
         except Exception as e:
@@ -118,15 +121,15 @@ class E2BSandbox:
             return {"error": "e2b package not installed"}
 
         try:
-            from e2b import Sandbox
+            from e2b import AsyncSandbox
 
-            sandbox = Sandbox(api_key=self.api_key)
+            sandbox = await AsyncSandbox.create(api_key=self.api_key)
             try:
-                content = sandbox.files.read(path)
+                content = await sandbox.files.read(path)
                 return {"path": path, "content": content}
             finally:
                 try:
-                    sandbox.kill()
+                    await sandbox.kill()
                 except Exception:
                     pass
         except Exception as e:

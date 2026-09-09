@@ -2,7 +2,7 @@
 Tests for the context manager's error recovery and degraded mode features.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from evolving_agent.core.context_manager import ContextManager, ContextQuery
@@ -181,6 +181,39 @@ async def test_filter_and_rank_memories():
     # Recent memory should rank higher (same similarity, better recency)
     assert len(ranked) == 2
     assert ranked[0][0].content == "Recent content"
+
+
+async def test_recent_context_normalizes_ham_and_legacy_timestamps():
+    """Aware HAM timestamps and naive legacy values can be compared safely."""
+    now = datetime.now(timezone.utc)
+    eastern = timezone(timedelta(hours=-4))
+    aware_recent = MemoryEntry(
+        content="HAM result",
+        memory_type="interaction",
+        timestamp=(now - timedelta(minutes=5)).astimezone(eastern),
+    )
+    naive_recent = MemoryEntry(
+        content="Legacy result",
+        memory_type="interaction",
+        timestamp=(now - timedelta(minutes=10)).replace(tzinfo=None),
+    )
+    aware_old = MemoryEntry(
+        content="Old result",
+        memory_type="interaction",
+        timestamp=now - timedelta(hours=25),
+    )
+    mock_memory = MagicMock(spec=LongTermMemory)
+    mock_memory.list_recent_memories = AsyncMock(
+        return_value=[aware_old, naive_recent, aware_recent]
+    )
+
+    context = await ContextManager(mock_memory)._get_recent_context(hours=24)
+
+    assert [item["content"] for item in context] == [
+        "HAM result",
+        "Legacy result",
+    ]
+    assert all(item["timestamp"].endswith("+00:00") for item in context)
 
 
 async def test_get_relevant_context_with_memories():
