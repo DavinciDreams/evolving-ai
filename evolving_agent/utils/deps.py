@@ -28,22 +28,58 @@ def _validate_project_key(supplied_key: str | None) -> None:
         raise HTTPException(status_code=401, detail="Invalid or missing project credential")
 
 
-def authenticate_request(request: Request) -> None:
-    """Authenticate a raw request for central middleware enforcement."""
+def authenticate_request(request: Request) -> dict:
+    """Authenticate with a service key or an approved human Nostr session."""
+    from evolving_agent.utils.config import config
+    from evolving_agent.utils import nostr_auth
+
+    if not config.api_auth_required:
+        claims = {"sub": "auth-disabled", "auth_method": "disabled"}
+        request.state.project_auth = claims
+        return claims
+
     supplied_key = request.headers.get("X-API-Key")
     authorization = request.headers.get("Authorization", "")
     if not supplied_key and authorization.lower().startswith("bearer "):
         supplied_key = authorization[7:].strip()
-    _validate_project_key(supplied_key)
+    if supplied_key:
+        _validate_project_key(supplied_key)
+        claims = {"sub": "project-api-key", "auth_method": "api_key"}
+        request.state.project_auth = claims
+        return claims
+
+    try:
+        claims = nostr_auth.verify_session(request)
+    except nostr_auth.NostrSessionUnavailable as exc:
+        raise HTTPException(503, "Nostr session store is unavailable") from exc
+    if claims is not None:
+        if request.method.upper() not in {"GET", "HEAD", "OPTIONS"}:
+            nostr_auth.require_session_origin(request)
+        request.state.project_auth = claims
+        return claims
+
+    if not config.api_key and not nostr_auth.enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Project authentication is required but not configured",
+        )
+    raise HTTPException(status_code=401, detail="Invalid or missing project credential")
 
 
 async def verify_api_key(
+    request: Request,
     api_key: str = Security(API_KEY_HEADER),
     bearer: HTTPAuthorizationCredentials | None = Security(BEARER_HEADER),
 ):
-    """Validate project access for explicitly protected route dependencies."""
+    """Validate project access for legacy explicitly protected dependencies."""
+    existing = getattr(request.state, "project_auth", None)
+    if existing is not None:
+        return existing
     supplied_key = api_key or (bearer.credentials if bearer else None)
-    _validate_project_key(supplied_key)
+    if supplied_key:
+        _validate_project_key(supplied_key)
+        return {"sub": "project-api-key", "auth_method": "api_key"}
+    return authenticate_request(request)
 
 
 def get_agent() -> SelfImprovingAgent:

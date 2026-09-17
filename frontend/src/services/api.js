@@ -38,6 +38,7 @@ const scrubAuthFromError = (error) => {
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -162,6 +163,46 @@ export const validateProjectApiKey = async (credential) => {
   const response = await api.get('/status', {
     headers: { 'X-API-Key': credential },
   });
+  return response.data;
+};
+
+export const getNostrSession = async () => {
+  const response = await api.get('/auth/nostr/session', { noRetry: true });
+  return response.data;
+};
+
+export const authenticateWithNostr = async () => {
+  const signer = typeof window !== 'undefined' ? window.nostr : undefined;
+  if (!signer?.getPublicKey || !signer?.signEvent) {
+    throw new Error('A NIP-07 browser signer is required.');
+  }
+  const pubkey = await signer.getPublicKey();
+  if (!/^[0-9a-f]{64}$/.test(pubkey)) {
+    throw new Error('The Nostr signer returned an invalid public key.');
+  }
+  const options = await api.post('/auth/nostr/options', { pubkey }, { noRetry: true });
+  const { challenge, verify_url: verifyUrl } = options.data;
+  const event = await signer.signEvent({
+    pubkey,
+    created_at: Math.floor(Date.now() / 1000),
+    kind: 27235,
+    tags: [
+      ['u', verifyUrl],
+      ['method', 'POST'],
+      ['challenge', challenge],
+    ],
+    content: '',
+  });
+  const response = await api.post(
+    '/auth/nostr/verify',
+    { challenge, event },
+    { noRetry: true }
+  );
+  return response.data;
+};
+
+export const logoutNostr = async () => {
+  const response = await api.post('/auth/nostr/logout', {}, { noRetry: true });
   return response.data;
 };
 

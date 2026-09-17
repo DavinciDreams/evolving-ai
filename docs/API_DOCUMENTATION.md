@@ -6,15 +6,22 @@ The Self-Improving AI Agent now includes a comprehensive REST API with Swagger d
 
 ## Authentication
 
-By default, the API has no authentication. All GET endpoints remain open.
-
-Write endpoints (POST /chat, POST /self-improve, etc.) can be protected by setting the `API_KEY` environment variable. When set, include the key in requests:
+Production defaults to authentication on every route except the documented
+health, documentation, public-memory, and Nostr sign-in endpoints. Automation
+uses the dedicated `PROJECT_API_KEY` environment variable:
 
 ```http
 X-API-Key: your-api-key
 ```
 
-Leave `API_KEY` empty to disable authentication (default).
+Human browser users may instead use an allowlisted Nostr public key through a
+NIP-07 signer. The signer creates a short-lived proof; never send an `nsec` or
+other private key to Katbot. Nostr identity links the human account while
+Katbot's allowlist remains the service-local authority boundary.
+
+Set `API_AUTH_REQUIRED=false` only for isolated local development. The legacy
+`API_KEY` name is accepted for compatibility, but production should configure
+only `PROJECT_API_KEY` so there is one unambiguous service credential.
 
 ## 🚀 Quick Start
 
