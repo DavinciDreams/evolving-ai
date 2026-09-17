@@ -35,20 +35,13 @@ class HAMMemoryClient:
         base_url: str,
         api_key: str,
         project: str,
-        scope: str,
-        repo: str,
-        expected_agent_id: str,
         timeout: float = 30.0,
         transport: Optional[httpx.AsyncBaseTransport] = None,
     ) -> None:
         if not api_key:
             raise HAMMemoryError("HAM_API_KEY is required when MEMORY_BACKEND=ham")
-        if not project or not scope:
-            raise HAMMemoryError("HAM_PROJECT and HAM_SCOPE are required")
-        if not expected_agent_id:
-            raise HAMMemoryError(
-                "HAM_EXPECTED_AGENT_ID is required for credential attribution checks"
-            )
+        if not project:
+            raise HAMMemoryError("HAM_PROJECT is required")
         parsed_url = urlsplit(base_url)
         if (
             parsed_url.scheme != "https"
@@ -63,9 +56,11 @@ class HAMMemoryClient:
             )
 
         self.project = project
-        self.scope = scope
-        self.repo = repo
-        self.expected_agent_id = expected_agent_id
+        self.scope = ""
+        self.repo = ""
+        self.agent_id = ""
+        self.allowed_scopes: tuple[str, ...] = ()
+        self.write_scopes: tuple[str, ...] = ()
         self._initialized = False
         self._owner_loop: Optional[asyncio.AbstractEventLoop] = None
         self._worker_wait_seconds = max(float(timeout) + 1.0, 2.0)
@@ -112,27 +107,43 @@ class HAMMemoryClient:
             future.cancel()
             raise HAMMemoryError("HAM tool read exceeded its deadline") from exc
 
-    async def initialize(self) -> None:
-        """Verify principal and least authority before the first memory mutation."""
-        self._initialized = False
+    async def _refresh_identity(self) -> None:
+        """Refresh the credential-owned identity and scope ceiling from HAM."""
         identity = await self._request("GET", "/whoami")
-        if (
-            not isinstance(identity, dict)
-            or identity.get("agent_id") != self.expected_agent_id
-        ):
-            raise HAMMemoryError(
-                "HAM credential identity does not match expected agent"
-            )
+        if not isinstance(identity, dict) or not identity.get("agent_id"):
+            raise HAMMemoryError("HAM credential identity response is invalid")
         boundary = identity.get("scope_boundary") or {}
+        allowed_scopes = (
+            boundary.get("allowed_scopes") if isinstance(boundary, dict) else None
+        )
+        allowed_scopes_valid = isinstance(allowed_scopes, list) and all(
+            isinstance(value, str) for value in allowed_scopes
+        )
         if (
             identity.get("role") != "agent"
             or not isinstance(boundary, dict)
             or boundary.get("mode") != "credential_allowlist"
-            or boundary.get("allowed_scopes") != [self.scope]
+            or not allowed_scopes_valid
+            or not allowed_scopes
         ):
             raise HAMMemoryError(
-                "HAM credential must be a non-admin agent restricted to exactly the configured project scope"
+                "HAM credential must be a non-admin agent with an explicit scope ceiling"
             )
+        self.agent_id = str(identity["agent_id"])
+        self.allowed_scopes = tuple(dict.fromkeys(allowed_scopes))
+        if self.scope and self.scope not in self.allowed_scopes:
+            raise HAMMemoryError("HAM credential cannot write to the configured project")
+        if self.scope:
+            self.write_scopes = tuple(
+                scope
+                for scope in (self.scope, "shared")
+                if scope in self.allowed_scopes
+            )
+
+    async def initialize(self) -> None:
+        """Load identity, scope ceiling, and project attribution from HAM."""
+        self._initialized = False
+        await self._refresh_identity()
         projects = await self._request("GET", "/projects")
         if not isinstance(projects, list):
             raise HAMMemoryError("HAM project response was malformed")
@@ -144,12 +155,19 @@ class HAMMemoryClient:
             raise HAMMemoryError(
                 f"HAM credential cannot access configured project {self.project!r}"
             )
-        if configured.get("scope") != self.scope:
-            raise HAMMemoryError(
-                "HAM project scope does not match the configured least-privilege scope"
-            )
-        if self.repo and configured.get("repo") not in {None, self.repo}:
-            raise HAMMemoryError("HAM project repository attribution does not match")
+        project_scope = configured.get("scope")
+        if not isinstance(project_scope, str) or project_scope not in self.allowed_scopes:
+            raise HAMMemoryError("HAM credential cannot write to the configured project")
+        project_repo = configured.get("repo")
+        if project_repo is not None and not isinstance(project_repo, str):
+            raise HAMMemoryError("HAM project repository attribution is malformed")
+        self.scope = project_scope
+        self.repo = project_repo or ""
+        self.write_scopes = tuple(
+            scope
+            for scope in (self.scope, "shared")
+            if scope in self.allowed_scopes
+        )
         self._initialized = True
 
     async def _ensure_initialized(self) -> None:
@@ -180,10 +198,10 @@ class HAMMemoryClient:
         if not attributed_agent:
             stored = await self.get(memory_id)
             attributed_agent = (stored or {}).get("metadata", {}).get("agent_id")
-        if attributed_agent != self.expected_agent_id:
+        if attributed_agent != self.agent_id:
             raise HAMMemoryError(
                 "HAM write identity mismatch: the credential is not bound to the "
-                f"expected principal {self.expected_agent_id!r}"
+                f"active principal {self.agent_id!r}"
             )
 
     async def add(
@@ -197,6 +215,7 @@ class HAMMemoryClient:
         idempotency_key: Optional[str] = None,
     ) -> int:
         await self._ensure_initialized()
+        await self._refresh_identity()
         payload = {
             "content": content,
             "timestamp": timestamp,
@@ -207,7 +226,7 @@ class HAMMemoryClient:
             },
             "type": memory_type,
             "title": f"Katbot {memory_type}",
-            "scopes": [self.scope],
+            "scopes": list(self.write_scopes),
             "project": self.project,
             "repo": self.repo,
             "task": "katbot-runtime-memory",
@@ -233,12 +252,10 @@ class HAMMemoryClient:
         top_k: int,
         memory_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        await self._ensure_initialized()
         payload: Dict[str, Any] = {
             "query": query,
             "top_k": min(max(top_k, 1), 100),
-            "scopes": [self.scope],
-            "project": self.project,
-            "repo": self.repo,
         }
         if memory_type:
             payload["types"] = [memory_type]
@@ -253,11 +270,9 @@ class HAMMemoryClient:
         limit: int,
         memory_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        await self._ensure_initialized()
         payload: Dict[str, Any] = {
             "limit": min(max(limit, 1), 100),
-            "scopes": [self.scope],
-            "project": self.project,
-            "repo": self.repo,
         }
         if memory_type:
             payload["types"] = [memory_type]
@@ -273,7 +288,8 @@ class HAMMemoryClient:
         cursor: Optional[str] = None,
         memory_type: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """Page deterministically through visible memories in newest-first order."""
+        """Page project memories for Katbot's bounded public-memory view."""
+        await self._ensure_initialized()
         payload: Dict[str, Any] = {
             "limit": min(max(limit, 1), 100),
             "scopes": [self.scope],
@@ -321,6 +337,7 @@ class HAMMemoryClient:
         metadata: Dict[str, Any],
     ) -> int:
         await self._ensure_initialized()
+        await self._refresh_identity()
         payload = {
             "content": content,
             "timestamp": timestamp,
@@ -330,7 +347,7 @@ class HAMMemoryClient:
                 "audience": metadata.get("audience", "project"),
             },
             "type": memory_type,
-            "scopes": [self.scope],
+            "scopes": list(self.write_scopes),
             "project": self.project,
             "repo": self.repo,
             "task": "katbot-runtime-memory",

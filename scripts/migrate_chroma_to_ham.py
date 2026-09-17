@@ -260,9 +260,6 @@ def build_ham_client() -> HAMMemoryClient:
         base_url=config.ham_api_url,
         api_key=config.ham_api_key,
         project=config.ham_project,
-        scope=config.ham_scope,
-        repo=config.ham_repo,
-        expected_agent_id=config.ham_expected_agent_id,
         timeout=config.ham_timeout_seconds,
     )
 
