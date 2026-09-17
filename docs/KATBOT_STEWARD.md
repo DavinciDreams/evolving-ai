@@ -74,8 +74,8 @@ Defaults below describe this implementation, not an observed deployment. See
 | `API_AUTH_REQUIRED` | `true` | Keep private API authorization enabled |
 | `PROJECT_API_KEY` | separately provisioned | Project control-plane access |
 | `MEMORY_BACKEND` | `ham` | Authoritative durable memory |
-| `HAM_API_URL`, `HAM_KEY` | reviewed HTTPS endpoint and dedicated credential | HAM transport and principal |
-| `HAM_PROJECT`, `HAM_SCOPE`, `HAM_SHARED_SCOPE`, `HAM_EXPECTED_AGENT_ID` | `evolving-ai`, `project:evolving-ai`, `shared`, dedicated agent ID | Project-attributed writes with tenant-global shared recall |
+| `HAM_API_URL`, `HAM_API_KEY` | reviewed HTTPS endpoint and dedicated managed credential | Authoritative identity and memory-scope ceiling |
+| `HAM_PROJECT` | `evolving-ai` | Selects the HAM-owned project record that supplies scope and repository attribution |
 | `LEGACY_MEMORY_READ_ONLY` | `true` | Legacy containment; also enforce volume permissions |
 | `WEB_CONCURRENCY` | `1` | Required singleton ownership |
 | `CHAT_TIMEOUT_SECONDS` | `60` | Foreground deadline |

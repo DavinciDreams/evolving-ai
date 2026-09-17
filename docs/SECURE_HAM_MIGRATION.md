@@ -66,10 +66,6 @@ MEMORY_BACKEND=ham
 HAM_API_URL=https://ham.flobots.xyz
 HAM_API_KEY=<katbot-service-credential>
 HAM_PROJECT=evolving-ai
-HAM_SCOPE=project:evolving-ai
-HAM_SHARED_SCOPE=shared
-HAM_REPO=DavinciDreams/evolving-ai
-HAM_EXPECTED_AGENT_ID=katbot-evolving-ai
 
 LEGACY_MEMORY_READ_ONLY=true
 MEMORY_PERSIST_DIRECTORY=/app/data/memory_db
@@ -86,12 +82,13 @@ TPMJS_ENABLED=false
 The frontend holds `PROJECT_API_KEY` only in JavaScript memory after a successful
 `GET /status` check. It is not written to local storage or session storage.
 
-Before any mutation the HAM adapter calls `/whoami` and requires the expected
-agent, non-admin role, and exactly the project plus shared scopes above, then
-validates the project catalog. Broad/admin, extra-scope, missing-scope, or
-wrong-agent credentials are rejected before a write. HAM transport must use
-HTTPS. Identity/credential metadata supplied by callers is removed; only
-server-side attribution is authoritative.
+Before any mutation the HAM adapter calls `/whoami`, accepts only a non-admin
+agent credential with an explicit scope ceiling, and then loads the selected
+project from HAM's catalog. The credential is the sole source of agent identity
+and readable scopes; the project record is the sole source of write scope and
+repository attribution. App configuration cannot duplicate or contradict those
+mappings. HAM transport must use HTTPS. Identity/credential metadata supplied by
+callers is removed; only server-side attribution is authoritative.
 
 ## Gate 3: export a redacted, attributable snapshot
 
