@@ -3,6 +3,7 @@
 import asyncio
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -599,3 +600,18 @@ def test_environment_configuration_is_explicit_and_opt_in():
         DreamConfig.from_env({"DREAM_CYCLE_ENABLED": "perhaps"})
     with pytest.raises(ValueError):
         DreamConfig.from_env({"DREAM_CYCLE_MAX_TOKENS": "a lot"})
+
+
+def test_deployment_surfaces_bounded_dream_deadlines():
+    root = Path(__file__).resolve().parents[1]
+    expected = {
+        "DREAM_CYCLE_TIMEOUT_SECONDS=${DREAM_CYCLE_TIMEOUT_SECONDS:-90}",
+        "DREAM_CYCLE_LLM_TIMEOUT_SECONDS=${DREAM_CYCLE_LLM_TIMEOUT_SECONDS:-60}",
+    }
+    for filename in ("docker-compose.yaml", "docker-compose.coolify.yaml"):
+        content = (root / filename).read_text(encoding="utf-8")
+        assert all(item in content for item in expected)
+
+    example = (root / ".env.example").read_text(encoding="utf-8")
+    assert "DREAM_CYCLE_TIMEOUT_SECONDS=90" in example
+    assert "DREAM_CYCLE_LLM_TIMEOUT_SECONDS=60" in example
