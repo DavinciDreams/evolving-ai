@@ -52,7 +52,7 @@ scope: project:evolving-ai
 repo:  DavinciDreams/evolving-ai
 agent principal: katbot-evolving-ai
 HAM credential role: agent (non-admin), used by the dedicated Katbot service
-allowed scopes: [project:evolving-ai]
+allowed scopes: [project:evolving-ai, shared]
 ```
 
 Set the backend environment:
@@ -66,9 +66,6 @@ MEMORY_BACKEND=ham
 HAM_API_URL=https://ham.flobots.xyz
 HAM_API_KEY=<katbot-service-credential>
 HAM_PROJECT=evolving-ai
-HAM_SCOPE=project:evolving-ai
-HAM_REPO=DavinciDreams/evolving-ai
-HAM_EXPECTED_AGENT_ID=katbot-evolving-ai
 
 LEGACY_MEMORY_READ_ONLY=true
 MEMORY_PERSIST_DIRECTORY=/app/data/memory_db
@@ -85,10 +82,12 @@ TPMJS_ENABLED=false
 The frontend holds `PROJECT_API_KEY` only in JavaScript memory after a successful
 `GET /status` check. It is not written to local storage or session storage.
 
-Before any mutation the HAM adapter calls `/whoami` and requires the expected
-agent, non-admin role, and exactly the project scope above, then validates the
-project catalog. Broad/admin or wrong-agent credentials are rejected before a
-write. HAM transport must use HTTPS. Identity/credential metadata supplied by
+Before any mutation the HAM adapter calls `/whoami`, accepts only a non-admin
+agent credential with an explicit scope ceiling, and then loads the selected
+project from HAM's catalog. The credential is the sole source of agent identity
+and readable scopes; the project record is the sole source of write scope and
+repository attribution. App configuration cannot duplicate or contradict those
+mappings. HAM transport must use HTTPS. Identity/credential metadata supplied by
 callers is removed; only server-side attribution is authoritative.
 
 ## Gate 3: export a redacted, attributable snapshot
@@ -143,10 +142,12 @@ content checksum and legacy source attribution. Semantic recall is sampled and
 reported separately. It also verifies that the server attributed
 writes to `katbot-evolving-ai`; callers cannot assert that identity themselves.
 
-Legacy records are `visibility=shared` within `project:evolving-ai`, not globally
-public and not agent-private. The application keeps their `audience=project` so
-public memory routes do not expose them. Quarantine labels remain attached;
-successful transport is not authority to use quarantined content as guidance.
+Legacy records retain `project:evolving-ai` classification and are also visible
+through the tenant-global `shared` memory scope. This is not public web access:
+the application keeps their `audience=project`, so public memory routes do not
+expose them. Explicitly private HAM memories remain private. Quarantine labels
+remain attached; successful transport is not authority to use quarantined
+content as guidance.
 
 If verification fails, stop. Keep `MEMORY_BACKEND=chroma` only in an isolated
 maintenance environment with writes disabled. Do not delete or alter the source

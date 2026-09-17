@@ -104,21 +104,6 @@ class Config:
         return os.getenv("HAM_PROJECT", "evolving-ai")
 
     @property
-    def ham_scope(self) -> str:
-        """Get the single least-privilege scope requested by Katbot."""
-        return os.getenv("HAM_SCOPE", "project:evolving-ai")
-
-    @property
-    def ham_repo(self) -> str:
-        """Get repository provenance attached to Katbot memories."""
-        return os.getenv("HAM_REPO", "DavinciDreams/evolving-ai")
-
-    @property
-    def ham_expected_agent_id(self) -> str:
-        """Get the server-bound AgentPrincipal expected on HAM writes."""
-        return os.getenv("HAM_EXPECTED_AGENT_ID", "katbot-evolving-ai")
-
-    @property
     def ham_timeout_seconds(self) -> float:
         """Get the timeout for HAM REST requests."""
         return float(os.getenv("HAM_TIMEOUT_SECONDS", "30"))
@@ -461,9 +446,6 @@ class Config:
             "ham_api_url": self.ham_api_url,
             "ham_api_key": "***" if self.ham_api_key else "",
             "ham_project": self.ham_project,
-            "ham_scope": self.ham_scope,
-            "ham_repo": self.ham_repo,
-            "ham_expected_agent_id": self.ham_expected_agent_id,
             "persistent_data_dir": self.persistent_data_dir,
             "memory_collection_name": self.memory_collection_name,
             "max_memory_entries": self.max_memory_entries,

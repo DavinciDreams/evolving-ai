@@ -19,7 +19,7 @@ IDENTITY = {
     "role": "agent",
     "scope_boundary": {
         "mode": "credential_allowlist",
-        "allowed_scopes": ["project:evolving-ai"],
+        "allowed_scopes": ["project:evolving-ai", "shared"],
     },
 }
 PROJECTS = [
@@ -33,6 +33,21 @@ PROJECTS = [
 
 class _KeepAliveHAMHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+
+    def do_GET(self):
+        if self.path == "/whoami":
+            payload = IDENTITY
+        elif self.path == "/projects":
+            payload = PROJECTS
+        else:
+            self.send_error(404)
+            return
+        body = json.dumps(payload).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self):
         self.rfile.read(int(self.headers.get("Content-Length", "0")))
@@ -75,9 +90,6 @@ def _client(
         base_url="https://ham.invalid",
         api_key="test-ham-credential",
         project="evolving-ai",
-        scope="project:evolving-ai",
-        repo="DavinciDreams/evolving-ai",
-        expected_agent_id="katbot-evolving-ai",
         transport=httpx.MockTransport(routed),
     )
 
@@ -91,9 +103,6 @@ async def test_registered_memory_tool_reuses_ham_client_on_owning_event_loop():
         base_url="https://ham.invalid",
         api_key="synthetic-test-only",
         project="evolving-ai",
-        scope="project:evolving-ai",
-        repo="DavinciDreams/evolving-ai",
-        expected_agent_id="katbot-evolving-ai",
         timeout=2,
     )
     await client.close()
@@ -146,9 +155,102 @@ async def test_initialize_validates_project_scope_and_repository():
     client = _client(handler, preflight=False)
     try:
         await client.initialize()
+        assert client.agent_id == "katbot-evolving-ai"
+        assert client.allowed_scopes == ("project:evolving-ai", "shared")
+        assert client.write_scopes == ("project:evolving-ai", "shared")
+        assert client.scope == "project:evolving-ai"
+        assert client.repo == "DavinciDreams/evolving-ai"
     finally:
         await client.close()
     assert calls == ["/whoami", "/projects"]
+
+
+@pytest.mark.parametrize(
+    ("allowed_scopes", "write_scopes"),
+    [
+        (["project:evolving-ai"], ["project:evolving-ai"]),
+        (
+            ["project:evolving-ai", "shared", "task:extra"],
+            ["project:evolving-ai", "shared"],
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_credential_is_single_source_of_scope_truth(
+    allowed_scopes, write_scopes
+):
+    identity = {
+        **IDENTITY,
+        "scope_boundary": {
+            "mode": "credential_allowlist",
+            "allowed_scopes": allowed_scopes,
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/ingest"
+        payload = json.loads(request.content)
+        assert payload["scopes"] == write_scopes
+        return httpx.Response(200, json={"id": 40, "agent_id": "katbot-evolving-ai"})
+
+    client = _client(handler, identity=identity)
+    try:
+        await client.add(
+            content="scope source of truth",
+            source_id="scope-source",
+            timestamp="2026-09-17T00:00:00Z",
+            memory_type="fact",
+            metadata={},
+        )
+        assert list(client.allowed_scopes) == allowed_scopes
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_write_refreshes_changed_credential_scope_without_app_config():
+    whoami_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal whoami_calls
+        if request.url.path == "/whoami":
+            whoami_calls += 1
+            scopes = (
+                ["project:evolving-ai"]
+                if whoami_calls == 1
+                else ["project:evolving-ai", "shared"]
+            )
+            return httpx.Response(
+                200,
+                json={
+                    **IDENTITY,
+                    "scope_boundary": {
+                        "mode": "credential_allowlist",
+                        "allowed_scopes": scopes,
+                    },
+                },
+            )
+        if request.url.path == "/projects":
+            return httpx.Response(200, json=PROJECTS)
+        assert request.url.path == "/ingest"
+        assert json.loads(request.content)["scopes"] == [
+            "project:evolving-ai",
+            "shared",
+        ]
+        return httpx.Response(200, json={"id": 39, "agent_id": "katbot-evolving-ai"})
+
+    client = _client(handler, preflight=False)
+    try:
+        await client.add(
+            content="credential changed in HAM",
+            source_id="live-scope-refresh",
+            timestamp="2026-09-17T00:00:00Z",
+            memory_type="fact",
+            metadata={},
+        )
+    finally:
+        await client.close()
+    assert whoami_calls == 2
 
 
 @pytest.mark.asyncio
@@ -158,6 +260,9 @@ async def test_add_never_sends_agent_identity_and_checks_server_attribution():
         payload = json.loads(request.content)
         assert "agent_id" not in payload
         assert "agent_id" not in payload["metadata"]
+        assert payload["scopes"] == ["project:evolving-ai", "shared"]
+        assert payload["project"] == "evolving-ai"
+        assert payload["repo"] == "DavinciDreams/evolving-ai"
         return httpx.Response(200, json={"id": 41, "agent_id": "katbot-evolving-ai"})
 
     client = _client(handler)
@@ -290,7 +395,7 @@ async def test_get_returns_none_for_not_found():
 @pytest.mark.parametrize(
     "identity",
     [
-        {**IDENTITY, "agent_id": "human-user"},
+        {**IDENTITY, "agent_id": ""},
         {**IDENTITY, "role": "admin"},
         {
             **IDENTITY,
@@ -300,7 +405,14 @@ async def test_get_returns_none_for_not_found():
             **IDENTITY,
             "scope_boundary": {
                 "mode": "credential_allowlist",
-                "allowed_scopes": ["project:evolving-ai", "shared"],
+                "allowed_scopes": [],
+            },
+        },
+        {
+            **IDENTITY,
+            "scope_boundary": {
+                "mode": "credential_allowlist",
+                "allowed_scopes": [42],
             },
         },
         {
@@ -313,7 +425,7 @@ async def test_get_returns_none_for_not_found():
     ],
 )
 @pytest.mark.asyncio
-async def test_preflight_rejects_wrong_or_broad_credential_before_any_write(identity):
+async def test_preflight_rejects_invalid_credential_before_any_write(identity):
     def no_mutations(request):
         pytest.fail("No mutation is permitted before identity preflight passes")
 
@@ -335,8 +447,7 @@ async def test_preflight_rejects_wrong_or_broad_credential_before_any_write(iden
     "projects",
     [
         [],
-        [{**PROJECTS[0], "scope": "shared"}],
-        [{**PROJECTS[0], "repo": "wrong/repo"}],
+        [{**PROJECTS[0], "scope": 42}],
     ],
 )
 @pytest.mark.asyncio
@@ -345,6 +456,35 @@ async def test_project_preflight_fails_closed(projects):
     try:
         with pytest.raises(HAMMemoryError):
             await client.initialize()
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize(
+    ("operation", "path"),
+    [
+        ("search", "/search"),
+        ("recent", "/memories/recent"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_global_reads_use_authorized_scopes_without_project_narrowing(
+    operation, path
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == path
+        payload = json.loads(request.content)
+        assert "scopes" not in payload
+        assert "project" not in payload
+        assert "repo" not in payload
+        return httpx.Response(200, json=[])
+
+    client = _client(handler)
+    try:
+        if operation == "search":
+            assert await client.search("cross-project memory", top_k=5) == []
+        elif operation == "recent":
+            assert await client.recent(limit=5) == []
     finally:
         await client.close()
 
@@ -415,9 +555,6 @@ def test_credential_transport_rejects_unsafe_urls(url):
             base_url=url,
             api_key="fake",
             project="evolving-ai",
-            scope="project:evolving-ai",
-            repo="repo",
-            expected_agent_id="katbot-evolving-ai",
         )
 
 

@@ -94,9 +94,9 @@ MEMORY_BACKEND=ham
 HAM_API_URL=https://ham.flobots.xyz
 HAM_API_KEY=<distinct-katbot-service-credential>
 HAM_PROJECT=evolving-ai
-HAM_SCOPE=project:evolving-ai
-HAM_REPO=DavinciDreams/evolving-ai
-HAM_EXPECTED_AGENT_ID=katbot-evolving-ai
+
+# HAM derives identity and read scopes from the credential, and write
+# classification/repository attribution from the selected project record.
 
 # Legacy Chroma source (migration/rollback only)
 LEGACY_MEMORY_READ_ONLY=true
