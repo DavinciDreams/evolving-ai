@@ -1,8 +1,8 @@
 """Pure selected-provider resolution shared by chat and bounded experiments.
 
 No credential properties, environment reads, network requests, or fallback to
-another provider occur here. Config exposes explicit DEFAULT_MODEL separately
-from its historical baked-in default so model precedence is unambiguous.
+another provider occur here. The Z AI model setting is authoritative so a stale
+generic setting cannot silently override it.
 """
 
 from __future__ import annotations
@@ -59,9 +59,8 @@ def _https_base(value: str, *, bare_host_v1: bool = False) -> str:
 def resolve_provider(config) -> ProviderSelection:
     """Resolve the selected model and actual endpoint, never inspect credentials.
 
-    Explicit DEFAULT_MODEL wins. Otherwise OpenAI/ZAI use their provider-specific
-    model; Anthropic/OpenRouter retain default_model. Plain config test doubles
-    without default_model_override treat their supplied default_model as explicit.
+    Z AI always uses its provider-specific model. The generic DEFAULT_MODEL
+    override remains available for the other providers.
     """
     provider = config.default_llm_provider
     if provider not in {"openai", "zai", "anthropic", "openrouter"}:
@@ -75,7 +74,7 @@ def resolve_provider(config) -> ProviderSelection:
             config.openai_base_url or "https://api.openai.com/v1", bare_host_v1=True
         )
     elif provider == "zai":
-        model = override or config.zai_model
+        model = config.zai_model
         base = _https_base(config.zai_base_url)
     elif provider == "anthropic":
         model = override or config.default_model

@@ -45,8 +45,7 @@ In Coolify, add these environment variables:
 ```bash
 # Current Z AI coding-plan provider
 DEFAULT_LLM_PROVIDER=zai
-DEFAULT_MODEL=glm-5.1
-ZAI_MODEL=glm-5.1
+ZAI_MODEL=glm-5.3
 ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
 ZAI_API_KEY=<managed-zai-key>
 
@@ -60,6 +59,10 @@ OPENROUTER_API_KEY=sk-or-...
 
 DEFAULT_MODEL=gpt-4o-mini  # or your preferred provider model
 ```
+
+The active provider's model variable is authoritative. For Z AI, set only
+`ZAI_MODEL`; a stale `DEFAULT_MODEL` cannot override it. `EVALUATION_MODEL` is
+optional and otherwise follows the same selected model.
 
 **Optional but Recommended:**
 ```bash

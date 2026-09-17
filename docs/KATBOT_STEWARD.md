@@ -248,8 +248,9 @@ termination policy. Reconcile uncertain durable outcomes before restarting work.
 
 ## Offline checks
 
-Chat and experiments use the same selected-provider resolver: explicit
-`DEFAULT_MODEL` wins, otherwise OpenAI/ZAI use their provider-specific model.
+Chat and experiments use the same selected-provider resolver. Z AI always uses
+`ZAI_MODEL`, so a stale generic model cannot override it. Other providers retain
+the `DEFAULT_MODEL` override.
 Configured endpoints require HTTPS on the standard port; a bare OpenAI host is
 normalized to `/v1`, while explicit proxy paths are preserved. Legacy plaintext
 local HTTP configuration must be reviewed before enabling this branch. No

@@ -76,10 +76,9 @@ zero does not guarantee determinism, and hashing does not establish model weight
 or service version. Pin versioned models and curate repeat trials when available.
 
 Chat and the bounded runner use the same credential-free selected-provider
-resolver. An explicitly configured, nonempty `DEFAULT_MODEL` takes precedence
-over `OPENAI_MODEL`/`ZAI_MODEL`; without that override, those providers use their
-provider-specific model. Anthropic/OpenRouter use `DEFAULT_MODEL` (set a model
-appropriate to that provider; the legacy baked-in default is ZAI-specific).
+resolver. Z AI always uses `ZAI_MODEL`, so a stale generic model cannot override
+it. The other providers retain the `DEFAULT_MODEL` override (set a model
+appropriate to the selected provider).
 Only the selected provider's credentials are used, never a different provider
 as an implicit fallback. For OpenAI-compatible endpoints, a bare HTTPS host gains
 `/v1`; explicit versioned or proxy paths are preserved. HTTPS on port 443 without

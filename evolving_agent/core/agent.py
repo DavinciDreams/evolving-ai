@@ -1344,7 +1344,7 @@ Performance:
 
 Configuration:
 - LLM Provider: {config.default_llm_provider}
-- Model: {config.default_model}
+- Model: {config.selected_model}
 - Self-modification: {config.enable_self_modification}
             """
             )

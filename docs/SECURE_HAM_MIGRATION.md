@@ -72,9 +72,9 @@ MEMORY_PERSIST_DIRECTORY=/app/data/memory_db
 MEMORY_COLLECTION_NAME=agent_memory
 
 ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
-ZAI_MODEL=glm-5.1
+ZAI_MODEL=glm-5.3
 DEFAULT_LLM_PROVIDER=zai
-DEFAULT_MODEL=glm-5.1
+DEFAULT_MODEL=
 
 TPMJS_ENABLED=false
 ```

@@ -57,7 +57,7 @@ class Config:
     @property
     def zai_model(self) -> str:
         """Get Z AI model name."""
-        return os.getenv("ZAI_MODEL", "glm-5.1")
+        return os.getenv("ZAI_MODEL", "glm-5.3")
 
     @property
     def log_level(self) -> str:
@@ -150,8 +150,8 @@ class Config:
 
     @property
     def evaluation_model(self) -> str:
-        """Get evaluation model."""
-        return os.getenv("EVALUATION_MODEL", "glm-5.1")
+        """Get an explicit evaluation model or reuse the selected chat model."""
+        return os.getenv("EVALUATION_MODEL", "") or self.selected_model
 
     @property
     def evaluation_provider(self) -> str:
@@ -450,7 +450,7 @@ class Config:
             "memory_collection_name": self.memory_collection_name,
             "max_memory_entries": self.max_memory_entries,
             "default_llm_provider": self.default_llm_provider,
-            "default_model": self.default_model,
+            "default_model": self.selected_model,
             "evaluation_model": self.evaluation_model,
             "evaluation_provider": self.evaluation_provider,
             "temperature": self.temperature,
