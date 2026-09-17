@@ -75,7 +75,7 @@ Defaults below describe this implementation, not an observed deployment. See
 | `PROJECT_API_KEY` | separately provisioned | Project control-plane access |
 | `MEMORY_BACKEND` | `ham` | Authoritative durable memory |
 | `HAM_API_URL`, `HAM_KEY` | reviewed HTTPS endpoint and dedicated credential | HAM transport and principal |
-| `HAM_PROJECT`, `HAM_SCOPE`, `HAM_EXPECTED_AGENT_ID` | explicitly scoped deployment values | Verified project/service identity |
+| `HAM_PROJECT`, `HAM_SCOPE`, `HAM_SHARED_SCOPE`, `HAM_EXPECTED_AGENT_ID` | `evolving-ai`, `project:evolving-ai`, `shared`, dedicated agent ID | Project-attributed writes with tenant-global shared recall |
 | `LEGACY_MEMORY_READ_ONLY` | `true` | Legacy containment; also enforce volume permissions |
 | `WEB_CONCURRENCY` | `1` | Required singleton ownership |
 | `CHAT_TIMEOUT_SECONDS` | `60` | Foreground deadline |

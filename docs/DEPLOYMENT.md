@@ -95,8 +95,12 @@ HAM_API_URL=https://ham.flobots.xyz
 HAM_API_KEY=<distinct-katbot-service-credential>
 HAM_PROJECT=evolving-ai
 HAM_SCOPE=project:evolving-ai
+HAM_SHARED_SCOPE=shared
 HAM_REPO=DavinciDreams/evolving-ai
 HAM_EXPECTED_AGENT_ID=katbot-evolving-ai
+
+# Project-attributed writes are also tagged shared. Agent recall spans both
+# authorized scopes; unauthenticated public-memory paging remains project-bound.
 
 # Legacy Chroma source (migration/rollback only)
 LEGACY_MEMORY_READ_ONLY=true

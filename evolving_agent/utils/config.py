@@ -105,8 +105,13 @@ class Config:
 
     @property
     def ham_scope(self) -> str:
-        """Get the single least-privilege scope requested by Katbot."""
+        """Get the project scope used to classify Katbot memories."""
         return os.getenv("HAM_SCOPE", "project:evolving-ai")
+
+    @property
+    def ham_shared_scope(self) -> str:
+        """Get the tenant-global scope used for shared HAM recall."""
+        return os.getenv("HAM_SHARED_SCOPE", "shared")
 
     @property
     def ham_repo(self) -> str:
@@ -462,6 +467,7 @@ class Config:
             "ham_api_key": "***" if self.ham_api_key else "",
             "ham_project": self.ham_project,
             "ham_scope": self.ham_scope,
+            "ham_shared_scope": self.ham_shared_scope,
             "ham_repo": self.ham_repo,
             "ham_expected_agent_id": self.ham_expected_agent_id,
             "persistent_data_dir": self.persistent_data_dir,

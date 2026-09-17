@@ -36,6 +36,7 @@ class HAMMemoryClient:
         api_key: str,
         project: str,
         scope: str,
+        shared_scope: str = "shared",
         repo: str,
         expected_agent_id: str,
         timeout: float = 30.0,
@@ -43,8 +44,10 @@ class HAMMemoryClient:
     ) -> None:
         if not api_key:
             raise HAMMemoryError("HAM_API_KEY is required when MEMORY_BACKEND=ham")
-        if not project or not scope:
-            raise HAMMemoryError("HAM_PROJECT and HAM_SCOPE are required")
+        if not project or not scope or not shared_scope:
+            raise HAMMemoryError(
+                "HAM_PROJECT, HAM_SCOPE, and HAM_SHARED_SCOPE are required"
+            )
         if not expected_agent_id:
             raise HAMMemoryError(
                 "HAM_EXPECTED_AGENT_ID is required for credential attribution checks"
@@ -64,6 +67,8 @@ class HAMMemoryClient:
 
         self.project = project
         self.scope = scope
+        self.shared_scope = shared_scope
+        self.scopes = tuple(dict.fromkeys((scope, shared_scope)))
         self.repo = repo
         self.expected_agent_id = expected_agent_id
         self._initialized = False
@@ -124,14 +129,23 @@ class HAMMemoryClient:
                 "HAM credential identity does not match expected agent"
             )
         boundary = identity.get("scope_boundary") or {}
+        allowed_scopes = (
+            boundary.get("allowed_scopes") if isinstance(boundary, dict) else None
+        )
+        allowed_scopes_valid = isinstance(allowed_scopes, list) and all(
+            isinstance(value, str) for value in allowed_scopes
+        )
         if (
             identity.get("role") != "agent"
             or not isinstance(boundary, dict)
             or boundary.get("mode") != "credential_allowlist"
-            or boundary.get("allowed_scopes") != [self.scope]
+            or not allowed_scopes_valid
+            or len(allowed_scopes) != len(self.scopes)
+            or set(allowed_scopes) != set(self.scopes)
         ):
             raise HAMMemoryError(
-                "HAM credential must be a non-admin agent restricted to exactly the configured project scope"
+                "HAM credential must be a non-admin agent restricted to exactly "
+                "the configured project and shared scopes"
             )
         projects = await self._request("GET", "/projects")
         if not isinstance(projects, list):
@@ -207,7 +221,7 @@ class HAMMemoryClient:
             },
             "type": memory_type,
             "title": f"Katbot {memory_type}",
-            "scopes": [self.scope],
+            "scopes": list(self.scopes),
             "project": self.project,
             "repo": self.repo,
             "task": "katbot-runtime-memory",
@@ -236,9 +250,7 @@ class HAMMemoryClient:
         payload: Dict[str, Any] = {
             "query": query,
             "top_k": min(max(top_k, 1), 100),
-            "scopes": [self.scope],
-            "project": self.project,
-            "repo": self.repo,
+            "scopes": list(self.scopes),
         }
         if memory_type:
             payload["types"] = [memory_type]
@@ -255,9 +267,7 @@ class HAMMemoryClient:
     ) -> List[Dict[str, Any]]:
         payload: Dict[str, Any] = {
             "limit": min(max(limit, 1), 100),
-            "scopes": [self.scope],
-            "project": self.project,
-            "repo": self.repo,
+            "scopes": list(self.scopes),
         }
         if memory_type:
             payload["types"] = [memory_type]
@@ -273,7 +283,7 @@ class HAMMemoryClient:
         cursor: Optional[str] = None,
         memory_type: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        """Page deterministically through visible memories in newest-first order."""
+        """Page project memories for Katbot's bounded public-memory view."""
         payload: Dict[str, Any] = {
             "limit": min(max(limit, 1), 100),
             "scopes": [self.scope],
@@ -330,7 +340,7 @@ class HAMMemoryClient:
                 "audience": metadata.get("audience", "project"),
             },
             "type": memory_type,
-            "scopes": [self.scope],
+            "scopes": list(self.scopes),
             "project": self.project,
             "repo": self.repo,
             "task": "katbot-runtime-memory",

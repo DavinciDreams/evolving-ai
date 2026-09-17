@@ -50,6 +50,7 @@ services:
       - HAM_API_KEY=${HAM_API_KEY}
       - HAM_PROJECT=${HAM_PROJECT:-evolving-ai}
       - HAM_SCOPE=${HAM_SCOPE:-project:evolving-ai}
+      - HAM_SHARED_SCOPE=${HAM_SHARED_SCOPE:-shared}
       - HAM_REPO=${HAM_REPO:-DavinciDreams/evolving-ai}
       - HAM_EXPECTED_AGENT_ID=${HAM_EXPECTED_AGENT_ID:-katbot-evolving-ai}
       - LEGACY_MEMORY_READ_ONLY=${LEGACY_MEMORY_READ_ONLY:-true}

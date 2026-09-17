@@ -19,7 +19,7 @@ IDENTITY = {
     "role": "agent",
     "scope_boundary": {
         "mode": "credential_allowlist",
-        "allowed_scopes": ["project:evolving-ai"],
+        "allowed_scopes": ["project:evolving-ai", "shared"],
     },
 }
 PROJECTS = [
@@ -158,6 +158,9 @@ async def test_add_never_sends_agent_identity_and_checks_server_attribution():
         payload = json.loads(request.content)
         assert "agent_id" not in payload
         assert "agent_id" not in payload["metadata"]
+        assert payload["scopes"] == ["project:evolving-ai", "shared"]
+        assert payload["project"] == "evolving-ai"
+        assert payload["repo"] == "DavinciDreams/evolving-ai"
         return httpx.Response(200, json={"id": 41, "agent_id": "katbot-evolving-ai"})
 
     client = _client(handler)
@@ -300,7 +303,14 @@ async def test_get_returns_none_for_not_found():
             **IDENTITY,
             "scope_boundary": {
                 "mode": "credential_allowlist",
-                "allowed_scopes": ["project:evolving-ai", "shared"],
+                "allowed_scopes": ["project:evolving-ai"],
+            },
+        },
+        {
+            **IDENTITY,
+            "scope_boundary": {
+                "mode": "credential_allowlist",
+                "allowed_scopes": ["project:evolving-ai", "shared", "task:extra"],
             },
         },
         {
@@ -345,6 +355,35 @@ async def test_project_preflight_fails_closed(projects):
     try:
         with pytest.raises(HAMMemoryError):
             await client.initialize()
+    finally:
+        await client.close()
+
+
+@pytest.mark.parametrize(
+    ("operation", "path"),
+    [
+        ("search", "/search"),
+        ("recent", "/memories/recent"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_global_reads_use_authorized_scopes_without_project_narrowing(
+    operation, path
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == path
+        payload = json.loads(request.content)
+        assert payload["scopes"] == ["project:evolving-ai", "shared"]
+        assert "project" not in payload
+        assert "repo" not in payload
+        return httpx.Response(200, json=[])
+
+    client = _client(handler)
+    try:
+        if operation == "search":
+            assert await client.search("cross-project memory", top_k=5) == []
+        elif operation == "recent":
+            assert await client.recent(limit=5) == []
     finally:
         await client.close()
 

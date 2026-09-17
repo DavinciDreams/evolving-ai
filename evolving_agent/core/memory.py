@@ -264,6 +264,7 @@ class LongTermMemory:
                     api_key=config.ham_api_key,
                     project=config.ham_project,
                     scope=config.ham_scope,
+                    shared_scope=config.ham_shared_scope,
                     repo=config.ham_repo,
                     expected_agent_id=config.ham_expected_agent_id,
                     timeout=config.ham_timeout_seconds,
@@ -587,6 +588,7 @@ class LongTermMemory:
                 "backend": "ham",
                 "project": config.ham_project,
                 "scope": config.ham_scope,
+                "scopes": [config.ham_scope, config.ham_shared_scope],
             }
         count = self.collection.count()
         memory_types = await self.memory_ops.get_memory_type_distribution()
