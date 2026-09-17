@@ -39,7 +39,7 @@ def print_config_info():
     print("Configuration:")
     print("=" * 73)
     print(f"  LLM Provider:     {config.default_llm_provider}")
-    print(f"  Model:            {config.default_model}")
+    print(f"  Model:            {config.selected_model}")
     print(f"  Evaluation Model: {config.evaluation_model}")
     print(f"  Temperature:      {config.temperature}")
     print(f"  Max Tokens:       {config.max_tokens}")

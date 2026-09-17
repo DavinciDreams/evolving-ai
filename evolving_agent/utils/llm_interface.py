@@ -505,7 +505,7 @@ class LLMManager:
 
         if openai_api_key and openai_api_key != "your_openai_api_key_here":
             model = (
-                config.default_model
+                config.selected_model
                 if config.default_llm_provider == "openai"
                 else config.openai_model
             )
@@ -523,7 +523,7 @@ class LLMManager:
             and config.anthropic_api_key != "your_anthropic_api_key_here"
         ):
             model = (
-                config.default_model
+                config.selected_model
                 if config.default_llm_provider == "anthropic"
                 else "claude-3-5-sonnet-20241022"
             )
@@ -537,7 +537,7 @@ class LLMManager:
             and config.openrouter_api_key != "your_openrouter_api_key_here"
         ):
             model = (
-                config.default_model
+                config.selected_model
                 if config.default_llm_provider == "openrouter"
                 else "anthropic/claude-3-haiku"
             )
@@ -547,7 +547,11 @@ class LLMManager:
 
         # Initialize Z AI
         if config.zai_api_key:
-            model = config.default_model if config.default_llm_provider == "zai" else config.zai_model
+            model = (
+                config.selected_model
+                if config.default_llm_provider == "zai"
+                else config.zai_model
+            )
             try:
                 self.interfaces["zai"] = ZAIInterface(
                     api_key=config.zai_api_key,

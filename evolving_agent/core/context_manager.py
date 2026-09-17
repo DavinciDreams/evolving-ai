@@ -554,7 +554,7 @@ class ContextManager:
                 "memory_stats": await self.memory.get_memory_stats(),
                 "config": {
                     "llm_provider": config.default_llm_provider,
-                    "model": config.default_model,
+                    "model": config.selected_model,
                     "self_modification_enabled": config.enable_self_modification,
                 },
             }

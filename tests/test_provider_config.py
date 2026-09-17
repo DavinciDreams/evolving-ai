@@ -49,19 +49,56 @@ def test_selected_provider_only_without_credentials(provider, model, base):
         selected.model = "mutated"
 
 
-@pytest.mark.parametrize("provider", ["openai", "zai", "anthropic", "openrouter"])
-def test_explicit_default_model_wins_consistently_with_real_config(
-    monkeypatch, provider
+@pytest.mark.parametrize(
+    "provider,expected",
+    [
+        ("openai", "explicit-selected-model"),
+        ("zai", "zai-specific-model"),
+        ("anthropic", "explicit-selected-model"),
+        ("openrouter", "explicit-selected-model"),
+    ],
+)
+def test_provider_specific_model_is_not_overridden_by_stale_generic_config(
+    monkeypatch, provider, expected
 ):
     monkeypatch.setenv("DEFAULT_LLM_PROVIDER", provider)
     monkeypatch.setenv("DEFAULT_MODEL", "explicit-selected-model")
-    monkeypatch.setenv("OPENAI_MODEL", "unused-openai-model")
-    monkeypatch.setenv("ZAI_MODEL", "unused-zai-model")
+    monkeypatch.setenv("OPENAI_MODEL", "openai-specific-model")
+    monkeypatch.setenv("ZAI_MODEL", "zai-specific-model")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://example.test")
     monkeypatch.setenv("ZAI_BASE_URL", "https://example.test/v4")
     config = Config.__new__(Config)  # Do not load any developer .env file.
-    assert resolve_provider(config).model == "explicit-selected-model"
-    assert config.selected_model == "explicit-selected-model"
+    assert resolve_provider(config).model == expected
+    assert config.selected_model == expected
+
+
+def test_zai_model_is_single_deployment_authority(monkeypatch):
+    monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "zai")
+    monkeypatch.setenv("DEFAULT_MODEL", "stale-generic-model")
+    monkeypatch.setenv("ZAI_MODEL", "glm-5.3")
+    monkeypatch.delenv("EVALUATION_MODEL", raising=False)
+    config = Config.__new__(Config)
+
+    assert config.selected_model == "glm-5.3"
+    assert config.evaluation_model == "glm-5.3"
+    assert config.get_all_config()["default_model"] == "glm-5.3"
+
+
+def test_compose_forwards_current_model_and_dream_variables():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    expected = {
+        "ZAI_MODEL=${ZAI_MODEL:-glm-5.3}",
+        "DEFAULT_MODEL=${DEFAULT_MODEL:-}",
+        "EVALUATION_MODEL=${EVALUATION_MODEL:-}",
+        "DREAM_CYCLE_TIMEOUT_SECONDS=${DREAM_CYCLE_TIMEOUT_SECONDS:-90}",
+        "DREAM_CYCLE_LLM_TIMEOUT_SECONDS=${DREAM_CYCLE_LLM_TIMEOUT_SECONDS:-60}",
+    }
+    for filename in ("docker-compose.yaml", "docker-compose.coolify.yaml"):
+        content = (root / filename).read_text(encoding="utf-8")
+        assert all(item in content for item in expected)
+        assert "ZAI_MODEL=${ZAI_MODEL:-glm-5.1}" not in content
 
 
 @pytest.mark.parametrize(
