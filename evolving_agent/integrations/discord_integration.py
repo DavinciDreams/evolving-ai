@@ -294,8 +294,12 @@ class DiscordIntegration:
 
                 logger.info(f"Discord response sent (processing time: {processing_time:.2f}s)")
 
-            except Exception as e:
-                logger.error("Discord message processing failed")
+            except Exception as exc:
+                # Keep the failure class for operations telemetry without logging
+                # message content, credentials, or exception text.
+                logger.error(
+                    "Discord message processing failed: {}", type(exc).__name__
+                )
                 error_embed = self.formatter.format_error_message(
                     "Discord operation failed", user_friendly=True
                 )
