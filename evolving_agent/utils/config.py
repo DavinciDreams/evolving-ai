@@ -427,6 +427,21 @@ class Config:
         return os.getenv("API_AUTH_REQUIRED", "true").lower() == "true"
 
     @property
+    def nostr_auth_enabled(self) -> bool:
+        """Whether browser users may authenticate with an approved Nostr key."""
+        return os.getenv("NOSTR_AUTH_ENABLED", "false").lower() == "true"
+
+    @property
+    def project_nostr_pubkeys(self) -> str:
+        """Return the service-local allowlist of human Nostr public keys."""
+        return os.getenv("PROJECT_NOSTR_PUBKEYS", "")
+
+    @property
+    def nostr_auth_verify_url(self) -> str:
+        """Return the exact public verification URL signed by NIP-07 clients."""
+        return os.getenv("NOSTR_AUTH_VERIFY_URL", "")
+
+    @property
     def tpmjs_enabled(self) -> bool:
         """Whether the optional TPMJS registry should be probed and exposed."""
         return os.getenv("TPMJS_ENABLED", "false").lower() == "true"
@@ -493,6 +508,9 @@ class Config:
             "tpmjs_api_key": "***" if self.tpmjs_api_key else "",
             "tpmjs_enabled": self.tpmjs_enabled,
             "api_auth_required": self.api_auth_required,
+            "nostr_auth_enabled": self.nostr_auth_enabled,
+            "project_nostr_pubkeys": "***" if self.project_nostr_pubkeys else "",
+            "nostr_auth_verify_url": self.nostr_auth_verify_url,
             "iterative_revision_max_rounds": self.iterative_revision_max_rounds,
             "iterative_revision_target_score": self.iterative_revision_target_score,
             "best_of_n_count": self.best_of_n_count,

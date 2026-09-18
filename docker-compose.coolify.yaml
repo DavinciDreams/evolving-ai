@@ -15,6 +15,9 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-}
       - API_AUTH_REQUIRED=${API_AUTH_REQUIRED:-true}
       - PROJECT_API_KEY=${PROJECT_API_KEY}
+      - NOSTR_AUTH_ENABLED=${NOSTR_AUTH_ENABLED:-false}
+      - PROJECT_NOSTR_PUBKEYS=${PROJECT_NOSTR_PUBKEYS:-}
+      - NOSTR_AUTH_VERIFY_URL=${NOSTR_AUTH_VERIFY_URL:-}
       # LLM Provider Configuration
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL}
@@ -34,7 +37,7 @@ services:
       # Tool Use
       - ENABLE_TOOL_USE=${ENABLE_TOOL_USE:-true}
       - MAX_TOOL_ITERATIONS=${MAX_TOOL_ITERATIONS:-15}
-      - TOOL_SANDBOX_DIR=/app
+      - TOOL_SANDBOX_DIR=${TOOL_SANDBOX_DIR:-/app/workspace}
       - TPMJS_API_KEY=${TPMJS_API_KEY}
       - TPMJS_ENABLED=${TPMJS_ENABLED:-false}
 
@@ -152,6 +155,9 @@ services:
         source: scratchpad-data
         target: /app/data/scratchpad
       - type: volume
+        source: workspace-data
+        target: /app/workspace
+      - type: volume
         source: app-logs
         target: /app/logs
     restart: unless-stopped
@@ -186,5 +192,7 @@ volumes:
     name: evolving-ai-persistent
   scratchpad-data:
     name: evolving-ai-scratchpad
+  workspace-data:
+    name: evolving-ai-workspace
   app-logs:
     name: evolving-ai-logs

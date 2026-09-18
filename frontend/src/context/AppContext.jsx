@@ -4,6 +4,9 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { Toaster } from 'react-hot-toast';
 import {
   clearProjectApiKey,
+  authenticateWithNostr as authenticateNostrSession,
+  getNostrSession,
+  logoutNostr,
   setProjectApiKey,
   validateProjectApiKey,
 } from '../services/api';
@@ -29,6 +32,8 @@ export const AppProvider = ({ children }) => {
     () => localStorage.getItem('evolving-ai-theme') || 'light'
   );
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [nostrEnabled, setNostrEnabled] = useState(false);
+  const [authMethod, setAuthMethod] = useState(null);
 
   const toggleSidebar = () => setSidebarOpen((prev) => !prev);
   const toggleTheme = () => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
@@ -40,13 +45,44 @@ export const AppProvider = ({ children }) => {
     setProjectApiKey(candidate);
     queryClient.clear();
     setIsAuthenticated(true);
+    setAuthMethod('api_key');
+    return true;
+  }, []);
+
+  const authenticateWithNostr = useCallback(async () => {
+    await authenticateNostrSession();
+    clearProjectApiKey();
+    queryClient.clear();
+    setIsAuthenticated(true);
+    setAuthMethod('nostr');
     return true;
   }, []);
 
   const logout = useCallback(() => {
+    if (authMethod === 'nostr') {
+      void logoutNostr().catch(() => {});
+    }
     clearProjectApiKey();
     queryClient.clear();
     setIsAuthenticated(false);
+    setAuthMethod(null);
+  }, [authMethod]);
+
+  useEffect(() => {
+    let active = true;
+    getNostrSession()
+      .then((session) => {
+        if (!active) return;
+        setNostrEnabled(Boolean(session.enabled));
+        if (session.signed_in) {
+          setIsAuthenticated(true);
+          setAuthMethod('nostr');
+        }
+      })
+      .catch(() => {
+        if (active) setNostrEnabled(false);
+      });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -71,7 +107,10 @@ export const AppProvider = ({ children }) => {
     setTheme,
     toggleTheme,
     isAuthenticated,
+    nostrEnabled,
+    authMethod,
     authenticate,
+    authenticateWithNostr,
     logout,
   };
 

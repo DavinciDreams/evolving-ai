@@ -5,6 +5,8 @@ import { AppProvider } from '../context/AppContext';
 import App from '../App';
 import {
   clearProjectApiKey,
+  authenticateWithNostr,
+  getNostrSession,
   setProjectApiKey,
   validateProjectApiKey,
 } from '../services/api';
@@ -22,6 +24,9 @@ vi.mock('../services/api', () => {
     api: mockApi,
     default: mockApi,
     clearProjectApiKey: vi.fn(),
+    authenticateWithNostr: vi.fn(),
+    getNostrSession: vi.fn().mockResolvedValue({ enabled: false, signed_in: false }),
+    logoutNostr: vi.fn().mockResolvedValue({ signed_out: true }),
     setProjectApiKey: vi.fn(),
     validateProjectApiKey: vi.fn(),
   };
@@ -80,5 +85,22 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Log out' }));
     expect(clearProjectApiKey).toHaveBeenCalled();
     expect(screen.getByRole('heading', { name: 'Project access required' })).toBeInTheDocument();
+  });
+
+  it('offers Nostr human login without asking for a private key', async () => {
+    const user = userEvent.setup();
+    getNostrSession.mockResolvedValueOnce({ enabled: true, signed_in: false });
+    authenticateWithNostr.mockResolvedValueOnce({ signed_in: true });
+    render(
+      <AppProvider>
+        <App />
+      </AppProvider>
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Continue with Nostr' }));
+
+    expect(authenticateWithNostr).toHaveBeenCalledOnce();
+    expect(await screen.findByText('AI Agent Dashboard')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/private key/i)).not.toBeInTheDocument();
   });
 });

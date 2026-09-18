@@ -6,6 +6,7 @@ vi.mock('react-hot-toast', () => ({
 
 import {
   api,
+  authenticateWithNostr,
   clearProjectApiKey,
   setProjectApiKey,
 } from '../../services/api';
@@ -49,5 +50,49 @@ describe('project credential transport', () => {
     await api.get('/status', { headers: { 'X-API-Key': 'candidate-key' } });
 
     expect(observed).toBe('candidate-key');
+  });
+
+  it('uses a NIP-07 signer and sends only public proof material', async () => {
+    const pubkey = 'a'.repeat(64);
+    const signedEvent = {
+      id: 'b'.repeat(64),
+      sig: 'c'.repeat(128),
+      pubkey,
+      created_at: 123,
+      kind: 27235,
+      tags: [],
+      content: '',
+    };
+    const signEvent = vi.fn().mockResolvedValue(signedEvent);
+    window.nostr = {
+      getPublicKey: vi.fn().mockResolvedValue(pubkey),
+      signEvent,
+    };
+    const observed = [];
+    api.defaults.adapter = async (config) => {
+      observed.push({ url: config.url, data: JSON.parse(config.data) });
+      if (config.url.endsWith('/options')) {
+        return {
+          ...responseFor(config),
+          data: { challenge: 'd'.repeat(43), verify_url: 'https://api.example/auth/nostr/verify' },
+        };
+      }
+      return { ...responseFor(config), data: { signed_in: true } };
+    };
+
+    await authenticateWithNostr();
+
+    expect(signEvent).toHaveBeenCalledWith(expect.objectContaining({
+      pubkey,
+      kind: 27235,
+      content: '',
+      tags: expect.arrayContaining([['challenge', 'd'.repeat(43)]]),
+    }));
+    expect(observed[1]).toEqual({
+      url: '/auth/nostr/verify',
+      data: { challenge: 'd'.repeat(43), event: signedEvent },
+    });
+    expect(JSON.stringify(observed)).not.toMatch(/nsec|private/i);
+    delete window.nostr;
   });
 });

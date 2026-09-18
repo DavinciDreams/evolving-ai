@@ -66,6 +66,8 @@ def _validate_separate_service_credentials() -> None:
 async def lifespan(app: FastAPI):
     """Initialize and cleanup the agent with graceful shutdown."""
     _validate_separate_service_credentials()
+    from evolving_agent.utils.nostr_auth import validate_config as validate_nostr_auth_config
+    validate_nostr_auth_config()
     if os.getenv("WEB_CONCURRENCY", "1") != "1":
         raise RuntimeError("Steward runtime requires exactly one worker")
     app_state.server_shutdown = False
@@ -276,6 +278,10 @@ _PUBLIC_API_PATHS = frozenset({
     "/docs/oauth2-redirect",
     "/redoc",
     "/public/memories",
+    "/auth/nostr/session",
+    "/auth/nostr/options",
+    "/auth/nostr/verify",
+    "/auth/nostr/logout",
 })
 
 
@@ -355,6 +361,7 @@ from evolving_agent.api.routes.web_search import router as web_search_router
 from evolving_agent.api.routes.steward import router as steward_router
 from evolving_agent.api.routes.media import router as media_router
 from evolving_agent.api.routes.connectors import router as connectors_router
+from evolving_agent.api.routes.auth import router as auth_router
 
 app.include_router(general_router)
 app.include_router(interaction_router)
@@ -369,6 +376,7 @@ app.include_router(feedback_router)
 app.include_router(steward_router)
 app.include_router(media_router)
 app.include_router(connectors_router)
+app.include_router(auth_router)
 
 
 # ---------------------------------------------------------------------------

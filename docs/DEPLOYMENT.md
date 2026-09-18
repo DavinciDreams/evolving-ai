@@ -32,7 +32,8 @@ This guide covers deploying the Evolving AI Agent to Coolify (backend) and Verce
 - Port: `8000`
 
 Use Docker Compose for production. The compose file mounts named volumes for
-ChromaDB, session state, knowledge, backups, scratchpad data, and logs. A plain
+ChromaDB, session state, knowledge, backups, scratchpad data, a Katbot
+workspace, and logs. A plain
 Dockerfile deployment can run the app, but you must add the same persistent
 storage mounts in Coolify manually or memory will be lost when the container is
 recreated.
@@ -75,6 +76,12 @@ TRAEFIK_DOCKER_NETWORK=coolify
 API_AUTH_REQUIRED=true
 PROJECT_API_KEY=<separate-long-random-secret>
 
+# Human login. Use the same public key as other applications if desired, but
+# grant access here explicitly. Never configure an nsec/private key.
+NOSTR_AUTH_ENABLED=true
+PROJECT_NOSTR_PUBKEYS=<lowercase-64-character-public-key>
+NOSTR_AUTH_VERIFY_URL=https://www.evolvingai.bio/api/auth/nostr/verify
+
 # GitHub Integration
 GITHUB_TOKEN=ghp_...
 GITHUB_REPO=DavinciDreams/evolving-ai
@@ -109,6 +116,7 @@ MEMORY_COLLECTION_NAME=agent_memory
 KNOWLEDGE_BASE_PATH=/app/data/knowledge_base
 BACKUP_DIRECTORY=/app/data/backups
 SCRATCHPAD_DIR=/app/data/scratchpad
+TOOL_SANDBOX_DIR=/app/workspace
 
 # Same-origin Vercel rewrite needs no cross-origin browser access.
 CORS_ORIGINS=
@@ -117,6 +125,11 @@ CORS_ORIGINS=
 LOG_LEVEL=INFO
 LOG_FILE=/app/logs/agent.log
 ```
+
+`NOSTR_AUTH_VERIFY_URL` is the single source of truth for both the signed
+NIP-98 URL and the allowed browser origin. Keep the frontend on the canonical
+`www` origin and its same-origin `/api` rewrite; this avoids cross-site session
+cookies and a second origin setting that could drift.
 
 ### Persistent Volumes
 
@@ -128,11 +141,16 @@ evolving-ai-persistent   -> /app/data/persistent_data
 evolving-ai-knowledge    -> /app/data/knowledge_base
 evolving-ai-backups      -> /app/data/backups
 evolving-ai-scratchpad   -> /app/data/scratchpad
+evolving-ai-workspace    -> /app/workspace
 evolving-ai-logs         -> /app/logs
 ```
 
 After deploying, verify Coolify created or attached these storages before
 testing reboot persistence.
+
+`/app/workspace` is Katbot's durable general working folder. The smaller
+scratchpad remains separate so existing notes survive unchanged. The host
+command tool is not a security sandbox; route untrusted code through E2B.
 
 ### Step 4: Deploy
 
