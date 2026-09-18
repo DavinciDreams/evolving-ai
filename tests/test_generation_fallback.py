@@ -32,7 +32,10 @@ async def test_conversational_messages_do_not_offer_tools(agent, query):
 
     assert response == "Hello!"
     assert sdk.call_args.kwargs["tools"] is None
-    assert "External tools are intentionally unavailable" in sdk.call_args.kwargs["system"]
+    assert (
+        "External tools are intentionally unavailable"
+        in sdk.call_args.kwargs["system"]
+    )
 
 
 async def test_action_request_still_offers_enabled_tools(agent):
