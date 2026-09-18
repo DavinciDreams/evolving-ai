@@ -9,6 +9,60 @@ from evolving_agent.core.identity import BASE_STEWARD_PROMPT
 agent = agent_tests.agent
 
 
+@pytest.mark.parametrize(
+    "query",
+    ["hello", "Hello!", "hi there", "good morning", "thank you"],
+)
+async def test_conversational_messages_do_not_offer_tools(agent, query):
+    agent._build_messages = MagicMock(return_value=[])
+    agent._get_ai_sdk_model = MagicMock(return_value=object())
+    agent.tpmjs_client = object()
+    cfg = MagicMock(
+        enable_tool_use=True,
+        max_tool_iterations=15,
+        temperature=0.3,
+        max_tokens=2048,
+        default_llm_provider="zai",
+    )
+    result = MagicMock(text="Hello!", tool_results=[], steps=[])
+    with patch("evolving_agent.core.agent.config", cfg), patch(
+        "evolving_agent.core.agent.generate_text", return_value=result
+    ) as sdk:
+        response = await SelfImprovingAgent._generate_response(agent, query, {})
+
+    assert response == "Hello!"
+    assert sdk.call_args.kwargs["tools"] is None
+    assert (
+        "External tools are intentionally unavailable"
+        in sdk.call_args.kwargs["system"]
+    )
+
+
+async def test_action_request_still_offers_enabled_tools(agent):
+    agent._build_messages = MagicMock(return_value=[])
+    agent._get_ai_sdk_model = MagicMock(return_value=object())
+    agent.tpmjs_client = None
+    agent.web_search = None
+    agent.memory = None
+    agent.e2b_sandbox = None
+    cfg = MagicMock(
+        enable_tool_use=True,
+        max_tool_iterations=15,
+        temperature=0.3,
+        max_tokens=2048,
+        default_llm_provider="zai",
+    )
+    result = MagicMock(text="result", tool_results=[], steps=[])
+    sentinel_tools = [object()]
+    with patch("evolving_agent.core.agent.config", cfg), patch(
+        "evolving_agent.core.agent.get_all_tools", return_value=sentinel_tools
+    ), patch("evolving_agent.core.agent.generate_text", return_value=result) as sdk:
+        await SelfImprovingAgent._generate_response(agent, "look up today's weather", {})
+
+    assert sdk.call_args.kwargs["tools"] == sentinel_tools
+    assert "Tools are available capabilities" in sdk.call_args.kwargs["system"]
+
+
 @pytest.mark.parametrize("failure_stage", ["model", "generation"])
 async def test_one_fallback_for_sdk_failure(agent, failure_stage):
     agent._build_system_prompt = MagicMock(return_value=BASE_STEWARD_PROMPT)
