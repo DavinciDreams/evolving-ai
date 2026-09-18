@@ -1,5 +1,6 @@
 """Tests for Discord integration."""
 
+import asyncio
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
 from evolving_agent.integrations.discord_rate_limiter import RateLimiter
@@ -208,6 +209,7 @@ class TestDiscordIntegration:
         """Create mock agent."""
         agent = Mock()
         agent.run = AsyncMock(return_value="Test response from agent")
+        agent.review_ham_corpus = AsyncMock(return_value="Evidence-linked HAM review")
         agent.register_status_callback = Mock()
         return agent
 
@@ -365,6 +367,83 @@ class TestDiscordIntegration:
         mock_agent.run.assert_called_once()
         assert mock_agent.run.call_args.kwargs["conversation_id"] == "discord:987:123456789"
         assert mock_agent.run.call_args.kwargs["wait_for_storage"] is True
+        assert mock_agent.run.call_args.kwargs["direct_context"] is True
+        assert mock_agent.run.call_args.kwargs["evaluate_response"] is False
+
+    async def test_ham_review_runs_in_background_with_progress(
+        self, mock_agent, mock_config
+    ):
+        from evolving_agent.integrations.discord_integration import DiscordIntegration
+
+        integration = DiscordIntegration("test_token", mock_agent, mock_config)
+        integration.send_response = AsyncMock()
+        acknowledgement = AsyncMock()
+        acknowledgement.edit = AsyncMock()
+        integration._send_with_retry = AsyncMock(return_value=acknowledgement)
+
+        message = Mock()
+        message.author.id = 42
+        message.author.name = "alice"
+        message.channel.id = 123456789
+        message.channel.name = "memory-lab"
+        message.channel.send = AsyncMock()
+        message.guild.id = 987
+        message.content = "Please review the HAM physics memories and synthesize them"
+
+        await integration.handle_message(message)
+
+        mock_agent.run.assert_not_called()
+        integration._send_with_retry.assert_awaited_once()
+        assert integration._review_tasks
+        await asyncio.gather(*list(integration._review_tasks))
+
+        mock_agent.review_ham_corpus.assert_awaited_once()
+        kwargs = mock_agent.review_ham_corpus.await_args.kwargs
+        assert kwargs["conversation_id"] == "discord:987:123456789"
+        await kwargs["progress"]("Scanning evidence")
+        acknowledgement.edit.assert_awaited()
+        integration.send_response.assert_awaited_once_with(
+            message.channel, "Evidence-linked HAM review"
+        )
+        assert not integration._review_channels
+
+    async def test_second_ham_review_in_channel_is_rejected_without_new_task(
+        self, mock_agent, mock_config
+    ):
+        from evolving_agent.integrations.discord_integration import DiscordIntegration
+
+        integration = DiscordIntegration("test_token", mock_agent, mock_config)
+        integration._send_with_retry = AsyncMock()
+        integration._review_channels.add("discord:987:123456789")
+        message = Mock()
+        message.author.id = 42
+        message.author.name = "alice"
+        message.channel.id = 123456789
+        message.channel.name = "memory-lab"
+        message.guild.id = 987
+        message.content = "Review HAM for physics themes"
+
+        await integration.handle_message(message)
+
+        mock_agent.review_ham_corpus.assert_not_awaited()
+        integration._send_with_retry.assert_awaited_once()
+
+    @pytest.mark.parametrize(
+        "query,expected",
+        [
+            ("review HAM for physics", True),
+            ("HAM corpus synthesis of phase transitions", True),
+            ("remember this physics idea", False),
+            ("hello HAM", False),
+        ],
+    )
+    async def test_ham_review_intent_is_explicit(
+        self, mock_agent, mock_config, query, expected
+    ):
+        from evolving_agent.integrations.discord_integration import DiscordIntegration
+
+        integration = DiscordIntegration("test_token", mock_agent, mock_config)
+        assert integration._is_ham_review_request(query) is expected
 
     async def test_get_stats(self, mock_agent, mock_config):
         """Test getting integration stats."""

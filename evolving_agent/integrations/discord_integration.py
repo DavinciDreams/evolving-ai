@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import re
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -82,6 +83,8 @@ class DiscordIntegration:
         # State
         self.initialized = False
         self.is_running = False
+        self._review_tasks: set[asyncio.Task] = set()
+        self._review_channels: set[str] = set()
         self._setup_event_handlers()
 
         logger.info(
@@ -213,6 +216,16 @@ class DiscordIntegration:
             if self.status_updates_enabled and self.status_channel_id:
                 await self._post_shutdown_status()
 
+            pending_reviews = [task for task in self._review_tasks if not task.done()]
+            for task in pending_reviews:
+                task.cancel()
+            if pending_reviews:
+                try:
+                    async with asyncio.timeout(2):
+                        await asyncio.gather(*pending_reviews, return_exceptions=True)
+                except TimeoutError:
+                    logger.warning("Discord HAM review shutdown timed out")
+
             await self.client.close()
             logger.info("Discord bot shutdown complete")
 
@@ -257,6 +270,10 @@ class DiscordIntegration:
             await self.handle_feature_request(message)
             return
 
+        if self._is_ham_review_request(query):
+            await self._start_ham_review(message, query)
+            return
+
         # Show typing indicator if enabled
         async with message.channel.typing() if self.show_typing else self._noop_context():
             try:
@@ -275,6 +292,8 @@ class DiscordIntegration:
                     context_hints=context_hints,
                     conversation_id=conversation_id,
                     wait_for_storage=True,
+                    direct_context=True,
+                    evaluate_response=False,
                 )
                 processing_time = (datetime.utcnow() - start_time).total_seconds()
 
@@ -304,6 +323,98 @@ class DiscordIntegration:
                     "Discord operation failed", user_friendly=True
                 )
                 await message.channel.send(embed=error_embed)
+
+    _HAM_REVIEW_RE = re.compile(
+        r"(?:\bham\b.{0,120}\b(?:review|survey|audit|map|summary|summari[sz]e|"
+        r"synthesis|synthesi[sz]e|analysis|analy[sz]e)\b|"
+        r"\b(?:review|survey|audit|map|summary|summari[sz]e|synthesis|"
+        r"synthesi[sz]e|analysis|analy[sz]e)\b.{0,120}\bham\b)",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    @classmethod
+    def _is_ham_review_request(cls, query: str) -> bool:
+        """Route explicit HAM corpus reviews away from synchronous chat."""
+        return bool(cls._HAM_REVIEW_RE.search(query))
+
+    async def _start_ham_review(self, message: discord.Message, query: str) -> None:
+        channel_key = self._get_conversation_id(message)
+        if channel_key in self._review_channels:
+            await self._send_with_retry(
+                message.channel,
+                content=(
+                    "A HAM review is already running in this channel. I’ll post its "
+                    "result here; ordinary chat can continue meanwhile."
+                ),
+            )
+            return
+
+        self._review_channels.add(channel_key)
+        try:
+            acknowledgement = await self._send_with_retry(
+                message.channel,
+                content=(
+                    "🔎 I’m starting a bounded HAM corpus review in the background. "
+                    "I’ll update this status and post the evidence-linked result here; "
+                    "ordinary chat can continue meanwhile."
+                ),
+            )
+        except Exception:
+            self._review_channels.discard(channel_key)
+            raise
+
+        async def progress(status: str) -> None:
+            logger.info("HAM review progress: {}", status)
+            try:
+                await acknowledgement.edit(content=f"🔎 {status}")
+            except Exception as exc:
+                logger.warning(
+                    "Discord HAM review status update failed: {}", type(exc).__name__
+                )
+
+        async def work() -> None:
+            try:
+                report = await asyncio.wait_for(
+                    self.agent.review_ham_corpus(
+                        query,
+                        progress=progress,
+                        conversation_id=channel_key,
+                    ),
+                    timeout=300,
+                )
+                try:
+                    await acknowledgement.edit(
+                        content="✅ HAM review complete; posting the result below."
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Discord HAM review completion update failed: {}",
+                        type(exc).__name__,
+                    )
+                await self.send_response(message.channel, report)
+                logger.info("Discord HAM review response sent")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error("Discord HAM review failed: {}", type(exc).__name__)
+                error_embed = self.formatter.format_error_message(
+                    "The HAM review did not complete within its bounded job. "
+                    "Ordinary chat is still available.",
+                    user_friendly=True,
+                )
+                await message.channel.send(embed=error_embed)
+            finally:
+                self._review_channels.discard(channel_key)
+
+        task = asyncio.create_task(work(), name=f"katbot-ham-review:{channel_key}")
+        self._review_tasks.add(task)
+
+        def finished(done: asyncio.Task) -> None:
+            self._review_tasks.discard(done)
+            if not done.cancelled():
+                done.exception()
+
+        task.add_done_callback(finished)
 
     def _get_conversation_id(self, message: discord.Message) -> str:
         """Build a stable conversation key for Discord channel context."""

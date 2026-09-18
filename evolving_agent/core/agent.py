@@ -457,6 +457,8 @@ class SelfImprovingAgent:
         conversation_id: Optional[str] = None,
         conversation_history: Optional[List[Dict[str, Any]]] = None,
         wait_for_storage: bool = False,
+        direct_context: bool = False,
+        evaluate_response: bool = True,
     ) -> str:
         """Run a bounded, non-reentrant interaction; never queue silently."""
         if not hasattr(self, "runtime"):
@@ -483,7 +485,8 @@ class SelfImprovingAgent:
             self.last_evaluation_score = None
             self.last_storage_status = {"memory_stored": False, "knowledge_updated": False}
             return await self._run_impl(query, context_hints, conversation_id,
-                                        conversation_history, wait_for_storage)
+                                        conversation_history, wait_for_storage,
+                                        direct_context, evaluate_response)
 
         return await self.runtime.run(operation)
 
@@ -494,6 +497,8 @@ class SelfImprovingAgent:
         conversation_id: Optional[str] = None,
         conversation_history: Optional[List[Dict[str, Any]]] = None,
         wait_for_storage: bool = False,
+        direct_context: bool = False,
+        evaluate_response: bool = True,
     ) -> str:
 
         """
@@ -509,6 +514,10 @@ class SelfImprovingAgent:
             wait_for_storage: When true, persist SQLite/Chroma memory writes before
                 returning. Useful for synchronous chat adapters like Discord where
                 the next message may arrive immediately after the response is sent.
+            direct_context: When true, use one bounded semantic memory retrieval
+                rather than model-expanded context searches.
+            evaluate_response: When false, keep evaluation off the foreground
+                response path. The interaction is still stored without a fake score.
 
         Returns:
             The agent's response
@@ -554,9 +563,14 @@ class SelfImprovingAgent:
                 return response
 
             # Step 1: Retrieve relevant context
-            context = await self.context_manager.get_relevant_context(
-                query=query, context_types=context_hints
-            )
+            if direct_context:
+                context = await self.context_manager.get_direct_context(
+                    query=query, context_hints=context_hints
+                )
+            else:
+                context = await self.context_manager.get_relevant_context(
+                    query=query, context_types=context_hints
+                )
             context, _ = redact_value(context)
 
             # Step 1b: Retrieve conversation history for multi-turn context
@@ -581,7 +595,7 @@ class SelfImprovingAgent:
             initial_response, _ = redact_text(initial_response)
 
             # Step 3: Evaluate the response (if enabled)
-            if config.enable_evaluation:
+            if config.enable_evaluation and evaluate_response:
                 evaluation = await self._evaluate_bounded(
                     query=query, output=initial_response, context=context
                 )
@@ -647,7 +661,12 @@ class SelfImprovingAgent:
             else:
                 # Skip evaluation and use initial response
                 final_response = initial_response
-                evaluation = EvaluationResult.skipped("evaluation_disabled")
+                reason = (
+                    "interactive_evaluation_skipped"
+                    if config.enable_evaluation and not evaluate_response
+                    else "evaluation_disabled"
+                )
+                evaluation = EvaluationResult.skipped(reason)
 
             if not isinstance(final_response, str) or not final_response.strip():
                 raise RuntimeError("Provider returned no usable response")
@@ -714,6 +733,57 @@ class SelfImprovingAgent:
             ), max_tokens=min(config.max_tokens, 4000),
             temperature=config.temperature, timeout=10,
         )
+
+    async def review_ham_corpus(
+        self,
+        query: str,
+        *,
+        progress=None,
+        conversation_id: Optional[str] = None,
+    ) -> str:
+        """Run a bounded corpus review outside the interactive chat runtime.
+
+        This method deliberately does not call :meth:`run`, advertise tools, or
+        mutate the foreground runtime lease. Discord can therefore acknowledge
+        the request immediately while the review performs bounded retrieval and
+        no-tool synthesis in its own observed task.
+        """
+        from ..integrations.bounded_llm import BoundedTextProvider
+        from .ham_review import HAMReviewService
+
+        service = HAMReviewService(
+            self.memory,
+            BoundedTextProvider(config),
+        )
+        result = await service.review(query, progress=progress)
+        evaluation = EvaluationResult.skipped("background_ham_review")
+        context = {
+            "ham_review": {
+                "source_count": result.source_count,
+                "semantic_queries": result.semantic_queries,
+                "project_records_scanned": result.project_records_scanned,
+            }
+        }
+        try:
+            await asyncio.gather(
+                self.data_manager.save_interaction(
+                    query=query,
+                    response=result.report,
+                    evaluation_score=None,
+                    context_used=context,
+                    metadata={
+                        "session_id": self.session_id,
+                        "background_ham_review": True,
+                    },
+                    conversation_id=conversation_id,
+                ),
+                self._store_interaction(query, result.report, context, evaluation),
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Background HAM review persistence failed: {}", type(exc).__name__
+            )
+        return result.report
 
     _SELF_EDIT_KEYWORDS = [
         "improve yourself", "self-edit", "self edit", "self-improve",
