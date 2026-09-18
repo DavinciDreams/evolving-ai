@@ -28,6 +28,32 @@ async def test_get_relevant_context_basic():
     assert "system_state" in context
 
 
+async def test_direct_context_uses_one_search_and_no_llm_expansion():
+    mock_memory = MagicMock(spec=LongTermMemory)
+    entry = MemoryEntry(content="Kuramoto phase transition", memory_type="research")
+    mock_memory.search_memories = AsyncMock(return_value=[(entry, 0.91)])
+    mock_memory.list_recent_memories = AsyncMock(return_value=[entry])
+    context_manager = ContextManager(mock_memory)
+
+    with patch('evolving_agent.core.context_manager.llm_manager') as mock_llm:
+        context = await context_manager.get_direct_context(
+            "physics synchronization",
+            context_hints=["discord_user:alice"],
+        )
+
+    mock_memory.search_memories.assert_awaited_once_with(
+        query="physics synchronization",
+        n_results=8,
+        memory_type=None,
+        similarity_threshold=0.6,
+    )
+    mock_memory.list_recent_memories.assert_awaited_once_with(limit=8)
+    mock_llm.generate_response.assert_not_called()
+    assert context["relevant_memory"]["items"][0]["content"] == entry.content
+    assert context["request_context"] == ["discord_user:alice"]
+    assert context["system_state"]["mode"] == "direct"
+
+
 async def test_context_query_generation():
     """Test that context queries are generated for all context types."""
     mock_memory = MagicMock(spec=LongTermMemory)

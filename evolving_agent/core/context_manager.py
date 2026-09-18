@@ -124,6 +124,92 @@ class ContextManager:
             logger.error(f"Failed to get relevant context: {e}")
             # Try to return degraded context
             return self._get_degraded_context(query)
+
+    async def get_direct_context(
+        self,
+        query: str,
+        context_hints: Optional[List[str]] = None,
+        max_context_items: int = 8,
+        similarity_threshold: float = 0.6,
+    ) -> Dict[str, Any]:
+        """Retrieve one bounded semantic context set without LLM query expansion.
+
+        Interactive adapters need predictable latency.  The full context path
+        generates several model-authored search queries, performs one memory
+        search per query, and may ask the model to summarize each result set.
+        That is useful for offline work, but it consumed most of Discord's chat
+        deadline.  This path performs one semantic search and one recent-memory
+        read concurrently and never invokes the model.
+        """
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("Direct context query must be non-empty text")
+        if not 1 <= max_context_items <= 20:
+            raise ValueError("Direct context item limit must be between 1 and 20")
+
+        try:
+            semantic_task = self.memory.search_memories(
+                query=query,
+                n_results=max_context_items,
+                memory_type=None,
+                similarity_threshold=similarity_threshold,
+            )
+            recent_task = self.memory.list_recent_memories(
+                limit=min(max_context_items, 10)
+            )
+            semantic, recent = await asyncio.gather(
+                semantic_task, recent_task, return_exceptions=True
+            )
+
+            organized: Dict[str, Any] = {}
+            if not isinstance(semantic, BaseException):
+                items = [
+                    {
+                        "content": memory.content,
+                        "relevance_score": score,
+                        "timestamp": memory.timestamp.isoformat(),
+                        "memory_type": memory.memory_type,
+                        "metadata": memory.metadata,
+                    }
+                    for memory, score in semantic[:max_context_items]
+                ]
+                if items:
+                    organized["relevant_memory"] = {
+                        "items": items,
+                        "total_items": len(items),
+                    }
+            else:
+                logger.warning("Direct semantic context retrieval failed")
+
+            if not isinstance(recent, BaseException):
+                recent_items = [
+                    {
+                        "content": memory.content,
+                        "timestamp": _as_utc(memory.timestamp).isoformat(),
+                        "memory_type": memory.memory_type,
+                    }
+                    for memory in recent[: min(max_context_items, 5)]
+                ]
+                if recent_items:
+                    organized["recent_interactions"] = recent_items
+            else:
+                logger.warning("Direct recent context retrieval failed")
+
+            if context_hints:
+                organized["request_context"] = [
+                    str(value)[:200] for value in context_hints[:8]
+                ]
+            organized["system_state"] = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "mode": "direct",
+            }
+            self._update_degraded_cache(query, organized)
+            logger.info("Retrieved direct context without model expansion")
+            return organized
+        except Exception as exc:
+            logger.warning(
+                "Direct context retrieval degraded: {}", type(exc).__name__
+            )
+            return self._get_degraded_context(query)
     
     async def _generate_context_queries_with_recovery(
         self, main_query: str, context_types: Optional[List[str]] = None

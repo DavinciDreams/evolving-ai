@@ -106,6 +106,7 @@ async def agent():
     # ---- Context manager ----
     a.context_manager = MagicMock()
     a.context_manager.get_relevant_context = AsyncMock(return_value={})
+    a.context_manager.get_direct_context = AsyncMock(return_value={})
 
     # ---- Data manager ----
     a.data_manager = MagicMock()
@@ -269,6 +270,30 @@ async def test_run_skips_evaluation_when_disabled(agent):
 
     agent.evaluator.evaluate_output.assert_not_called()
     assert result == "Test answer"
+
+
+async def test_interactive_adapter_can_bypass_foreground_evaluation(agent):
+    """Discord should not spend its response deadline on optional evaluation."""
+    with patch("evolving_agent.core.agent.config", _make_config(enable_evaluation=True)):
+        result = await agent.run(
+            "hello", evaluate_response=False, wait_for_storage=True
+        )
+
+    agent.evaluator.evaluate_output.assert_not_called()
+    agent._improve_response.assert_not_called()
+    assert result == "Test answer"
+    assert agent.last_evaluation_score is None
+
+
+async def test_interactive_adapter_uses_direct_context(agent):
+    hints = ["discord_user:alice", "discord_channel:physics"]
+    with patch("evolving_agent.core.agent.config", _make_config()):
+        await agent.run("phase transitions", context_hints=hints, direct_context=True)
+
+    agent.context_manager.get_direct_context.assert_awaited_once_with(
+        query="phase transitions", context_hints=hints
+    )
+    agent.context_manager.get_relevant_context.assert_not_awaited()
 
 
 async def test_run_detects_self_edit_request(agent):
