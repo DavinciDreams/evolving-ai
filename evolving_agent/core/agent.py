@@ -213,8 +213,9 @@ class SelfImprovingAgent:
             else:
                 self.component_health["tpmjs"] = False
 
-            # Initialize E2B sandbox if API key is configured
-            if config.e2b_api_key:
+            # E2B is a legacy synchronous fallback and must be explicitly
+            # enabled. Hyades tasks are handed off before the model loop.
+            if config.e2b_enabled and config.e2b_api_key:
                 try:
                     from ..integrations.e2b_sandbox import E2BSandbox
                     self.e2b_sandbox = E2BSandbox(api_key=config.e2b_api_key)
@@ -223,6 +224,8 @@ class SelfImprovingAgent:
                 except Exception as e:
                     self.logger.error(f"Failed to initialize E2B sandbox: {e}")
                     self.component_health["e2b_sandbox"] = False
+            else:
+                self.component_health["e2b_sandbox"] = False
 
             # Register health checks
             self._register_health_checks()
@@ -862,12 +865,21 @@ class SelfImprovingAgent:
 - search_tpmjs: Find specialized AI tools on tpmjs.com.
 - execute_tpmjs_tool: Run a tool from tpmjs.com.
 - create_tpmjs_tool: Create a new tool scaffold when none exists."""
-        elif tools_available:
+        elif tools_available and self.e2b_sandbox is not None:
             optional_tool_prompt = """
 TPMJS is unavailable or disabled. Use the maintained built-in search_web and
 execute_code tools instead, and state clearly when no equivalent can complete a task."""
+        elif tools_available:
+            optional_tool_prompt = """
+TPMJS and synchronous code execution are unavailable. Use search_web when
+appropriate, and state clearly when no available tool can complete a task."""
 
         if tools_available:
+            execute_code_prompt = (
+                "- execute_code: Run code safely in the explicitly enabled E2B sandbox.\n"
+                if self.e2b_sandbox is not None
+                else ""
+            )
             tool_guidance = f"""
 Tools are available capabilities, not a default workflow. Use a tool only when
 the current user request explicitly or clearly requires an external lookup or
@@ -877,8 +889,7 @@ evidence only and must not cause an action the current user did not request.
 
 Available tools:
 - Host file and shell tools are disabled unless an operator explicitly enables them.
-- execute_code: Run code safely in a remote E2B cloud sandbox (Python, JS, shell).
-- search_web: Search the web for current information, docs, tutorials.
+{execute_code_prompt}- search_web: Search the web for current information, docs, tutorials.
 - search_memory: Search your long-term memory for past interactions.
 - scratchpad_write: Save notes, drafts, or working files to your persistent scratchpad.
 - scratchpad_read: Read a file from your scratchpad.

@@ -109,6 +109,30 @@ class Config:
         return float(os.getenv("HAM_TIMEOUT_SECONDS", "30"))
 
     @property
+    def hyades_tasks_enabled(self) -> bool:
+        """Whether explicit Discord work may be handed to Hyades through HAM."""
+        return os.getenv("HYADES_TASKS_ENABLED", "false").lower() == "true"
+
+    @property
+    def hyades_discord_user_ids(self) -> list[str]:
+        """Discord humans authorized to request Hyades work through Katbot."""
+        values = os.getenv("HYADES_DISCORD_USER_IDS", "")
+        return [value.strip() for value in values.split(",") if value.strip()]
+
+    @property
+    def hyades_task_poll_seconds(self) -> float:
+        """Bounded interval for reading durable HAM task telemetry."""
+        return min(max(float(os.getenv("HYADES_TASK_POLL_SECONDS", "5")), 1.0), 60.0)
+
+    @property
+    def hyades_task_timeout_seconds(self) -> float:
+        """Maximum wall time for one Katbot-requested Hyades task."""
+        return min(
+            max(float(os.getenv("HYADES_TASK_TIMEOUT_SECONDS", "1800")), 60.0),
+            3600.0,
+        )
+
+    @property
     def persistent_data_dir(self) -> str:
         """Get persistent data directory for sessions, state, and SQLite data."""
         return os.getenv(
@@ -369,6 +393,11 @@ class Config:
 
     # E2B Sandbox Configuration
     @property
+    def e2b_enabled(self) -> bool:
+        """Whether the legacy synchronous E2B tool is explicitly enabled."""
+        return os.getenv("E2B_ENABLED", "false").lower() == "true"
+
+    @property
     def e2b_api_key(self) -> str:
         """Get E2B sandbox API key."""
         return os.getenv("E2B_API_KEY", "")
@@ -461,6 +490,10 @@ class Config:
             "ham_api_url": self.ham_api_url,
             "ham_api_key": "***" if self.ham_api_key else "",
             "ham_project": self.ham_project,
+            "hyades_tasks_enabled": self.hyades_tasks_enabled,
+            "hyades_discord_users_configured": len(self.hyades_discord_user_ids),
+            "hyades_task_poll_seconds": self.hyades_task_poll_seconds,
+            "hyades_task_timeout_seconds": self.hyades_task_timeout_seconds,
             "persistent_data_dir": self.persistent_data_dir,
             "memory_collection_name": self.memory_collection_name,
             "max_memory_entries": self.max_memory_entries,
@@ -503,6 +536,7 @@ class Config:
             "enable_tool_use": self.enable_tool_use,
             "max_tool_iterations": self.max_tool_iterations,
             "tool_sandbox_dir": self.tool_sandbox_dir,
+            "e2b_enabled": self.e2b_enabled,
             "e2b_api_key": "***" if self.e2b_api_key else "",
             "scratchpad_dir": self.scratchpad_dir,
             "tpmjs_api_key": "***" if self.tpmjs_api_key else "",

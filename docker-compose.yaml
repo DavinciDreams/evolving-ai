@@ -38,6 +38,7 @@ services:
       - TPMJS_ENABLED=${TPMJS_ENABLED:-false}
 
       # E2B Sandbox (remote code execution)
+      - E2B_ENABLED=${E2B_ENABLED:-false}
       - E2B_API_KEY=${E2B_API_KEY}
 
       # Agent Scratchpad
@@ -48,6 +49,11 @@ services:
       - HAM_API_URL=${HAM_API_URL:-https://ham.flobots.xyz}
       - HAM_API_KEY=${HAM_API_KEY}
       - HAM_PROJECT=${HAM_PROJECT:-evolving-ai}
+      - HAM_TIMEOUT_SECONDS=${HAM_TIMEOUT_SECONDS:-30}
+      - HYADES_TASKS_ENABLED=${HYADES_TASKS_ENABLED:-false}
+      - HYADES_DISCORD_USER_IDS=${HYADES_DISCORD_USER_IDS}
+      - HYADES_TASK_POLL_SECONDS=${HYADES_TASK_POLL_SECONDS:-5}
+      - HYADES_TASK_TIMEOUT_SECONDS=${HYADES_TASK_TIMEOUT_SECONDS:-1800}
       - LEGACY_MEMORY_READ_ONLY=${LEGACY_MEMORY_READ_ONLY:-true}
       - MEMORY_PERSIST_DIRECTORY=/app/data/memory_db
       - PERSISTENT_DATA_DIR=/app/data/persistent_data

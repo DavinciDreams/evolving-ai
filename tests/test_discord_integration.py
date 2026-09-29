@@ -228,6 +228,10 @@ class TestDiscordIntegration:
         config.discord_max_message_length = 2000
         config.discord_attachment_threshold = 12000
         config.discord_max_attachment_bytes = 7_500_000
+        config.hyades_tasks_enabled = True
+        config.hyades_discord_user_ids = ["42"]
+        config.hyades_task_poll_seconds = 1
+        config.hyades_task_timeout_seconds = 60
         return config
 
     async def test_discord_integration_initialization(self, mock_agent, mock_config):
@@ -444,6 +448,86 @@ class TestDiscordIntegration:
 
         integration = DiscordIntegration("test_token", mock_agent, mock_config)
         assert integration._is_ham_review_request(query) is expected
+
+    @pytest.mark.parametrize(
+        "query,expected",
+        [
+            ("!hyades run a bounded Python canary", True),
+            ("hyades: inspect this repository", True),
+            ("Katbot can you do a self improvement loop?", True),
+            ("tell me what Hyades is", False),
+            ("!hyades cancel", False),
+        ],
+    )
+    async def test_hyades_intent_requires_explicit_work(
+        self, mock_agent, mock_config, query, expected
+    ):
+        from evolving_agent.integrations.discord_integration import DiscordIntegration
+
+        integration = DiscordIntegration("test_token", mock_agent, mock_config)
+        assert integration._is_hyades_task_request(query) is expected
+
+    async def test_self_improvement_is_handed_off_without_entering_chat_loop(
+        self, mock_agent, mock_config
+    ):
+        from evolving_agent.integrations.discord_integration import DiscordIntegration
+
+        integration = DiscordIntegration("test_token", mock_agent, mock_config)
+        acknowledgement = AsyncMock()
+        acknowledgement.edit = AsyncMock()
+        integration._send_with_retry = AsyncMock(return_value=acknowledgement)
+        integration.send_response = AsyncMock()
+        bridge = Mock()
+        bridge.post = AsyncMock(
+            return_value={"task_id": "a" * 32, "status": "pending", "version": 1}
+        )
+        bridge.follow = AsyncMock(return_value="gVisor canary complete")
+        integration._hyades_bridge = Mock(return_value=bridge)
+
+        message = Mock()
+        message.id = 101
+        message.author.id = 42
+        message.author.name = "alice"
+        message.channel.id = 123456789
+        message.channel.name = "memory-lab"
+        message.channel.send = AsyncMock()
+        message.guild.id = 987
+        message.content = "Katbot can you do a self improvement loop?"
+
+        await integration.handle_message(message)
+
+        mock_agent.run.assert_not_called()
+        assert integration._hyades_tasks
+        await asyncio.gather(*list(integration._hyades_tasks))
+        bridge.post.assert_awaited_once()
+        assert bridge.post.await_args.kwargs["requester_ref"] == (
+            "discord:987:123456789:user:42"
+        )
+        bridge.follow.assert_awaited_once()
+        integration.send_response.assert_awaited_once_with(
+            message.channel, "gVisor canary complete", query_id="a" * 32
+        )
+        assert not integration._hyades_channels
+
+    async def test_hyades_handoff_rejects_unlisted_discord_user(
+        self, mock_agent, mock_config
+    ):
+        from evolving_agent.integrations.discord_integration import DiscordIntegration
+
+        integration = DiscordIntegration("test_token", mock_agent, mock_config)
+        integration._send_with_retry = AsyncMock()
+        integration._start_hyades_task = AsyncMock()
+        message = Mock()
+        message.author.id = 404
+        message.channel.id = 123456789
+        message.guild.id = 987
+        message.content = "!hyades run a canary"
+
+        await integration.handle_message(message)
+
+        integration._start_hyades_task.assert_not_awaited()
+        integration._send_with_retry.assert_awaited_once()
+        assert "not authorized" in integration._send_with_retry.await_args.kwargs["content"]
 
     async def test_get_stats(self, mock_agent, mock_config):
         """Test getting integration stats."""
