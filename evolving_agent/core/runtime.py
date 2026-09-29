@@ -1,8 +1,9 @@
-"""Single-process, bounded execution with value-free telemetry.
+"""Single-process, non-reentrant execution with value-free telemetry.
 
-Synchronous SDK workers cannot be killed safely. A timed-out worker therefore
-keeps the runtime busy until it actually exits; we never start a replacement
-over a still-running tool call. Run exactly one application worker.
+Foreground work may run without a wall-clock deadline, but it remains strictly
+single-flight. Synchronous SDK workers cannot be killed safely. A timed-out
+worker therefore keeps the runtime busy until it actually exits; we never start
+a replacement over a still-running tool call. Run exactly one application worker.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import asyncio
 import os
 import time
 from collections import deque
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional
 
 
 class RuntimeBusyError(RuntimeError):
@@ -26,14 +27,30 @@ def bounded_seconds(name: str, default: float, maximum: float = 300.0) -> float:
     return value
 
 
+def optional_seconds(
+    name: str, default: float = 0.0, maximum: float = 300.0
+) -> Optional[float]:
+    """Return a positive deployment deadline, or ``None`` when configured as zero."""
+    value = float(os.getenv(name, str(default)))
+    if value == 0:
+        return None
+    if not 0 < value <= maximum:
+        raise ValueError(f"{name} must be zero or between 0 and {maximum}")
+    return value
+
+
 class AgentRuntime:
     """One foreground operation and a bounded set of observed background jobs."""
 
     def __init__(
-        self, *, timeout: float = 60.0, max_jobs: int = 8, shutdown_timeout: float = 2.0
+        self,
+        *,
+        timeout: Optional[float] = None,
+        max_jobs: int = 8,
+        shutdown_timeout: float = 2.0,
     ):
         if (
-            not 0 < timeout <= 300
+            (timeout is not None and not 0 < timeout <= 300)
             or not 1 <= max_jobs <= 32
             or not 0 < shutdown_timeout <= 10
         ):
@@ -81,13 +98,21 @@ class AgentRuntime:
         await asyncio.sleep(0)
         await asyncio.sleep(0)
 
-    async def _execute(self, operation: Callable[[], Awaitable], *, timeout: float):
+    async def _execute(
+        self, operation: Callable[[], Awaitable], *, timeout: Optional[float]
+    ):
         async def invoke():
             return await operation()
 
         task = asyncio.create_task(invoke(), name="katbot-runtime-operation")
         self._track(task, self._async_workers)
         try:
+            if timeout is None:
+                # Shield keeps caller cancellation from being trapped by a
+                # cancellation-resistant dependency. The handler below still
+                # requests cancellation and retains the runtime lease until
+                # the dependency actually exits.
+                return await asyncio.shield(task)
             done, _ = await asyncio.wait({task}, timeout=timeout)
             if not done:
                 await self._cancel(task)
