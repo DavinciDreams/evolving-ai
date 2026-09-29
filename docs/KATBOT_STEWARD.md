@@ -3,8 +3,10 @@
 Katbot can consolidate recent HAM memories, run bounded response-strategy
 experiments, and activate or roll back measured guidance. These are opt-in
 capabilities, not unrestricted self-modification. The implementation does not
-change model weights, execute generated code, grant tools, publish repositories,
-or treat a dream as fact. Offline tests demonstrate the control flow; **real
+change model weights, grant tools, publish repositories, or treat a dream as
+fact. Explicit Discord work can optionally be handed to a separately authorized
+Hyades gVisor executor; Katbot does not execute it in the serving container.
+Offline tests demonstrate the control flow; **real
 provider quality gains, production HAM behavior, and deployment readiness still
 require separate authorized verification**.
 
@@ -28,6 +30,15 @@ memories and dream/learning evidence belong in HAM/PostgreSQL. Legacy Chroma
 must remain contained and read-only after verified migration. Local interaction
 history and the connector delivery inbox are operational stores, not replacements
 for HAM or sources of independent benchmark authority.
+
+Hyades execution reuses `HAM_API_URL`, `HAM_API_KEY`, and `HAM_PROJECT`. Katbot
+posts a durable task and reads its append-only progress; it never receives a
+Hyades or Saturn credential and never calls the sandbox service directly. The
+Hyades executor binding owns workspace tickets, `sandbox-pod` selection, and
+runtime authority. Discord accepts `!hyades <request>` and explicit natural
+self-improvement requests when `HYADES_TASKS_ENABLED=true`; `!hyades cancel`
+may be used by the originating Discord user. Only IDs listed in
+`HYADES_DISCORD_USER_IDS` may create work, and one task is admitted per channel.
 
 ## Activation sequence
 
@@ -76,6 +87,10 @@ Defaults below describe this implementation, not an observed deployment. See
 | `MEMORY_BACKEND` | `ham` | Authoritative durable memory |
 | `HAM_API_URL`, `HAM_API_KEY` | reviewed HTTPS endpoint and dedicated managed credential | Authoritative identity and memory-scope ceiling |
 | `HAM_PROJECT` | `evolving-ai` | Selects the HAM-owned project record that supplies scope and repository attribution |
+| `HYADES_TASKS_ENABLED` | `false` | Opt in to durable Discord-to-HAM task handoff for the Hyades gVisor executor |
+| `HYADES_DISCORD_USER_IDS` | empty | Comma-separated Discord users allowed to create Hyades tasks; empty fails closed |
+| `HYADES_TASK_POLL_SECONDS` / `HYADES_TASK_TIMEOUT_SECONDS` | `5` / `1800` | Progress cadence and hard Katbot-side task deadline |
+| `E2B_ENABLED` | `false` | Explicit legacy synchronous fallback; keep disabled while Hyades is active |
 | `LEGACY_MEMORY_READ_ONLY` | `true` | Legacy containment; also enforce volume permissions |
 | `WEB_CONCURRENCY` | `1` | Required singleton ownership |
 | `CHAT_TIMEOUT_SECONDS` | `60` | Foreground deadline |

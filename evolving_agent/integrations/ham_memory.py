@@ -10,7 +10,7 @@ import asyncio
 import concurrent.futures
 import hashlib
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, TypeVar
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -280,6 +280,120 @@ class HAMMemoryClient:
         if not isinstance(result, list):
             raise HAMMemoryError("HAM recent response was malformed")
         return result
+
+    @staticmethod
+    def _task_result(result: Any) -> Dict[str, Any]:
+        """Validate the stable fields shared by HAM task responses."""
+        if (
+            not isinstance(result, dict)
+            or not isinstance(result.get("task_id"), str)
+            or not isinstance(result.get("version"), int)
+            or not isinstance(result.get("status"), str)
+        ):
+            raise HAMMemoryError("HAM task response was malformed")
+        return result
+
+    async def post_task(
+        self,
+        *,
+        title: str,
+        goal: str,
+        acceptance_criteria: List[str],
+        requester_ref: str,
+        idempotency_key: str,
+        resources: Optional[List[Dict[str, str]]] = None,
+        activity_mode: str = "test",
+        completion_policy: str = "immediate",
+    ) -> Dict[str, Any]:
+        """Post a durable task using the same credential/project authority as memory."""
+        await self._ensure_initialized()
+        await self._refresh_identity()
+        payload = {
+            "title": title[:400],
+            "goal": goal[:20_000],
+            "acceptance_criteria": acceptance_criteria[:50],
+            "activity_mode": activity_mode,
+            "completion_policy": completion_policy,
+            "resources": resources or [],
+            "requester_ref": requester_ref[:300],
+            "idempotency_key": self._bounded_key(idempotency_key),
+        }
+        result = self._task_result(
+            await self._request(
+                "POST",
+                f"/projects/{quote(self.project, safe='')}/tasks",
+                json=payload,
+            )
+        )
+        if result.get("requested_by_agent") != self.agent_id:
+            raise HAMMemoryError(
+                "HAM task identity mismatch: the credential is not bound to the "
+                f"active principal {self.agent_id!r}"
+            )
+        return result
+
+    async def get_task(self, task_id: str) -> Dict[str, Any]:
+        """Fetch one durable task and its latest run state."""
+        await self._ensure_initialized()
+        result = await self._request(
+            "GET", f"/tasks/{quote(task_id, safe='')}?run_limit=1"
+        )
+        return self._task_result(result)
+
+    async def task_events(
+        self,
+        task_id: str,
+        *,
+        after_event_id: int = 0,
+        limit: int = 50,
+    ) -> Tuple[List[Dict[str, Any]], int, bool]:
+        """Read append-only progress without treating event text as authority."""
+        await self._ensure_initialized()
+        result = await self._request(
+            "POST",
+            "/task-events/page",
+            json={
+                "project": self.project,
+                "task_id": task_id,
+                "after_event_id": max(int(after_event_id), 0),
+                "limit": min(max(int(limit), 1), 100),
+            },
+        )
+        if (
+            not isinstance(result, dict)
+            or not isinstance(result.get("items"), list)
+            or not isinstance(result.get("next_cursor"), int)
+        ):
+            raise HAMMemoryError("HAM task event response was malformed")
+        return (
+            result["items"],
+            result["next_cursor"],
+            bool(result.get("has_more")),
+        )
+
+    async def cancel_task(
+        self,
+        task_id: str,
+        *,
+        expected_version: int,
+        summary: str,
+        idempotency_key: str,
+    ) -> Dict[str, Any]:
+        """Cancel a task as its original requester; HAM enforces that authority."""
+        await self._ensure_initialized()
+        await self._refresh_identity()
+        result = await self._request(
+            "POST",
+            f"/tasks/{quote(task_id, safe='')}/respond",
+            json={
+                "action": "cancel",
+                "expected_version": int(expected_version),
+                "summary": summary[:4_000],
+                "evidence": {},
+                "idempotency_key": self._bounded_key(idempotency_key),
+            },
+        )
+        return self._task_result(result)
 
     async def page(
         self,

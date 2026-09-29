@@ -12,6 +12,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .discord_formatter import DiscordFormatter
 from .discord_rate_limiter import RateLimiter
+from .hyades_tasks import HyadesTaskBridge, HyadesTaskError
 
 
 class DiscordIntegration:
@@ -79,12 +80,33 @@ class DiscordIntegration:
             DiscordFormatter.MAX_EMBED_DESCRIPTION + 1,
         )
         self.max_attachment_bytes = max(int(config.discord_max_attachment_bytes), 1)
+        hyades_enabled = getattr(config, "hyades_tasks_enabled", False)
+        self.hyades_tasks_enabled = (
+            hyades_enabled if isinstance(hyades_enabled, bool) else False
+        )
+        hyades_users = getattr(config, "hyades_discord_user_ids", [])
+        self.hyades_discord_user_ids = {
+            str(value) for value in hyades_users
+        } if isinstance(hyades_users, (list, tuple, set)) else set()
+        poll_seconds = getattr(config, "hyades_task_poll_seconds", 5.0)
+        timeout_seconds = getattr(config, "hyades_task_timeout_seconds", 1800.0)
+        self.hyades_task_poll_seconds = (
+            float(poll_seconds) if isinstance(poll_seconds, (int, float)) else 5.0
+        )
+        self.hyades_task_timeout_seconds = (
+            float(timeout_seconds)
+            if isinstance(timeout_seconds, (int, float))
+            else 1800.0
+        )
 
         # State
         self.initialized = False
         self.is_running = False
         self._review_tasks: set[asyncio.Task] = set()
         self._review_channels: set[str] = set()
+        self._hyades_tasks: set[asyncio.Task] = set()
+        self._hyades_channels: Dict[str, Dict[str, Optional[str]]] = {}
+        self._hyades_cancelled: set[str] = set()
         self._setup_event_handlers()
 
         logger.info(
@@ -226,6 +248,16 @@ class DiscordIntegration:
                 except TimeoutError:
                     logger.warning("Discord HAM review shutdown timed out")
 
+            pending_hyades = [task for task in self._hyades_tasks if not task.done()]
+            for task in pending_hyades:
+                task.cancel()
+            if pending_hyades:
+                try:
+                    async with asyncio.timeout(2):
+                        await asyncio.gather(*pending_hyades, return_exceptions=True)
+                except TimeoutError:
+                    logger.warning("Discord Hyades follower shutdown timed out")
+
             await self.client.close()
             logger.info("Discord bot shutdown complete")
 
@@ -272,6 +304,20 @@ class DiscordIntegration:
 
         if self._is_ham_review_request(query):
             await self._start_ham_review(message, query)
+            return
+
+        if self.hyades_tasks_enabled and self._is_hyades_cancel_request(query):
+            await self._cancel_hyades_task(message)
+            return
+
+        if self.hyades_tasks_enabled and self._is_hyades_task_request(query):
+            if str(user_id) not in self.hyades_discord_user_ids:
+                await self._send_with_retry(
+                    message.channel,
+                    content="This Discord identity is not authorized to start Hyades work.",
+                )
+                return
+            await self._start_hyades_task(message, query)
             return
 
         # Show typing indicator if enabled
@@ -336,6 +382,173 @@ class DiscordIntegration:
     def _is_ham_review_request(cls, query: str) -> bool:
         """Route explicit HAM corpus reviews away from synchronous chat."""
         return bool(cls._HAM_REVIEW_RE.search(query))
+
+    _HYADES_TASK_RE = re.compile(
+        r"(?:^\s*!hyades(?:\s+run)?\s+\S|^\s*hyades:\s*\S|"
+        r"\b(?:run|start|do|try|perform)\b.{0,80}"
+        r"\bself[- ]improv(?:e|ement|ing)\b)",
+        re.IGNORECASE | re.DOTALL,
+    )
+    _HYADES_CANCEL_RE = re.compile(
+        r"^\s*(?:!hyades\s+cancel|!cancel\s+hyades)\s*$", re.IGNORECASE
+    )
+
+    @classmethod
+    def _is_hyades_task_request(cls, query: str) -> bool:
+        """Require an explicit command or a direct self-improvement request."""
+        return bool(cls._HYADES_TASK_RE.search(query)) and not bool(
+            cls._HYADES_CANCEL_RE.fullmatch(query)
+        )
+
+    @classmethod
+    def _is_hyades_cancel_request(cls, query: str) -> bool:
+        return bool(cls._HYADES_CANCEL_RE.fullmatch(query))
+
+    @staticmethod
+    def _hyades_goal(query: str) -> str:
+        return re.sub(
+            r"^\s*(?:!hyades(?:\s+run)?|hyades:)\s*",
+            "",
+            query,
+            count=1,
+            flags=re.IGNORECASE,
+        ).strip()
+
+    def _hyades_bridge(self) -> HyadesTaskBridge:
+        memory = getattr(self.agent, "memory", None)
+        client = getattr(memory, "ham_client", None)
+        if client is None:
+            raise HyadesTaskError("Katbot's HAM task client is unavailable")
+        return HyadesTaskBridge(
+            client,
+            poll_seconds=self.hyades_task_poll_seconds,
+            timeout_seconds=self.hyades_task_timeout_seconds,
+        )
+
+    async def _start_hyades_task(self, message: discord.Message, query: str) -> None:
+        channel_key = self._get_conversation_id(message)
+        if channel_key in self._hyades_channels:
+            await self._send_with_retry(
+                message.channel,
+                content=(
+                    "A Hyades task is already active in this channel. Use "
+                    "`!hyades cancel` to stop it before starting another."
+                ),
+            )
+            return
+
+        state: Dict[str, Optional[str]] = {
+            "task_id": None,
+            "user_id": str(message.author.id),
+        }
+        self._hyades_channels[channel_key] = state
+        try:
+            acknowledgement = await self._send_with_retry(
+                message.channel,
+                content=(
+                    "🧰 I’m handing this to Hyades as a durable bounded gVisor "
+                    "task. Ordinary chat can continue while it runs."
+                ),
+            )
+        except Exception:
+            self._hyades_channels.pop(channel_key, None)
+            raise
+
+        async def progress(status: str) -> None:
+            logger.info("Hyades task progress: {}", status)
+            try:
+                async with asyncio.timeout(10):
+                    await acknowledgement.edit(content=f"🧰 Hyades: {status}")
+            except Exception as exc:
+                logger.warning(
+                    "Discord Hyades status update failed: {}", type(exc).__name__
+                )
+
+        async def work() -> None:
+            task_id: Optional[str] = None
+            try:
+                bridge = self._hyades_bridge()
+                source_id = str(getattr(message, "id", channel_key + ":fallback"))
+                requester_ref = (
+                    f"{channel_key}:user:{message.author.id}"
+                )
+                posted = await bridge.post(
+                    self._hyades_goal(query),
+                    requester_ref=requester_ref,
+                    source_id=source_id,
+                )
+                task_id = str(posted["task_id"])
+                state["task_id"] = task_id
+                await progress(f"queued as `{task_id}`")
+                result = await bridge.follow(task_id, progress=progress)
+                await acknowledgement.edit(
+                    content=f"✅ Hyades task `{task_id}` reached a terminal result."
+                )
+                await self.send_response(message.channel, result, query_id=task_id)
+            except asyncio.CancelledError:
+                raise
+            except HyadesTaskError as exc:
+                if task_id and task_id in self._hyades_cancelled:
+                    try:
+                        await acknowledgement.edit(
+                            content=f"🛑 Hyades task `{task_id}` was cancelled."
+                        )
+                    except Exception:
+                        pass
+                else:
+                    logger.error("Discord Hyades task failed: {}", type(exc).__name__)
+                    try:
+                        await acknowledgement.edit(
+                            content="⚠️ The Hyades task did not complete safely."
+                        )
+                    except Exception:
+                        pass
+                    error_embed = self.formatter.format_error_message(
+                        str(exc), user_friendly=True
+                    )
+                    await message.channel.send(embed=error_embed)
+            finally:
+                if task_id:
+                    self._hyades_cancelled.discard(task_id)
+                self._hyades_channels.pop(channel_key, None)
+
+        task = asyncio.create_task(work(), name=f"katbot-hyades:{channel_key}")
+        self._hyades_tasks.add(task)
+
+        def finished(done: asyncio.Task) -> None:
+            self._hyades_tasks.discard(done)
+            if not done.cancelled():
+                done.exception()
+
+        task.add_done_callback(finished)
+
+    async def _cancel_hyades_task(self, message: discord.Message) -> None:
+        channel_key = self._get_conversation_id(message)
+        state = self._hyades_channels.get(channel_key)
+        if state is None:
+            await self._send_with_retry(
+                message.channel, content="There is no active Hyades task in this channel."
+            )
+            return
+        if state.get("user_id") != str(message.author.id):
+            await self._send_with_retry(
+                message.channel,
+                content="Only the Discord user who started this task may cancel it.",
+            )
+            return
+        task_id = state.get("task_id")
+        if not task_id:
+            await self._send_with_retry(
+                message.channel,
+                content="The task handoff is still being created; try cancellation again shortly.",
+            )
+            return
+        bridge = self._hyades_bridge()
+        await bridge.cancel(task_id)
+        self._hyades_cancelled.add(task_id)
+        await self._send_with_retry(
+            message.channel, content=f"Cancellation recorded for Hyades task `{task_id}`."
+        )
 
     async def _start_ham_review(self, message: discord.Message, query: str) -> None:
         channel_key = self._get_conversation_id(message)
