@@ -112,7 +112,7 @@ services:
 
       # Opt-in bounded stewardship and media (single worker only)
       - WEB_CONCURRENCY=${WEB_CONCURRENCY:-1}
-      - CHAT_TIMEOUT_SECONDS=${CHAT_TIMEOUT_SECONDS:-60}
+      - CHAT_TIMEOUT_SECONDS=${CHAT_TIMEOUT_SECONDS:-0}
       - EVALUATION_TIMEOUT_SECONDS=${EVALUATION_TIMEOUT_SECONDS:-8}
       - ENABLE_HOST_TOOLS=${ENABLE_HOST_TOOLS:-false}
       - ENABLE_BEST_OF_N=${ENABLE_BEST_OF_N:-false}

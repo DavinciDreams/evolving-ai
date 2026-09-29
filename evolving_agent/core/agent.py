@@ -29,7 +29,7 @@ from .context_manager import ContextManager
 from .evaluator import EvaluationResult, OutputEvaluator
 from .memory import LongTermMemory, MemoryEntry
 from .tools import get_all_tools
-from .runtime import AgentRuntime, bounded_seconds
+from .runtime import AgentRuntime, bounded_seconds, optional_seconds
 from .identity import BASE_STEWARD_PROMPT
 from ..utils.secret_redaction import redact_text, redact_value
 from ..integrations.web_search import WebSearchIntegration
@@ -90,7 +90,7 @@ class SelfImprovingAgent:
 
         # Last evaluation result (for API consumers)
         self.last_evaluation_score: Optional[float] = None
-        self.runtime = AgentRuntime(timeout=bounded_seconds("CHAT_TIMEOUT_SECONDS", 60))
+        self.runtime = AgentRuntime(timeout=optional_seconds("CHAT_TIMEOUT_SECONDS"))
         self.last_storage_status = {"memory_stored": False, "knowledge_updated": False}
         self.dream_service = None
         self.improvement_lab = None
@@ -460,9 +460,9 @@ class SelfImprovingAgent:
         direct_context: bool = False,
         evaluate_response: bool = True,
     ) -> str:
-        """Run a bounded, non-reentrant interaction; never queue silently."""
+        """Run a non-reentrant interaction; never queue silently."""
         if not hasattr(self, "runtime"):
-            self.runtime = AgentRuntime(timeout=bounded_seconds("CHAT_TIMEOUT_SECONDS", 60))
+            self.runtime = AgentRuntime(timeout=optional_seconds("CHAT_TIMEOUT_SECONDS"))
         if not isinstance(query, str) or not query.strip() or len(query) > 32000:
             raise ValueError("Query must contain 1 to 32000 characters")
         query, _ = redact_text(query)
@@ -836,7 +836,7 @@ class SelfImprovingAgent:
         model = OpenAIModel(selected.model, api_key=key)
         model._client = _openai_lib.OpenAI(
             api_key=key, base_url=selected.base_url,
-            timeout=bounded_seconds("CHAT_TIMEOUT_SECONDS", 60), max_retries=0,
+            timeout=optional_seconds("CHAT_TIMEOUT_SECONDS"), max_retries=0,
         )
         return model
 

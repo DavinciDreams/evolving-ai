@@ -92,6 +92,7 @@ def test_compose_forwards_current_model_and_dream_variables():
         "ZAI_MODEL=${ZAI_MODEL:-glm-5.3}",
         "DEFAULT_MODEL=${DEFAULT_MODEL:-}",
         "EVALUATION_MODEL=${EVALUATION_MODEL:-}",
+        "CHAT_TIMEOUT_SECONDS=${CHAT_TIMEOUT_SECONDS:-0}",
         "DREAM_CYCLE_TIMEOUT_SECONDS=${DREAM_CYCLE_TIMEOUT_SECONDS:-90}",
         "DREAM_CYCLE_LLM_TIMEOUT_SECONDS=${DREAM_CYCLE_LLM_TIMEOUT_SECONDS:-60}",
     }

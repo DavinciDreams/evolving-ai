@@ -6,7 +6,25 @@ import time
 
 import pytest
 
-from evolving_agent.core.runtime import AgentRuntime, RuntimeBusyError, bounded_seconds
+from evolving_agent.core.runtime import (
+    AgentRuntime,
+    RuntimeBusyError,
+    bounded_seconds,
+    optional_seconds,
+)
+
+
+async def test_foreground_has_no_default_deadline():
+    runtime = AgentRuntime()
+    release = asyncio.Event()
+    task = asyncio.create_task(runtime.run(release.wait))
+    await asyncio.sleep(0.02)
+    assert runtime.busy
+    assert runtime.status()["timeout_seconds"] is None
+    assert runtime.status()["timeouts"] == 0
+    release.set()
+    await asyncio.wait_for(task, timeout=0.2)
+    assert runtime.status()["completed"] == 1
 
 
 async def test_timeout_releases_async_operation():
@@ -61,6 +79,24 @@ def test_nan_timeout_is_rejected(monkeypatch):
     monkeypatch.setenv("CHAT_TIMEOUT_SECONDS", "nan")
     with pytest.raises(ValueError):
         bounded_seconds("CHAT_TIMEOUT_SECONDS", 60)
+
+
+@pytest.mark.parametrize("configured", ["0", "0.0"])
+def test_zero_disables_optional_deadline(monkeypatch, configured):
+    monkeypatch.setenv("CHAT_TIMEOUT_SECONDS", configured)
+    assert optional_seconds("CHAT_TIMEOUT_SECONDS") is None
+
+
+def test_positive_optional_deadline_is_preserved(monkeypatch):
+    monkeypatch.setenv("CHAT_TIMEOUT_SECONDS", "120")
+    assert optional_seconds("CHAT_TIMEOUT_SECONDS") == 120
+
+
+@pytest.mark.parametrize("configured", ["-1", "nan", "inf", "301"])
+def test_invalid_optional_deadline_is_rejected(monkeypatch, configured):
+    monkeypatch.setenv("CHAT_TIMEOUT_SECONDS", configured)
+    with pytest.raises(ValueError):
+        optional_seconds("CHAT_TIMEOUT_SECONDS")
 
 
 async def test_cancellation_resistant_async_operation_retains_lease_after_timeout():

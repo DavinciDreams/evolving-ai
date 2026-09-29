@@ -137,4 +137,26 @@ def test_chat_uses_selected_model_endpoint_and_disables_sdk_retries(agent, provi
     model_class.assert_called_once_with("pinned-model", api_key="synthetic-test-value")
     assert client_class.call_args.kwargs["base_url"] == selected.base_url
     assert client_class.call_args.kwargs["max_retries"] == 0
-    assert client_class.call_args.kwargs["timeout"] == 60
+    assert client_class.call_args.kwargs["timeout"] is None
+
+
+def test_chat_preserves_explicit_positive_provider_deadline(agent, monkeypatch):
+    from types import SimpleNamespace
+    from evolving_agent.integrations.provider_config import ProviderSelection
+
+    selected = ProviderSelection(
+        "zai",
+        "pinned-model",
+        "https://provider.test/v1",
+        "https://provider.test/v1/chat/completions",
+    )
+    cfg = SimpleNamespace(zai_api_key="synthetic-test-value")
+    monkeypatch.setenv("CHAT_TIMEOUT_SECONDS", "120")
+    with patch("evolving_agent.core.agent.config", cfg), patch(
+        "evolving_agent.integrations.provider_config.resolve_provider",
+        return_value=selected,
+    ), patch("evolving_agent.core.agent.OpenAIModel"), patch(
+        "evolving_agent.core.agent._openai_lib.OpenAI"
+    ) as client_class:
+        SelfImprovingAgent._get_ai_sdk_model(agent)
+    assert client_class.call_args.kwargs["timeout"] == 120

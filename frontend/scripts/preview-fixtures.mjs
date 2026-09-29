@@ -27,7 +27,7 @@ createServer(async (request, response) => {
   if (request.headers['x-api-key'] !== 'synthetic-local-preview') return send(401, { detail: 'Synthetic preview credential required' });
   const path = new URL(request.url, 'http://127.0.0.1:8079').pathname;
   if (request.method === 'GET') {
-    if (path === '/steward/status') return send(200, { runtime: { busy: false, timeout_seconds: 60, timeouts: 0, failed: 0 },
+    if (path === '/steward/status') return send(200, { runtime: { busy: false, timeout_seconds: null, timeouts: 0, failed: 0 },
       dreams: { enabled: true, running: false, last_result: { reason: 'Synthetic UI fixture' } }, improvement: lab,
       learning: { enabled: true, auto_promote: false, running: false }, jobs: Object.values(jobs) });
     if (path.startsWith('/steward/jobs/')) return send(200, jobs[path.split('/').at(-1)] || { status: 'failed' });

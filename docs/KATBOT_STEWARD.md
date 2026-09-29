@@ -78,7 +78,7 @@ Defaults below describe this implementation, not an observed deployment. See
 | `HAM_PROJECT` | `evolving-ai` | Selects the HAM-owned project record that supplies scope and repository attribution |
 | `LEGACY_MEMORY_READ_ONLY` | `true` | Legacy containment; also enforce volume permissions |
 | `WEB_CONCURRENCY` | `1` | Required singleton ownership |
-| `CHAT_TIMEOUT_SECONDS` | `60` | Foreground deadline |
+| `CHAT_TIMEOUT_SECONDS` | `0` | Foreground deadline disabled; set a positive value to re-enable it |
 | `EVALUATION_TIMEOUT_SECONDS` | `8` | Optional response self-evaluation deadline |
 | `RESOURCE_SHUTDOWN_SECONDS` | `5`, maximum `10` | Final resource-cleanup wait |
 | `DREAM_CYCLE_ENABLED` | `false` | Append provenance-linked dream synthesis |
