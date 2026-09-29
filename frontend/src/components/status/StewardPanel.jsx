@@ -27,7 +27,7 @@ export default function StewardPanel() {
     {data && <div className="space-y-4">
       <dl className="grid grid-cols-2 gap-2 text-sm">
         <dt>Runtime</dt><dd>{data.runtime?.busy ? 'Busy — no reentry' : 'Idle'}</dd>
-        <dt>Response deadline</dt><dd>{data.runtime?.timeout_seconds} seconds</dd>
+        <dt>Response deadline</dt><dd>{data.runtime?.timeout_seconds == null ? 'Disabled' : `${data.runtime.timeout_seconds} seconds`}</dd>
         <dt>Timeouts / failures</dt><dd>{data.runtime?.timeouts} / {data.runtime?.failed}</dd>
         <dt>Dreams</dt><dd>{data.dreams?.enabled ? (data.dreams.running ? 'Consolidating' : 'Enabled, idle-gated') : 'Disabled'}</dd>
         <dt>Last dream</dt><dd>{data.dreams?.last_result?.reason || 'No attempt yet'}</dd>

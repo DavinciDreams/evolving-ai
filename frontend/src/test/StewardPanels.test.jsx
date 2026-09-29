@@ -58,6 +58,17 @@ describe('media and stewardship controls', () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 
+  it('renders a disabled response deadline when the runtime has no timeout', async () => {
+    api.get.mockImplementation(path => Promise.resolve({ data: path === '/connectors/status'
+      ? { enabled: false, ready: false }
+      : { runtime: { busy: false, timeout_seconds: null, timeouts: 0, failed: 0 },
+        dreams: { enabled: false }, improvement: {}, learning: { enabled: false } } }));
+    show(<StewardPanel />);
+    const label = await screen.findByText('Response deadline');
+    expect(label.nextElementSibling).toHaveTextContent('Disabled');
+    expect(label.nextElementSibling).not.toHaveTextContent('seconds');
+  });
+
   it('makes a non-retrying asynchronous dream request', async () => {
     api.get.mockResolvedValue({ data: { runtime: { busy: false }, dreams: { enabled: true }, improvement: {} } });
     api.post.mockResolvedValue({ data: { job_id: 'test-job', status: 'queued' } });
