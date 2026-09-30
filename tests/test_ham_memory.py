@@ -31,6 +31,60 @@ PROJECTS = [
 ]
 
 
+@pytest.mark.asyncio
+async def test_current_tenant_identity_supports_reads_and_attributed_writes():
+    identity = {
+        **IDENTITY,
+        "scope_boundary": {"mode": "tenant_unrestricted", "allowed_scopes": None},
+    }
+    paths = []
+
+    def handler(request):
+        paths.append(request.url.path)
+        payload = json.loads(request.content)
+        if request.url.path in ("/search", "/memories/recent"):
+            assert "scopes" not in payload
+            return httpx.Response(200, json=[])
+        assert payload["scopes"] == ["project:evolving-ai", "shared"]
+        assert payload["project"] == "evolving-ai"
+        assert payload["repo"] == "DavinciDreams/evolving-ai"
+        assert "agent_id" not in payload
+        return httpx.Response(200, json={"id": 40, "agent_id": IDENTITY["agent_id"]})
+
+    client = _client(handler, identity=identity)
+    try:
+        await client.initialize()
+        assert client.tenant_unrestricted
+        await client.search("physics", top_k=5)
+        await client.recent(limit=5)
+        args = dict(content="memory", source_id="test", timestamp="2026-09-30T00:00:00Z",
+                    memory_type="fact", metadata={})
+        assert await client.add(**args) == 40
+        assert await client.supersede(39, expected_version=1, **args) == 40
+    finally:
+        await client.close()
+    assert paths == ["/search", "/memories/recent", "/ingest", "/memories/39/supersede"]
+
+
+@pytest.mark.asyncio
+async def test_tenant_identity_rechecks_legacy_ceiling_before_write():
+    identity = {
+        **IDENTITY,
+        "scope_boundary": {"mode": "tenant_unrestricted", "allowed_scopes": None},
+    }
+    client = _client(lambda request: pytest.fail("write must be rejected"), identity=identity)
+    try:
+        await client.initialize()
+        identity["scope_boundary"] = {
+            "mode": "credential_allowlist", "allowed_scopes": ["project:other"],
+        }
+        with pytest.raises(HAMMemoryError):
+            await client.add(content="memory", source_id="test", timestamp="now",
+                             memory_type="fact", metadata={})
+    finally:
+        await client.close()
+
+
 class _KeepAliveHAMHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -399,7 +453,7 @@ async def test_get_returns_none_for_not_found():
         {**IDENTITY, "role": "admin"},
         {
             **IDENTITY,
-            "scope_boundary": {"mode": "tenant_unrestricted", "allowed_scopes": None},
+            "scope_boundary": {"mode": "unknown", "allowed_scopes": None},
         },
         {
             **IDENTITY,
