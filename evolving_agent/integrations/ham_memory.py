@@ -60,6 +60,7 @@ class HAMMemoryClient:
         self.repo = ""
         self.agent_id = ""
         self.allowed_scopes: tuple[str, ...] = ()
+        self.tenant_unrestricted = False
         self.write_scopes: tuple[str, ...] = ()
         self._initialized = False
         self._owner_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -117,28 +118,40 @@ class HAMMemoryClient:
             boundary.get("allowed_scopes") if isinstance(boundary, dict) else None
         )
         allowed_scopes_valid = isinstance(allowed_scopes, list) and all(
-            isinstance(value, str) for value in allowed_scopes
+            isinstance(value, str) and bool(value.strip()) for value in allowed_scopes
+        )
+        tenant_unrestricted = (
+            isinstance(boundary, dict)
+            and boundary.get("mode") == "tenant_unrestricted"
+            and "allowed_scopes" in boundary
+            and allowed_scopes is None
         )
         if (
             identity.get("role") != "agent"
             or not isinstance(boundary, dict)
-            or boundary.get("mode") != "credential_allowlist"
-            or not allowed_scopes_valid
-            or not allowed_scopes
+            or not (tenant_unrestricted or (
+                boundary.get("mode") == "credential_allowlist"
+                and allowed_scopes_valid and bool(allowed_scopes)
+            ))
         ):
             raise HAMMemoryError(
-                "HAM credential must be a non-admin agent with an explicit scope ceiling"
+                "HAM credential must be a non-admin agent with a recognized scope boundary"
             )
         self.agent_id = str(identity["agent_id"])
-        self.allowed_scopes = tuple(dict.fromkeys(allowed_scopes))
-        if self.scope and self.scope not in self.allowed_scopes:
+        self.tenant_unrestricted = tenant_unrestricted
+        self.allowed_scopes = tuple(dict.fromkeys(allowed_scopes or ()))
+        if self.scope and not self._scope_allowed(self.scope):
             raise HAMMemoryError("HAM credential cannot write to the configured project")
         if self.scope:
             self.write_scopes = tuple(
                 scope
                 for scope in (self.scope, "shared")
-                if scope in self.allowed_scopes
+                if self._scope_allowed(scope)
             )
+
+    def _scope_allowed(self, scope: str) -> bool:
+        """Current HAM scopes are labels; legacy credentials retain their ceiling."""
+        return self.tenant_unrestricted or scope in self.allowed_scopes
 
     async def initialize(self) -> None:
         """Load identity, scope ceiling, and project attribution from HAM."""
@@ -156,7 +169,8 @@ class HAMMemoryClient:
                 f"HAM credential cannot access configured project {self.project!r}"
             )
         project_scope = configured.get("scope")
-        if not isinstance(project_scope, str) or project_scope not in self.allowed_scopes:
+        if (not isinstance(project_scope, str) or not project_scope.strip()
+                or not self._scope_allowed(project_scope)):
             raise HAMMemoryError("HAM credential cannot write to the configured project")
         project_repo = configured.get("repo")
         if project_repo is not None and not isinstance(project_repo, str):
@@ -166,7 +180,7 @@ class HAMMemoryClient:
         self.write_scopes = tuple(
             scope
             for scope in (self.scope, "shared")
-            if scope in self.allowed_scopes
+            if self._scope_allowed(scope)
         )
         self._initialized = True
 
